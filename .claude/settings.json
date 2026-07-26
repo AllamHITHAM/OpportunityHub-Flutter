@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 20 dart run raw_http_probe.dart)",
+      "Bash('C:\\\\Users\\\\Allam-l\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Projects-opportunityhub-flutter\\\\af300a11-9470-400a-a741-fbf43bc48e05\\\\scratchpad\\\\chromedriver\\\\chromedriver-win64\\\\chromedriver.exe' --port=4444)",
+      "Bash(disown)",
+      "Bash(curl -s http://localhost:4444/status)",
+      "Bash(curl -s -w '\\\\nHTTP_STATUS:%{http_code}\\\\n' -X PUT http://127.0.0.1:8000/api/organization/opportunities/7 -H 'Content-Type: application/json' -H 'Accept: application/json' -H 'Authorization: Bearer 20|1oDrbBi1oQlel5PpEQO9BJNghrny4GIsj5xkrkZ50a981ca2' -d '{\"title\":\"TEST E2E Senior Software Engineer\",\"description\":\"An updated great opportunity.\",\"opportunity_type\":\"job\",\"employment_type\":\"full_time\",\"work_mode\":\"hybrid\",\"experience_level\":\"senior\",\"status\":\"open\"}')"
+    ]
+  }
+}
