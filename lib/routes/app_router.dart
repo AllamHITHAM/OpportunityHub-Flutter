@@ -14,6 +14,8 @@ import '../features/auth/presentation/student_registration_screen.dart';
 import '../features/opportunities/presentation/opportunity_form_screen.dart';
 import '../features/opportunities/presentation/organization_opportunities_screen.dart';
 import '../features/opportunities/presentation/organization_opportunity_details_screen.dart';
+import '../features/opportunities/presentation/student_opportunities_screen.dart';
+import '../features/opportunities/presentation/student_opportunity_details_screen.dart';
 import '../features/organization/presentation/organization_home_screen.dart';
 import '../features/student/presentation/student_home_screen.dart';
 import '../providers/auth_provider.dart';
@@ -67,6 +69,11 @@ const _organizationOnboardingPaths = {
 /// carry dynamic `:id` segments.
 const _organizationOpportunitiesPathPrefix =
     AppRoutes.organizationOpportunities;
+
+/// Student opportunity browsing — a protected feature area, not onboarding.
+/// Matched by prefix for the same reason as
+/// [_organizationOpportunitiesPathPrefix].
+const _studentOpportunitiesPathPrefix = AppRoutes.studentOpportunities;
 
 /// Defines the app's navigation routes and redirects based on
 /// [AuthProvider], [StudentProfileProvider], and [OrganizationProfileProvider].
@@ -143,6 +150,16 @@ class AppRouter {
             opportunityId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
           ),
         ),
+        GoRoute(
+          path: AppRoutes.studentOpportunities,
+          builder: (_, _) => const StudentOpportunitiesScreen(),
+        ),
+        GoRoute(
+          path: '${AppRoutes.studentOpportunities}/:id',
+          builder: (_, state) => StudentOpportunityDetailsScreen(
+            opportunityId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
       ],
     );
   }
@@ -205,6 +222,13 @@ class AppRouter {
     // onboarding, but still off-limits to every other role.
     if (role != 'organization' &&
         currentPath.startsWith(_organizationOpportunitiesPathPrefix)) {
+      return homePath;
+    }
+
+    // Opportunity browsing is a student-only feature area — not
+    // onboarding, but still off-limits to every other role.
+    if (role != 'student' &&
+        currentPath.startsWith(_studentOpportunitiesPathPrefix)) {
       return homePath;
     }
 

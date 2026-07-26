@@ -449,6 +449,220 @@ void main() {
     });
   });
 
+  group('getPublicOpportunities', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'current_page': 1, 'data': [], 'last_page': 1, 'total': 0},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.getPublicOpportunities();
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(adapter.lastRequest?.path, '/opportunities');
+    });
+
+    test('sends only page/per_page when no filters are given', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'current_page': 1, 'data': [], 'last_page': 1, 'total': 0},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.getPublicOpportunities();
+
+      final query = adapter.lastRequest?.queryParameters;
+      expect(query?.keys.toSet(), {'page', 'per_page'});
+      expect(query?['page'], 1);
+      expect(query?['per_page'], 15);
+    });
+
+    test('includes filters only when provided', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'current_page': 1, 'data': [], 'last_page': 1, 'total': 0},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.getPublicOpportunities(
+        opportunityType: 'job',
+        employmentType: 'full_time',
+        workMode: 'remote',
+        experienceLevel: 'junior',
+        location: 'Amman',
+        fieldOfStudy: 'Computer Science',
+        keyword: 'engineer',
+        page: 2,
+        perPage: 20,
+      );
+
+      final query = adapter.lastRequest?.queryParameters;
+      expect(query?['opportunity_type'], 'job');
+      expect(query?['employment_type'], 'full_time');
+      expect(query?['work_mode'], 'remote');
+      expect(query?['experience_level'], 'junior');
+      expect(query?['location'], 'Amman');
+      expect(query?['field_of_study'], 'Computer Science');
+      expect(query?['keyword'], 'engineer');
+      expect(query?['page'], 2);
+      expect(query?['per_page'], 20);
+    });
+
+    test(
+      'parses the paginator envelope: items, current/last page, total',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'data': {
+              'current_page': 1,
+              'data': [
+                _opportunityJson(id: 1, title: 'Software Engineer'),
+                _opportunityJson(id: 2, title: 'Marketing Intern'),
+              ],
+              'last_page': 3,
+              'total': 42,
+            },
+          }, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        final result = await repository.getPublicOpportunities();
+
+        expect(result.items, hasLength(2));
+        expect(result.items[0].id, 1);
+        expect(result.currentPage, 1);
+        expect(result.lastPage, 3);
+        expect(result.total, 42);
+        expect(result.hasMore, isTrue);
+      },
+    );
+
+    test(
+      'parses nested organizationProfile and opportunitySkills relations',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'data': {
+              'current_page': 1,
+              'data': [
+                {
+                  ..._opportunityJson(id: 1),
+                  'organization_profile': {
+                    'id': 3,
+                    'organization_name': 'Acme Corp',
+                    'organization_type': 'company',
+                    'approval_status': 'approved',
+                  },
+                  'opportunity_skills': [
+                    {
+                      'id': 9,
+                      'is_required': true,
+                      'skill': {'id': 4, 'name': 'Flutter', 'category': 'Tech'},
+                    },
+                  ],
+                },
+              ],
+              'last_page': 1,
+              'total': 1,
+            },
+          }, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        final result = await repository.getPublicOpportunities();
+
+        final opportunity = result.items.single;
+        expect(opportunity.organizationProfile?.organizationName, 'Acme Corp');
+        expect(opportunity.opportunitySkills, hasLength(1));
+        expect(opportunity.opportunitySkills.single.skill.name, 'Flutter');
+        expect(opportunity.opportunitySkills.single.isRequired, isTrue);
+      },
+    );
+
+    test(
+      'a response with no relations parses with null organizationProfile and empty skills',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'data': {
+              'current_page': 1,
+              'data': [_opportunityJson(id: 1)],
+              'last_page': 1,
+              'total': 1,
+            },
+          }, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        final result = await repository.getPublicOpportunities();
+
+        expect(result.items.single.organizationProfile, isNull);
+        expect(result.items.single.opportunitySkills, isEmpty);
+      },
+    );
+
+    test('throws ApiException on a 422 invalid filter value', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'message': 'The given data was invalid.',
+          'errors': {
+            'opportunity_type': ['The selected opportunity type is invalid.'],
+          },
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getPublicOpportunities(),
+        throwsA(isA<ApiException>()),
+      );
+    });
+  });
+
+  group('getPublicOpportunity', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _opportunityJson(id: 6)}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getPublicOpportunity(6);
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(adapter.lastRequest?.path, '/opportunities/6');
+      expect(result.id, 6);
+    });
+
+    test(
+      'throws ApiException on the documented 404 (not open / not approved / nonexistent)',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': false,
+            'message': 'Opportunity not found',
+            'data': null,
+          }, 404);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.getPublicOpportunity(999),
+          throwsA(
+            isA<ApiException>().having(
+              (e) => e.message,
+              'message',
+              'Opportunity not found',
+            ),
+          ),
+        );
+      },
+    );
+  });
+
   group('deleteOpportunity', () {
     test('uses the exact documented method and path', () async {
       final adapter = _FakeHttpClientAdapter((options) {

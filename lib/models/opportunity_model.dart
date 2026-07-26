@@ -1,5 +1,9 @@
-/// An organization's opportunity, as returned by the Laravel
-/// `organization/opportunities` endpoints.
+import 'opportunity_skill_model.dart';
+import 'organization_profile_model.dart';
+
+/// An organization's opportunity, as returned by both the organization's own
+/// `organization/opportunities` endpoints and the public
+/// `opportunities` endpoints.
 ///
 /// The backend has a single `opportunities` table — `opportunityType` is
 /// purely a categorization label (job, internship, volunteer, scholarship,
@@ -7,6 +11,14 @@
 /// university/major/GPA/hours-per-week fields exist anywhere in the
 /// documented contract). Every field below applies uniformly regardless of
 /// type.
+///
+/// [organizationProfile] and [opportunitySkills] are only ever populated by
+/// the public endpoints, which eager-load `organizationProfile` and
+/// `opportunitySkills.skill` — the organization's own endpoints don't
+/// include either relation, so both are `null`/empty there. Modeled as real
+/// nested objects (reusing [OrganizationProfileModel] as-is, and a new
+/// lightweight [OpportunitySkillModel]) rather than flattened into strings,
+/// so the full nested data survives for the student-facing screens.
 class OpportunityModel {
   const OpportunityModel({
     required this.id,
@@ -25,6 +37,8 @@ class OpportunityModel {
     this.salaryMax,
     this.applicationDeadline,
     this.createdAt,
+    this.organizationProfile,
+    this.opportunitySkills = const [],
   });
 
   final int id;
@@ -63,7 +77,20 @@ class OpportunityModel {
 
   final DateTime? createdAt;
 
+  /// The posting organization — present only when the public endpoints'
+  /// eager-loaded `organization_profile` relation is in the response.
+  final OrganizationProfileModel? organizationProfile;
+
+  /// Skills attached to this opportunity — present only when the public
+  /// endpoints' eager-loaded `opportunity_skills` relation is in the
+  /// response. Empty (not null) when absent, so callers never need a null
+  /// check before iterating.
+  final List<OpportunitySkillModel> opportunitySkills;
+
   factory OpportunityModel.fromJson(Map<String, dynamic> json) {
+    final organizationProfileJson = json['organization_profile'];
+    final opportunitySkillsJson = json['opportunity_skills'];
+
     return OpportunityModel(
       id: json['id'] as int,
       title: json['title'] as String,
@@ -81,6 +108,18 @@ class OpportunityModel {
       positionsAvailable: json['positions_available'] as int? ?? 1,
       status: json['status'] as String,
       createdAt: _parseDate(json['created_at']),
+      organizationProfile: organizationProfileJson is Map<String, dynamic>
+          ? OrganizationProfileModel.fromJson(organizationProfileJson)
+          : null,
+      opportunitySkills: opportunitySkillsJson is List
+          ? opportunitySkillsJson
+                .map(
+                  (json) => OpportunitySkillModel.fromJson(
+                    json as Map<String, dynamic>,
+                  ),
+                )
+                .toList()
+          : const [],
     );
   }
 

@@ -11,6 +11,7 @@ import 'features/student/data/student_profile_repository.dart';
 import 'providers/auth_provider.dart';
 import 'providers/organization_opportunities_provider.dart';
 import 'providers/organization_profile_provider.dart';
+import 'providers/student_opportunities_provider.dart';
 import 'providers/student_profile_provider.dart';
 import 'routes/app_router.dart';
 
@@ -72,6 +73,13 @@ class MyApp extends StatelessWidget {
           OrganizationOpportunitiesProvider
         >(
           create: (context) => OrganizationOpportunitiesProvider(
+            repository: context.read<OpportunityRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, StudentOpportunitiesProvider>(
+          create: (context) => StudentOpportunitiesProvider(
             repository: context.read<OpportunityRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),

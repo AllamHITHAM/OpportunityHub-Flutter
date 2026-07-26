@@ -39,4 +39,11 @@ class AppRoutes {
 
   static String organizationOpportunityEdit(int id) =>
       '$organizationOpportunities/$id/edit';
+
+  /// Student-only opportunity browsing — see `AppRouter` for the
+  /// role/profile-completion gating applied to these.
+  static const String studentOpportunities = '/student/opportunities';
+
+  static String studentOpportunityDetails(int id) =>
+      '$studentOpportunities/$id';
 }

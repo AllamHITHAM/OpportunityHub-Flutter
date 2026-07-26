@@ -1,23 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../models/opportunity_model.dart';
-import '../../../providers/organization_opportunities_provider.dart';
-import '../../../routes/app_routes.dart';
+import '../../../providers/student_opportunities_provider.dart';
 import 'opportunity_display.dart';
 
-/// Organization-side opportunity details. Reached by ID alone (a route
-/// parameter, never GoRouter `extra`), so a direct URL visit or a browser
-/// refresh renders correctly instead of crashing.
+/// Read-only opportunity details for students. Reached by ID alone (a
+/// route parameter, never GoRouter `extra`), so a direct URL visit or a
+/// browser refresh renders correctly instead of crashing.
 ///
-/// No applicant list, quiz, or interview controls belong here yet — this
-/// phase covers opportunity management only.
-class OrganizationOpportunityDetailsScreen extends StatefulWidget {
-  const OrganizationOpportunityDetailsScreen({
+/// No apply/save/quiz/interview controls belong here yet — this phase
+/// covers browsing only.
+class StudentOpportunityDetailsScreen extends StatefulWidget {
+  const StudentOpportunityDetailsScreen({
     super.key,
     required this.opportunityId,
   });
@@ -25,89 +24,40 @@ class OrganizationOpportunityDetailsScreen extends StatefulWidget {
   final int opportunityId;
 
   @override
-  State<OrganizationOpportunityDetailsScreen> createState() =>
-      _OrganizationOpportunityDetailsScreenState();
+  State<StudentOpportunityDetailsScreen> createState() =>
+      _StudentOpportunityDetailsScreenState();
 }
 
-class _OrganizationOpportunityDetailsScreenState
-    extends State<OrganizationOpportunityDetailsScreen> {
+class _StudentOpportunityDetailsScreenState
+    extends State<StudentOpportunityDetailsScreen> {
   @override
   void initState() {
     super.initState();
     // Deferred to the post-frame callback — see
-    // OrganizationOpportunitiesScreen.initState for why calling this
-    // directly here would violate Flutter's build-phase constraints.
+    // StudentOpportunitiesScreen.initState for why calling this directly
+    // here would violate Flutter's build-phase constraints.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<OrganizationOpportunitiesProvider>().loadOpportunityDetails(
+      context.read<StudentOpportunitiesProvider>().loadOpportunityDetails(
         widget.opportunityId,
       );
     });
   }
 
-  Future<void> _confirmDelete(OpportunityModel opportunity) async {
-    final provider = context.read<OrganizationOpportunitiesProvider>();
-
-    final confirmed = await showAppConfirmationDialog(
-      context,
-      title: 'Delete Opportunity',
-      message:
-          'Are you sure you want to delete "${opportunity.title}"? '
-          'This cannot be undone.',
-      confirmLabel: 'Delete',
-      type: AppConfirmationType.danger,
-    );
-    if (!confirmed) return;
-
-    final success = await provider.deleteOpportunity(opportunity.id);
-    if (!mounted) return;
-
-    if (success) {
-      context.go(AppRoutes.organizationOpportunities);
-    } else if (provider.deleteErrorMessage != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(provider.deleteErrorMessage!)));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<OrganizationOpportunitiesProvider>();
+    final provider = context.watch<StudentOpportunitiesProvider>();
     final opportunity = provider.selectedOpportunity;
     final isThisOne = opportunity?.id == widget.opportunityId;
-    final isDeleting = provider.isDeleting(widget.opportunityId);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Opportunity Details'),
-        actions: isThisOne && opportunity != null
-            ? [
-                IconButton(
-                  onPressed: isDeleting
-                      ? null
-                      : () => context.push(
-                          AppRoutes.organizationOpportunityEdit(opportunity.id),
-                        ),
-                  icon: const Icon(Icons.edit_outlined),
-                  tooltip: 'Edit',
-                ),
-                IconButton(
-                  onPressed: isDeleting
-                      ? null
-                      : () => _confirmDelete(opportunity),
-                  icon: const Icon(Icons.delete_outline),
-                  tooltip: 'Delete',
-                ),
-              ]
-            : null,
-      ),
+      appBar: AppBar(title: const Text('Opportunity Details')),
       body: SafeArea(child: _buildBody(provider, opportunity, isThisOne)),
     );
   }
 
   Widget _buildBody(
-    OrganizationOpportunitiesProvider provider,
+    StudentOpportunitiesProvider provider,
     OpportunityModel? opportunity,
     bool isThisOne,
   ) {
@@ -130,25 +80,23 @@ class _OrganizationOpportunityDetailsScreenState
     }
 
     final textTheme = Theme.of(context).textTheme;
+    final organization = opportunity.organizationProfile;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(opportunity.title, style: textTheme.headlineSmall),
+          Text(opportunity.title, style: textTheme.headlineSmall),
+          if (organization != null) ...[
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              organization.organizationName,
+              style: textTheme.titleSmall?.copyWith(
+                color: AppColors.textSecondary,
               ),
-              const SizedBox(width: AppSpacing.xs),
-              StatusChip(
-                label: statusLabels[opportunity.status] ?? opportunity.status,
-                type: statusChipType(opportunity.status),
-              ),
-            ],
-          ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.sm),
           Wrap(
             spacing: AppSpacing.xs,
@@ -187,6 +135,35 @@ class _OrganizationOpportunityDetailsScreenState
               ],
             ),
           ),
+          if (opportunity.opportunitySkills.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SectionHeader(title: 'Skills'),
+                  const SizedBox(height: AppSpacing.xs),
+                  Wrap(
+                    spacing: AppSpacing.xs,
+                    runSpacing: AppSpacing.xxs,
+                    children: [
+                      for (final opportunitySkill
+                          in opportunity.opportunitySkills)
+                        StatusChip(
+                          label: opportunitySkill.isRequired
+                              ? '${opportunitySkill.skill.name} (Required)'
+                              : opportunitySkill.skill.name,
+                          type: opportunitySkill.isRequired
+                              ? AppStatusType.primary
+                              : AppStatusType.neutral,
+                          compact: true,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.md),
           AppCard(
             child: Column(
