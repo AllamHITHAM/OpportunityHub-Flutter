@@ -31,6 +31,11 @@ class StudentHomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             ElevatedButton(
+              onPressed: () => context.push(AppRoutes.studentCvs),
+              child: const Text('My CVs'),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
               onPressed: () => authProvider.logout(),
               child: const Text('Logout'),
             ),

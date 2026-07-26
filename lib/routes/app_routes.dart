@@ -46,4 +46,8 @@ class AppRoutes {
 
   static String studentOpportunityDetails(int id) =>
       '$studentOpportunities/$id';
+
+  /// Student-only CV management — see `AppRouter` for the
+  /// role/profile-completion gating applied to this.
+  static const String studentCvs = '/student/cvs';
 }

@@ -5,12 +5,14 @@ import 'core/api/api_client.dart';
 import 'core/storage/token_storage_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/data/auth_repository.dart';
+import 'features/cv/data/cv_repository.dart';
 import 'features/opportunities/data/opportunity_repository.dart';
 import 'features/organization/data/organization_profile_repository.dart';
 import 'features/student/data/student_profile_repository.dart';
 import 'providers/auth_provider.dart';
 import 'providers/organization_opportunities_provider.dart';
 import 'providers/organization_profile_provider.dart';
+import 'providers/student_cv_provider.dart';
 import 'providers/student_opportunities_provider.dart';
 import 'providers/student_profile_provider.dart';
 import 'routes/app_router.dart';
@@ -81,6 +83,16 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, StudentOpportunitiesProvider>(
           create: (context) => StudentOpportunitiesProvider(
             repository: context.read<OpportunityRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, CvRepository>(
+          update: (_, apiClient, _) => CvRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, StudentCvProvider>(
+          create: (context) => StudentCvProvider(
+            repository: context.read<CvRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,

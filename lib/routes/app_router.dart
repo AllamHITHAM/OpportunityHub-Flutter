@@ -11,6 +11,7 @@ import '../features/auth/presentation/organization_registration_screen.dart';
 import '../features/auth/presentation/splash_screen.dart';
 import '../features/auth/presentation/student_profile_registration_screen.dart';
 import '../features/auth/presentation/student_registration_screen.dart';
+import '../features/cv/presentation/student_cv_screen.dart';
 import '../features/opportunities/presentation/opportunity_form_screen.dart';
 import '../features/opportunities/presentation/organization_opportunities_screen.dart';
 import '../features/opportunities/presentation/organization_opportunity_details_screen.dart';
@@ -74,6 +75,11 @@ const _organizationOpportunitiesPathPrefix =
 /// Matched by prefix for the same reason as
 /// [_organizationOpportunitiesPathPrefix].
 const _studentOpportunitiesPathPrefix = AppRoutes.studentOpportunities;
+
+/// Student CV management — a protected feature area, not onboarding.
+/// Matched by prefix for consistency with the other feature areas, even
+/// though this one currently has no dynamic `:id` sub-routes.
+const _studentCvsPathPrefix = AppRoutes.studentCvs;
 
 /// Defines the app's navigation routes and redirects based on
 /// [AuthProvider], [StudentProfileProvider], and [OrganizationProfileProvider].
@@ -160,6 +166,10 @@ class AppRouter {
             opportunityId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
           ),
         ),
+        GoRoute(
+          path: AppRoutes.studentCvs,
+          builder: (_, _) => const StudentCvScreen(),
+        ),
       ],
     );
   }
@@ -229,6 +239,12 @@ class AppRouter {
     // onboarding, but still off-limits to every other role.
     if (role != 'student' &&
         currentPath.startsWith(_studentOpportunitiesPathPrefix)) {
+      return homePath;
+    }
+
+    // CV management is a student-only feature area — not onboarding, but
+    // still off-limits to every other role.
+    if (role != 'student' && currentPath.startsWith(_studentCvsPathPrefix)) {
       return homePath;
     }
 
