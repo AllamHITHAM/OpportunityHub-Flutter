@@ -87,6 +87,16 @@ class _OrganizationOpportunityDetailsScreenState
                   onPressed: isDeleting
                       ? null
                       : () => context.push(
+                          AppRoutes.organizationApplicants(opportunity.id),
+                          extra: opportunity.title,
+                        ),
+                  icon: const Icon(Icons.people_outline),
+                  tooltip: 'View Applicants',
+                ),
+                IconButton(
+                  onPressed: isDeleting
+                      ? null
+                      : () => context.push(
                           AppRoutes.organizationOpportunityEdit(opportunity.id),
                         ),
                   icon: const Icon(Icons.edit_outlined),

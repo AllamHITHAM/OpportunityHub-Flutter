@@ -105,6 +105,13 @@ Future<(OrganizationOpportunitiesProvider, List<String>)> _pumpDetails(
         },
       ),
       GoRoute(
+        path: '${AppRoutes.organizationOpportunities}/:id/applicants',
+        builder: (_, state) {
+          visitedPaths.add('applicants/${state.pathParameters['id']}');
+          return const Scaffold(body: Text('APPLICANTS_PLACEHOLDER'));
+        },
+      ),
+      GoRoute(
         path: '${AppRoutes.organizationOpportunities}/:id',
         builder: (_, state) => OrganizationOpportunityDetailsScreen(
           opportunityId: int.parse(state.pathParameters['id']!),
@@ -192,6 +199,42 @@ void main() {
 
     expect(visitedPaths, contains('edit/7'));
   });
+
+  testWidgets(
+    'View Applicants action is visible and opens the applicants route',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(id: 7),
+      );
+      final (_, visitedPaths) = await _pumpDetails(
+        tester,
+        repository: repository,
+        opportunityId: 7,
+      );
+
+      final applicantsButton = find.byIcon(Icons.people_outline);
+      expect(applicantsButton, findsOneWidget);
+
+      await tester.tap(applicantsButton);
+      await tester.pumpAndSettle();
+
+      expect(visitedPaths, contains('applicants/7'));
+    },
+  );
+
+  testWidgets(
+    'Existing Edit/Delete controls remain intact alongside View Applicants',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(id: 7),
+      );
+      await _pumpDetails(tester, repository: repository, opportunityId: 7);
+
+      expect(find.byIcon(Icons.people_outline), findsOneWidget);
+      expect(find.byIcon(Icons.edit_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    },
+  );
 
   testWidgets('Delete requires confirmation before anything happens', (
     tester,

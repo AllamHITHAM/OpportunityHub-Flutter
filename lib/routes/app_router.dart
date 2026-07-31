@@ -11,6 +11,10 @@ import '../features/auth/presentation/organization_registration_screen.dart';
 import '../features/auth/presentation/splash_screen.dart';
 import '../features/auth/presentation/student_profile_registration_screen.dart';
 import '../features/auth/presentation/student_registration_screen.dart';
+import '../features/applications/presentation/organization_applicants_screen.dart';
+import '../features/applications/presentation/organization_application_details_screen.dart';
+import '../features/applications/presentation/student_application_details_screen.dart';
+import '../features/applications/presentation/student_applications_screen.dart';
 import '../features/cv/presentation/student_cv_screen.dart';
 import '../features/opportunities/presentation/opportunity_form_screen.dart';
 import '../features/opportunities/presentation/organization_opportunities_screen.dart';
@@ -80,6 +84,18 @@ const _studentOpportunitiesPathPrefix = AppRoutes.studentOpportunities;
 /// Matched by prefix for consistency with the other feature areas, even
 /// though this one currently has no dynamic `:id` sub-routes.
 const _studentCvsPathPrefix = AppRoutes.studentCvs;
+
+/// Student application management — a protected feature area, not
+/// onboarding. Matched by prefix for the same reason as
+/// [_studentOpportunitiesPathPrefix].
+const _studentApplicationsPathPrefix = AppRoutes.studentApplications;
+
+/// Organization application management — a protected feature area, not
+/// onboarding. The applicants-list route
+/// (`/organization/opportunities/:id/applicants`) is already covered by
+/// [_organizationOpportunitiesPathPrefix]; this prefix additionally covers
+/// the standalone `/organization/applications/:id` details route.
+const _organizationApplicationsPathPrefix = AppRoutes.organizationApplications;
 
 /// Defines the app's navigation routes and redirects based on
 /// [AuthProvider], [StudentProfileProvider], and [OrganizationProfileProvider].
@@ -157,6 +173,24 @@ class AppRouter {
           ),
         ),
         GoRoute(
+          path: '${AppRoutes.organizationOpportunities}/:id/applicants',
+          builder: (_, state) => OrganizationApplicantsScreen(
+            opportunityId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+            // Only ever available via in-app navigation (see
+            // OrganizationOpportunityDetailsScreen) — a direct URL visit
+            // has no `extra`, which the screen handles safely on its own.
+            opportunityTitle: state.extra is String
+                ? state.extra as String
+                : null,
+          ),
+        ),
+        GoRoute(
+          path: '${AppRoutes.organizationApplications}/:id',
+          builder: (_, state) => OrganizationApplicationDetailsScreen(
+            applicationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
+        GoRoute(
           path: AppRoutes.studentOpportunities,
           builder: (_, _) => const StudentOpportunitiesScreen(),
         ),
@@ -169,6 +203,16 @@ class AppRouter {
         GoRoute(
           path: AppRoutes.studentCvs,
           builder: (_, _) => const StudentCvScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.studentApplications,
+          builder: (_, _) => const StudentApplicationsScreen(),
+        ),
+        GoRoute(
+          path: '${AppRoutes.studentApplications}/:id',
+          builder: (_, state) => StudentApplicationDetailsScreen(
+            applicationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
         ),
       ],
     );
@@ -229,9 +273,19 @@ class AppRouter {
     }
 
     // Opportunity management is an organization-only feature area — not
-    // onboarding, but still off-limits to every other role.
+    // onboarding, but still off-limits to every other role. This also
+    // covers the applicants-list route
+    // (/organization/opportunities/:id/applicants), which shares this
+    // prefix.
     if (role != 'organization' &&
         currentPath.startsWith(_organizationOpportunitiesPathPrefix)) {
+      return homePath;
+    }
+
+    // Application management is an organization-only feature area — not
+    // onboarding, but still off-limits to every other role.
+    if (role != 'organization' &&
+        currentPath.startsWith(_organizationApplicationsPathPrefix)) {
       return homePath;
     }
 
@@ -245,6 +299,13 @@ class AppRouter {
     // CV management is a student-only feature area — not onboarding, but
     // still off-limits to every other role.
     if (role != 'student' && currentPath.startsWith(_studentCvsPathPrefix)) {
+      return homePath;
+    }
+
+    // Application management is a student-only feature area — not
+    // onboarding, but still off-limits to every other role.
+    if (role != 'student' &&
+        currentPath.startsWith(_studentApplicationsPathPrefix)) {
       return homePath;
     }
 

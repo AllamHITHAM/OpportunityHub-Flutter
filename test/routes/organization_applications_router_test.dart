@@ -1,31 +1,24 @@
-// Router-level tests for student opportunity-browsing routes: role/profile
-// gating, direct-URL safety, and no redirect loops.
+// Router-level tests for organization application-management routes:
+// role/profile gating, direct-URL safety, and no redirect loops.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
-import 'package:opportunityhub_flutter/core/api/paginated_result.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
-import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
-import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
-import 'package:opportunityhub_flutter/models/cv_model.dart';
-import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
-import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
-import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
-import 'package:opportunityhub_flutter/providers/student_opportunities_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
@@ -67,44 +60,19 @@ class _FakeOrganizationProfileRepository extends OrganizationProfileRepository {
   Future<OrganizationProfileModel?> getProfile() async => getProfileResult;
 }
 
-class _FakeOpportunityRepository extends OpportunityRepository {
-  _FakeOpportunityRepository()
-    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
-
-  @override
-  Future<PaginatedResult<OpportunityModel>> getPublicOpportunities({
-    String? opportunityType,
-    String? employmentType,
-    String? workMode,
-    String? experienceLevel,
-    String? location,
-    String? fieldOfStudy,
-    String? keyword,
-    int page = 1,
-    int perPage = 15,
-  }) async =>
-      const PaginatedResult(items: [], currentPage: 1, lastPage: 1, total: 0);
-
-  @override
-  Future<OpportunityModel> getPublicOpportunity(int id) async {
-    throw ApiException('Opportunity not found', statusCode: 404);
-  }
-}
-
-class _FakeCvRepository extends CvRepository {
-  _FakeCvRepository()
-    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
-
-  @override
-  Future<List<CvModel>> getStudentCvs() async => [];
-}
-
 class _FakeApplicationRepository extends ApplicationRepository {
   _FakeApplicationRepository()
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   @override
-  Future<List<ApplicationModel>> getStudentApplications() async => [];
+  Future<List<ApplicationModel>> getApplicationsForOpportunity(
+    int opportunityId,
+  ) async => [];
+
+  @override
+  Future<ApplicationModel> getOrganizationApplication(int applicationId) async {
+    throw ApiException('Application not found', statusCode: 404);
+  }
 }
 
 void _setViewSize(WidgetTester tester, Size size) {
@@ -120,7 +88,7 @@ Future<void> _pumpAsRole(
   WidgetTester tester, {
   required String role,
   required String initialPath,
-  StudentProfileModel? studentProfile,
+  OrganizationProfileModel? organizationProfile,
 }) async {
   _setViewSize(tester, const Size(420, 1400));
 
@@ -138,31 +106,24 @@ Future<void> _pumpAsRole(
   );
   final studentProfileProvider = StudentProfileProvider(
     repository: _FakeStudentProfileRepository(
-      getProfileResult: role == 'student' ? studentProfile : null,
+      getProfileResult: role == 'student'
+          ? const StudentProfileModel(
+              id: 1,
+              university: 'State University',
+              major: 'Computer Science',
+              graduationYear: 2027,
+            )
+          : null,
     ),
     authProvider: authProvider,
-  );
-  const approvedOrgProfile = OrganizationProfileModel(
-    id: 1,
-    organizationName: 'Acme Corp',
-    organizationType: 'company',
-    approvalStatus: 'approved',
   );
   final organizationProfileProvider = OrganizationProfileProvider(
     repository: _FakeOrganizationProfileRepository(
-      getProfileResult: role == 'organization' ? approvedOrgProfile : null,
+      getProfileResult: organizationProfile,
     ),
     authProvider: authProvider,
   );
-  final opportunitiesProvider = StudentOpportunitiesProvider(
-    repository: _FakeOpportunityRepository(),
-    authProvider: authProvider,
-  );
-  final cvProvider = StudentCvProvider(
-    repository: _FakeCvRepository(),
-    authProvider: authProvider,
-  );
-  final applicationsProvider = StudentApplicationsProvider(
+  final applicationsProvider = OrganizationApplicationsProvider(
     repository: _FakeApplicationRepository(),
     authProvider: authProvider,
   );
@@ -182,11 +143,7 @@ Future<void> _pumpAsRole(
         ChangeNotifierProvider<OrganizationProfileProvider>.value(
           value: organizationProfileProvider,
         ),
-        ChangeNotifierProvider<StudentOpportunitiesProvider>.value(
-          value: opportunitiesProvider,
-        ),
-        ChangeNotifierProvider<StudentCvProvider>.value(value: cvProvider),
-        ChangeNotifierProvider<StudentApplicationsProvider>.value(
+        ChangeNotifierProvider<OrganizationApplicationsProvider>.value(
           value: applicationsProvider,
         ),
       ],
@@ -202,11 +159,11 @@ Future<void> _pumpAsRole(
   await tester.pumpAndSettle();
 }
 
-const _completeProfile = StudentProfileModel(
+const _approvedProfile = OrganizationProfileModel(
   id: 1,
-  university: 'State University',
-  major: 'Computer Science',
-  graduationYear: 2027,
+  organizationName: 'Acme Corp',
+  organizationType: 'company',
+  approvalStatus: 'approved',
 );
 
 void main() {
@@ -222,15 +179,7 @@ void main() {
       repository: _FakeOrganizationProfileRepository(),
       authProvider: authProvider,
     );
-    final opportunitiesProvider = StudentOpportunitiesProvider(
-      repository: _FakeOpportunityRepository(),
-      authProvider: authProvider,
-    );
-    final cvProvider = StudentCvProvider(
-      repository: _FakeCvRepository(),
-      authProvider: authProvider,
-    );
-    final applicationsProvider = StudentApplicationsProvider(
+    final applicationsProvider = OrganizationApplicationsProvider(
       repository: _FakeApplicationRepository(),
       authProvider: authProvider,
     );
@@ -250,11 +199,7 @@ void main() {
           ChangeNotifierProvider<OrganizationProfileProvider>.value(
             value: organizationProfileProvider,
           ),
-          ChangeNotifierProvider<StudentOpportunitiesProvider>.value(
-            value: opportunitiesProvider,
-          ),
-          ChangeNotifierProvider<StudentCvProvider>.value(value: cvProvider),
-          ChangeNotifierProvider<StudentApplicationsProvider>.value(
+          ChangeNotifierProvider<OrganizationApplicationsProvider>.value(
             value: applicationsProvider,
           ),
         ],
@@ -265,100 +210,142 @@ void main() {
       ),
     );
 
-    appRouter.router.go(AppRoutes.studentOpportunities);
+    appRouter.router.go(AppRoutes.organizationApplicants(5));
     await authProvider.initialize();
     await tester.pumpAndSettle();
 
-    expect(find.text('Opportunities'), findsNothing);
+    expect(find.text('Applicants'), findsNothing);
     expect(find.text('Login'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Organizations cannot access student opportunity routes', (
+  testWidgets('An approved organization can open the applicants route', (
     tester,
   ) async {
     await _pumpAsRole(
       tester,
       role: 'organization',
-      initialPath: AppRoutes.studentOpportunities,
+      initialPath: AppRoutes.organizationApplicants(5),
+      organizationProfile: _approvedProfile,
     );
 
-    expect(find.text('Opportunities'), findsNothing);
-    expect(find.text('Role: Organization'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('Admins cannot access student opportunity routes', (
-    tester,
-  ) async {
-    await _pumpAsRole(
-      tester,
-      role: 'admin',
-      initialPath: AppRoutes.studentOpportunities,
-    );
-
-    expect(find.text('Opportunities'), findsNothing);
+    expect(find.text('No Applicants Yet'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'A student with an incomplete profile remains routed to onboarding',
+    'An approved organization can open the application details route',
     (tester) async {
       await _pumpAsRole(
         tester,
-        role: 'student',
-        initialPath: AppRoutes.studentOpportunities,
-        studentProfile: null,
-      );
-
-      expect(find.text('Opportunities'), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'A student with a completed profile may access opportunity browsing',
-    (tester) async {
-      await _pumpAsRole(
-        tester,
-        role: 'student',
-        initialPath: AppRoutes.studentOpportunities,
-        studentProfile: _completeProfile,
-      );
-
-      expect(find.text('Opportunities'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets(
-    'Direct URL access to a details route does not crash (uses the ID alone)',
-    (tester) async {
-      await _pumpAsRole(
-        tester,
-        role: 'student',
-        initialPath: AppRoutes.studentOpportunityDetails(123),
-        studentProfile: _completeProfile,
+        role: 'organization',
+        initialPath: AppRoutes.organizationApplicationDetails(123),
+        organizationProfile: _approvedProfile,
       );
 
       // A nonexistent ID surfaces the documented not-found error safely,
       // rather than crashing — proving the route never depended on extra.
-      expect(find.text('Opportunity not found'), findsOneWidget);
+      expect(find.text('Application not found'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets('No redirect loop occurs for the opportunities list route', (
+  testWidgets('Students cannot access organization applicant routes', (
     tester,
   ) async {
     await _pumpAsRole(
       tester,
       role: 'student',
-      initialPath: AppRoutes.studentOpportunities,
-      studentProfile: _completeProfile,
+      initialPath: AppRoutes.organizationApplicants(5),
+    );
+
+    expect(find.text('No Applicants Yet'), findsNothing);
+    expect(find.text('Role: Student'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'Students cannot access organization application details routes',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'student',
+        initialPath: AppRoutes.organizationApplicationDetails(1),
+      );
+
+      expect(find.text('Application not found'), findsNothing);
+      expect(find.text('Role: Student'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Admins cannot access organization applicant routes', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: AppRoutes.organizationApplicants(5),
+    );
+
+    expect(find.text('No Applicants Yet'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Admins cannot access organization application details routes', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: AppRoutes.organizationApplicationDetails(1),
+    );
+
+    expect(find.text('Application not found'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'An organization with an incomplete profile remains routed to onboarding',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: AppRoutes.organizationApplicants(5),
+        organizationProfile: null,
+      );
+
+      expect(find.text('No Applicants Yet'), findsNothing);
+      expect(find.text('Company Profile Setup Incomplete'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'A malformed application ID does not crash — falls back to a safe not-found state',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: '${AppRoutes.organizationApplications}/not-a-number',
+        organizationProfile: _approvedProfile,
+      );
+
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('No redirect loop occurs for the applicants route', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'organization',
+      initialPath: AppRoutes.organizationApplicants(5),
+      organizationProfile: _approvedProfile,
     );
 
     // Settling completed without a pumpAndSettle timeout (which throws if
     // frames never stop scheduling, e.g. from a redirect loop).
-    expect(find.text('Opportunities'), findsOneWidget);
+    expect(find.text('No Applicants Yet'), findsOneWidget);
   });
 }

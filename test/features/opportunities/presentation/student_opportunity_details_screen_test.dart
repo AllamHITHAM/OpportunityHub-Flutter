@@ -9,14 +9,20 @@ import 'package:provider/provider.dart';
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
+import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/presentation/student_opportunity_details_screen.dart';
+import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_skill_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_opportunities_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
@@ -67,9 +73,59 @@ class _FakeOpportunityRepository extends OpportunityRepository {
   }
 }
 
+class _FakeCvRepository extends CvRepository {
+  _FakeCvRepository({this.listResult = const []})
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  List<CvModel> listResult;
+
+  @override
+  Future<List<CvModel>> getStudentCvs() async => listResult;
+}
+
+class _FakeApplicationRepository extends ApplicationRepository {
+  _FakeApplicationRepository({this.listResult = const [], this.applyResult})
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  List<ApplicationModel> listResult;
+  ApplicationModel? applyResult;
+
+  @override
+  Future<List<ApplicationModel>> getStudentApplications() async => listResult;
+
+  @override
+  Future<ApplicationModel> applyToOpportunity({
+    required int opportunityId,
+    required int cvId,
+    String? coverLetter,
+  }) async => applyResult!;
+}
+
+ApplicationModel _application({required int opportunityId}) {
+  return ApplicationModel(
+    id: 1,
+    studentId: 1,
+    opportunityId: opportunityId,
+    cvId: 1,
+    status: 'pending',
+    opportunity: _opportunity(id: opportunityId),
+    cv: const CvModel(
+      id: 1,
+      studentId: 1,
+      title: 'My CV',
+      filePath: 'cvs/my-cv.pdf',
+      version: 1,
+      isDefault: true,
+      createdByAi: false,
+    ),
+  );
+}
+
 Future<StudentOpportunitiesProvider> _pumpDetails(
   WidgetTester tester, {
   required _FakeOpportunityRepository repository,
+  _FakeCvRepository? cvRepository,
+  _FakeApplicationRepository? applicationRepository,
   int opportunityId = 1,
   Size size = const Size(420, 1400),
 }) async {
@@ -83,6 +139,14 @@ Future<StudentOpportunitiesProvider> _pumpDetails(
     repository: repository,
     authProvider: authProvider,
   );
+  final cvProvider = StudentCvProvider(
+    repository: cvRepository ?? _FakeCvRepository(),
+    authProvider: authProvider,
+  );
+  final applicationsProvider = StudentApplicationsProvider(
+    repository: applicationRepository ?? _FakeApplicationRepository(),
+    authProvider: authProvider,
+  );
 
   final router = GoRouter(
     initialLocation: AppRoutes.studentOpportunityDetails(opportunityId),
@@ -90,6 +154,10 @@ Future<StudentOpportunitiesProvider> _pumpDetails(
       GoRoute(
         path: AppRoutes.studentOpportunities,
         builder: (_, _) => const Scaffold(body: Text('LIST_PLACEHOLDER')),
+      ),
+      GoRoute(
+        path: AppRoutes.studentCvs,
+        builder: (_, _) => const Scaffold(body: Text('CVS_PLACEHOLDER')),
       ),
       GoRoute(
         path: '${AppRoutes.studentOpportunities}/:id',
@@ -101,8 +169,16 @@ Future<StudentOpportunitiesProvider> _pumpDetails(
   );
 
   await tester.pumpWidget(
-    ChangeNotifierProvider<StudentOpportunitiesProvider>.value(
-      value: provider,
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<StudentOpportunitiesProvider>.value(
+          value: provider,
+        ),
+        ChangeNotifierProvider<StudentCvProvider>.value(value: cvProvider),
+        ChangeNotifierProvider<StudentApplicationsProvider>.value(
+          value: applicationsProvider,
+        ),
+      ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
         routerConfig: router,
@@ -191,18 +267,142 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('No apply/save/edit/delete/applicant UI appears anywhere', (
+  testWidgets(
+    'No save/edit/delete/applicant/interview/quiz UI appears anywhere',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(getResult: _opportunity());
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.textContaining('Save'), findsNothing);
+      expect(find.byIcon(Icons.edit_outlined), findsNothing);
+      expect(find.byIcon(Icons.delete_outline), findsNothing);
+      expect(find.textContaining('Applicant'), findsNothing);
+      expect(find.textContaining('Interview'), findsNothing);
+      expect(find.textContaining('Quiz'), findsNothing);
+    },
+  );
+
+  testWidgets('Apply Now renders when the student has not applied yet', (
     tester,
   ) async {
-    final repository = _FakeOpportunityRepository(getResult: _opportunity());
-    await _pumpDetails(tester, repository: repository);
+    final repository = _FakeOpportunityRepository(
+      getResult: _opportunity(id: 1),
+    );
+    await _pumpDetails(tester, repository: repository, opportunityId: 1);
 
-    expect(find.textContaining('Apply'), findsNothing);
-    expect(find.textContaining('Save'), findsNothing);
-    expect(find.byIcon(Icons.edit_outlined), findsNothing);
-    expect(find.byIcon(Icons.delete_outline), findsNothing);
-    expect(find.textContaining('Applicant'), findsNothing);
-    expect(find.textContaining('Interview'), findsNothing);
-    expect(find.textContaining('Quiz'), findsNothing);
+    expect(find.text('Apply Now'), findsOneWidget);
+    expect(find.text('Already Applied'), findsNothing);
   });
+
+  testWidgets(
+    'Already Applied renders instead of Apply Now when hasAppliedTo is true',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(id: 1),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        opportunityId: 1,
+        applicationRepository: _FakeApplicationRepository(
+          listResult: [_application(opportunityId: 1)],
+        ),
+      );
+
+      expect(find.text('Already Applied'), findsOneWidget);
+      expect(find.text('Apply Now'), findsNothing);
+    },
+  );
+
+  testWidgets('Tapping Apply Now opens the apply bottom sheet', (tester) async {
+    final repository = _FakeOpportunityRepository(
+      getResult: _opportunity(id: 1, title: 'Software Engineer'),
+    );
+    await _pumpDetails(
+      tester,
+      repository: repository,
+      opportunityId: 1,
+      cvRepository: _FakeCvRepository(
+        listResult: [
+          const CvModel(
+            id: 1,
+            studentId: 1,
+            title: 'My CV',
+            filePath: 'cvs/my-cv.pdf',
+            version: 1,
+            isDefault: true,
+            createdByAi: false,
+          ),
+        ],
+      ),
+    );
+
+    await tester.tap(find.text('Apply Now'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Apply to Software Engineer'), findsOneWidget);
+    expect(find.text('Submit Application'), findsOneWidget);
+  });
+
+  testWidgets(
+    'Full apply flow: Apply Now -> select CV -> submit -> sheet closes -> '
+    'this same screen immediately shows Already Applied, no restart',
+    (tester) async {
+      const cv = CvModel(
+        id: 1,
+        studentId: 1,
+        title: 'My CV',
+        filePath: 'cvs/my-cv.pdf',
+        version: 1,
+        isDefault: true,
+        createdByAi: false,
+      );
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(id: 1, title: 'Software Engineer'),
+      );
+      final applicationRepository = _FakeApplicationRepository(
+        applyResult: ApplicationModel(
+          id: 99,
+          studentId: 1,
+          opportunityId: 1,
+          cvId: 1,
+          status: 'pending',
+          opportunity: _opportunity(id: 1, title: 'Software Engineer'),
+          cv: cv,
+        ),
+      );
+
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        opportunityId: 1,
+        cvRepository: _FakeCvRepository(listResult: [cv]),
+        applicationRepository: applicationRepository,
+      );
+
+      // Starting state: not yet applied.
+      expect(find.text('Apply Now'), findsOneWidget);
+      expect(find.text('Already Applied'), findsNothing);
+
+      // Tap Apply.
+      await tester.tap(find.text('Apply Now'));
+      await tester.pumpAndSettle();
+      expect(find.text('Submit Application'), findsOneWidget);
+
+      // The default (only) CV is already pre-selected — submit.
+      await tester.tap(find.text('Submit Application'));
+      await tester.pumpAndSettle();
+
+      // The sheet closed and a success snackbar appeared.
+      expect(find.text('Submit Application'), findsNothing);
+      expect(find.text('Application submitted successfully'), findsOneWidget);
+
+      // The very same StudentOpportunityDetailsScreen instance — never
+      // rebuilt/remounted/restarted — now shows Already Applied instead
+      // of Apply Now.
+      expect(find.text('Already Applied'), findsOneWidget);
+      expect(find.text('Apply Now'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

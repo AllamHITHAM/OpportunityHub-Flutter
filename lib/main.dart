@@ -4,14 +4,17 @@ import 'package:provider/provider.dart';
 import 'core/api/api_client.dart';
 import 'core/storage/token_storage_service.dart';
 import 'core/theme/app_theme.dart';
+import 'features/applications/data/application_repository.dart';
 import 'features/auth/data/auth_repository.dart';
 import 'features/cv/data/cv_repository.dart';
 import 'features/opportunities/data/opportunity_repository.dart';
 import 'features/organization/data/organization_profile_repository.dart';
 import 'features/student/data/student_profile_repository.dart';
 import 'providers/auth_provider.dart';
+import 'providers/organization_applications_provider.dart';
 import 'providers/organization_opportunities_provider.dart';
 import 'providers/organization_profile_provider.dart';
+import 'providers/student_applications_provider.dart';
 import 'providers/student_cv_provider.dart';
 import 'providers/student_opportunities_provider.dart';
 import 'providers/student_profile_provider.dart';
@@ -93,6 +96,27 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, StudentCvProvider>(
           create: (context) => StudentCvProvider(
             repository: context.read<CvRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, ApplicationRepository>(
+          update: (_, apiClient, _) =>
+              ApplicationRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, StudentApplicationsProvider>(
+          create: (context) => StudentApplicationsProvider(
+            repository: context.read<ApplicationRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ChangeNotifierProxyProvider<
+          AuthProvider,
+          OrganizationApplicationsProvider
+        >(
+          create: (context) => OrganizationApplicationsProvider(
+            repository: context.read<ApplicationRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,

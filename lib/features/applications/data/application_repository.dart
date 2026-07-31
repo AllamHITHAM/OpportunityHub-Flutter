@@ -1,0 +1,122 @@
+import 'package:dio/dio.dart';
+
+import '../../../core/api/api_client.dart';
+import '../../../models/application_model.dart';
+
+/// Talks to the Laravel application endpoints — both the student-facing
+/// ones (listing and applying) and the organization-facing ones (listing
+/// an opportunity's applicants, viewing one application, updating its
+/// status). Both sides operate on the same underlying `Application`
+/// entity, so one repository serves both rather than duplicating
+/// request/parsing logic across two classes — the same reasoning already
+/// applied to `OpportunityRepository`.
+class ApplicationRepository {
+  ApplicationRepository({required this.apiClient});
+
+  final ApiClient apiClient;
+
+  /// Fetches the authenticated student's own applications with
+  /// `GET /api/student/applications`. The response is a flat array, not
+  /// paginated.
+  Future<List<ApplicationModel>> getStudentApplications() async {
+    try {
+      final response = await apiClient.dio.get('/student/applications');
+      final data = apiClient.parseData(response) as List;
+      return data
+          .map(
+            (json) => ApplicationModel.fromJson(json as Map<String, dynamic>),
+          )
+          .toList();
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Applies to an opportunity with
+  /// `POST /api/opportunities/{opportunityId}/apply`.
+  ///
+  /// Errors: 404 (opportunity not open / organization not approved), 409
+  /// (already applied), 422 (deadline passed, no CV exists, or the given
+  /// `cv_id` doesn't belong to this student).
+  Future<ApplicationModel> applyToOpportunity({
+    required int opportunityId,
+    required int cvId,
+    String? coverLetter,
+  }) async {
+    try {
+      final response = await apiClient.dio.post(
+        '/opportunities/$opportunityId/apply',
+        data: {'cv_id': cvId, 'cover_letter': ?coverLetter},
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return ApplicationModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Fetches the applicants for one of the organization's own opportunities
+  /// with `GET /api/organization/opportunities/{opportunityId}/applications`.
+  /// The response is a flat array, not paginated. This endpoint does not
+  /// eager-load `opportunity` on each application (the caller already knows
+  /// it from [opportunityId]) — see `ApplicationModel.opportunity`.
+  Future<List<ApplicationModel>> getApplicationsForOpportunity(
+    int opportunityId,
+  ) async {
+    try {
+      final response = await apiClient.dio.get(
+        '/organization/opportunities/$opportunityId/applications',
+      );
+      final data = apiClient.parseData(response) as List;
+      return data
+          .map(
+            (json) => ApplicationModel.fromJson(json as Map<String, dynamic>),
+          )
+          .toList();
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Fetches a single application with
+  /// `GET /api/organization/applications/{applicationId}`.
+  ///
+  /// Errors: 404 (not found / not one of this organization's opportunities).
+  Future<ApplicationModel> getOrganizationApplication(int applicationId) async {
+    try {
+      final response = await apiClient.dio.get(
+        '/organization/applications/$applicationId',
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return ApplicationModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Updates an application's status with
+  /// `PUT /api/organization/applications/{applicationId}/status`.
+  ///
+  /// [status] is passed through as-is — restricting which values are
+  /// reachable (reviewed/shortlisted/rejected only, for this phase) is the
+  /// caller's responsibility, not this repository's; it talks to the
+  /// documented endpoint exactly as implemented.
+  ///
+  /// Errors: 404 (not found / not yours), 409 ("Cannot change the status of
+  /// a withdrawn application"), 422 (invalid status).
+  Future<ApplicationModel> updateOrganizationApplicationStatus({
+    required int applicationId,
+    required String status,
+  }) async {
+    try {
+      final response = await apiClient.dio.put(
+        '/organization/applications/$applicationId/status',
+        data: {'status': status},
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return ApplicationModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+}

@@ -40,6 +40,19 @@ class AppRoutes {
   static String organizationOpportunityEdit(int id) =>
       '$organizationOpportunities/$id/edit';
 
+  /// The applicants for one of the organization's own opportunities — see
+  /// `AppRouter` for the role/profile-completion gating applied to this.
+  static String organizationApplicants(int opportunityId) =>
+      '$organizationOpportunities/$opportunityId/applicants';
+
+  /// Organization-only application details — not nested under an
+  /// opportunity path, since the backend's single-application endpoint
+  /// doesn't need the opportunity ID to resolve.
+  static const String organizationApplications = '/organization/applications';
+
+  static String organizationApplicationDetails(int id) =>
+      '$organizationApplications/$id';
+
   /// Student-only opportunity browsing — see `AppRouter` for the
   /// role/profile-completion gating applied to these.
   static const String studentOpportunities = '/student/opportunities';
@@ -50,4 +63,10 @@ class AppRoutes {
   /// Student-only CV management — see `AppRouter` for the
   /// role/profile-completion gating applied to this.
   static const String studentCvs = '/student/cvs';
+
+  /// Student-only application management — see `AppRouter` for the
+  /// role/profile-completion gating applied to these.
+  static const String studentApplications = '/student/applications';
+
+  static String studentApplicationDetails(int id) => '$studentApplications/$id';
 }
