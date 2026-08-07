@@ -1,5 +1,7 @@
-// Router-level tests for organization opportunity-management routes:
-// role/profile gating, direct-URL safety, and no redirect loops.
+// Router-level tests for the Admin dashboard route: role gating,
+// direct-URL safety, current suspended-account behavior, and no redirect
+// loops. Mirrors organization_applications_router_test.dart's structure
+// and conventions.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,17 +12,14 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
-import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
-import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
-import 'package:opportunityhub_flutter/providers/organization_opportunities_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
@@ -63,26 +62,32 @@ class _FakeOrganizationProfileRepository extends OrganizationProfileRepository {
   Future<OrganizationProfileModel?> getProfile() async => getProfileResult;
 }
 
-class _FakeOpportunityRepository extends OpportunityRepository {
-  _FakeOpportunityRepository()
-    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
-
-  @override
-  Future<List<OpportunityModel>> getOpportunities() async => [];
-
-  @override
-  Future<OpportunityModel> getOpportunity(int id) async {
-    throw ApiException('Opportunity not found', statusCode: 404);
-  }
+AdminDashboardStatsModel _stats() {
+  return const AdminDashboardStatsModel(
+    totalUsers: 42,
+    totalStudents: 30,
+    totalOrganizations: 10,
+    pendingOrganizations: 3,
+    approvedOrganizations: 6,
+    rejectedOrganizations: 1,
+    totalOpportunities: 20,
+    openOpportunities: 15,
+    closedOpportunities: 5,
+    totalApplications: 100,
+    totalInterviews: 8,
+  );
 }
 
 class _FakeAdminDashboardRepository extends AdminDashboardRepository {
-  _FakeAdminDashboardRepository()
+  _FakeAdminDashboardRepository({this.loadError})
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  ApiException? loadError;
 
   @override
   Future<AdminDashboardStatsModel> getDashboardStats() async {
-    throw ApiException('Not used in these router tests');
+    if (loadError != null) throw loadError!;
+    return _stats();
   }
 }
 
@@ -99,7 +104,8 @@ Future<void> _pumpAsRole(
   WidgetTester tester, {
   required String role,
   required String initialPath,
-  OrganizationProfileModel? organizationProfile,
+  String status = 'active',
+  ApiException? dashboardError,
 }) async {
   _setViewSize(tester, const Size(420, 1400));
 
@@ -111,7 +117,7 @@ Future<void> _pumpAsRole(
         name: 'Test User',
         email: 'test@example.com',
         role: role,
-        status: 'active',
+        status: status,
       ),
     ),
   );
@@ -130,20 +136,19 @@ Future<void> _pumpAsRole(
   );
   final organizationProfileProvider = OrganizationProfileProvider(
     repository: _FakeOrganizationProfileRepository(
-      getProfileResult: organizationProfile,
+      getProfileResult: role == 'organization'
+          ? const OrganizationProfileModel(
+              id: 1,
+              organizationName: 'Acme Corp',
+              organizationType: 'company',
+              approvalStatus: 'approved',
+            )
+          : null,
     ),
     authProvider: authProvider,
   );
-  final opportunitiesProvider = OrganizationOpportunitiesProvider(
-    repository: _FakeOpportunityRepository(),
-    authProvider: authProvider,
-  );
-  // Not exercised by any test in this file, but registered because a
-  // role='admin' request for a non-admin route (see the "Admins cannot
-  // access..." test below) redirects to AdminHomeScreen, which now
-  // requires this provider to exist in the tree.
   final adminDashboardProvider = AdminDashboardProvider(
-    repository: _FakeAdminDashboardRepository(),
+    repository: _FakeAdminDashboardRepository(loadError: dashboardError),
     authProvider: authProvider,
   );
   final appRouter = AppRouter(
@@ -162,9 +167,6 @@ Future<void> _pumpAsRole(
         ChangeNotifierProvider<OrganizationProfileProvider>.value(
           value: organizationProfileProvider,
         ),
-        ChangeNotifierProvider<OrganizationOpportunitiesProvider>.value(
-          value: opportunitiesProvider,
-        ),
         ChangeNotifierProvider<AdminDashboardProvider>.value(
           value: adminDashboardProvider,
         ),
@@ -181,15 +183,59 @@ Future<void> _pumpAsRole(
   await tester.pumpAndSettle();
 }
 
-const _approvedProfile = OrganizationProfileModel(
-  id: 1,
-  organizationName: 'Acme Corp',
-  organizationType: 'company',
-  approvalStatus: 'approved',
-);
-
 void main() {
-  testWidgets('Unauthenticated users are redirected to login', (tester) async {
+  testWidgets('An authenticated active admin can open /admin', (tester) async {
+    await _pumpAsRole(tester, role: 'admin', initialPath: AppRoutes.adminHome);
+
+    expect(find.text('Admin Dashboard'), findsOneWidget);
+    expect(find.text('42'), findsOneWidget); // total_users from the fake
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Direct URL /admin works for an admin', (tester) async {
+    await _pumpAsRole(tester, role: 'admin', initialPath: '/admin');
+
+    expect(find.text('Admin Dashboard'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'Admin login/home redirect resolves to /admin, not another role\'s home',
+    (tester) async {
+      await _pumpAsRole(tester, role: 'admin', initialPath: AppRoutes.login);
+
+      expect(find.text('Admin Dashboard'), findsOneWidget);
+      expect(find.text('Login'), findsNothing);
+    },
+  );
+
+  testWidgets('Students cannot access /admin', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'student',
+      initialPath: AppRoutes.adminHome,
+    );
+
+    expect(find.text('Admin Dashboard'), findsNothing);
+    expect(find.text('Role: Student'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Organizations cannot access /admin', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'organization',
+      initialPath: AppRoutes.adminHome,
+    );
+
+    expect(find.text('Admin Dashboard'), findsNothing);
+    expect(find.text('Role: Organization'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('An unauthenticated guest is redirected to login from /admin', (
+    tester,
+  ) async {
     _setViewSize(tester, const Size(420, 1400));
 
     final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
@@ -201,8 +247,8 @@ void main() {
       repository: _FakeOrganizationProfileRepository(),
       authProvider: authProvider,
     );
-    final opportunitiesProvider = OrganizationOpportunitiesProvider(
-      repository: _FakeOpportunityRepository(),
+    final adminDashboardProvider = AdminDashboardProvider(
+      repository: _FakeAdminDashboardRepository(),
       authProvider: authProvider,
     );
     final appRouter = AppRouter(
@@ -221,8 +267,8 @@ void main() {
           ChangeNotifierProvider<OrganizationProfileProvider>.value(
             value: organizationProfileProvider,
           ),
-          ChangeNotifierProvider<OrganizationOpportunitiesProvider>.value(
-            value: opportunitiesProvider,
+          ChangeNotifierProvider<AdminDashboardProvider>.value(
+            value: adminDashboardProvider,
           ),
         ],
         child: MaterialApp.router(
@@ -232,116 +278,43 @@ void main() {
       ),
     );
 
-    appRouter.router.go(AppRoutes.organizationOpportunities);
+    appRouter.router.go(AppRoutes.adminHome);
     await authProvider.initialize();
     await tester.pumpAndSettle();
 
-    expect(find.text('Opportunities'), findsNothing);
+    expect(find.text('Admin Dashboard'), findsNothing);
     expect(find.text('Login'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Students cannot access organization opportunity routes', (
-    tester,
-  ) async {
-    await _pumpAsRole(
-      tester,
-      role: 'student',
-      initialPath: AppRoutes.organizationOpportunities,
-    );
-
-    expect(find.text('Opportunities'), findsNothing);
-    expect(find.text('Role: Student'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('Admins cannot access organization opportunity routes', (
-    tester,
-  ) async {
-    await _pumpAsRole(
-      tester,
-      role: 'admin',
-      initialPath: AppRoutes.organizationOpportunities,
-    );
-
-    expect(find.text('Opportunities'), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
-
   testWidgets(
-    'An organization with an incomplete profile remains routed to onboarding',
+    'A suspended admin (restored session) follows current active-account '
+    'behavior: the router still resolves to /admin, and the dashboard '
+    'surfaces the backend\'s inactive-account error rather than crashing '
+    'or silently showing stats',
     (tester) async {
       await _pumpAsRole(
         tester,
-        role: 'organization',
-        initialPath: AppRoutes.organizationOpportunities,
-        organizationProfile: null,
+        role: 'admin',
+        initialPath: AppRoutes.adminHome,
+        status: 'suspended',
+        dashboardError: ApiException('Account is not active', statusCode: 403),
       );
 
-      expect(find.text('Opportunities'), findsNothing);
-      expect(find.text('Company Profile Setup Incomplete'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'An organization with a completed profile may access opportunity management',
-    (tester) async {
-      await _pumpAsRole(
-        tester,
-        role: 'organization',
-        initialPath: AppRoutes.organizationOpportunities,
-        organizationProfile: _approvedProfile,
-      );
-
-      expect(find.text('Opportunities'), findsOneWidget);
+      // No router-level redirect exists for account status today (see
+      // AppRouter._redirect — it checks `role` only) — this test documents
+      // that existing behavior rather than inventing a new one.
+      expect(find.text('Admin Dashboard'), findsOneWidget);
+      expect(find.text('Account is not active'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets(
-    'Direct URL access to the create route does not crash and requires no extra',
-    (tester) async {
-      await _pumpAsRole(
-        tester,
-        role: 'organization',
-        initialPath: AppRoutes.organizationOpportunityCreate,
-        organizationProfile: _approvedProfile,
-      );
-
-      expect(find.text('Create Opportunity'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets(
-    'Direct URL access to a details route does not crash (uses the ID alone)',
-    (tester) async {
-      await _pumpAsRole(
-        tester,
-        role: 'organization',
-        initialPath: AppRoutes.organizationOpportunityDetails(123),
-        organizationProfile: _approvedProfile,
-      );
-
-      // A nonexistent ID surfaces the documented not-found error safely,
-      // rather than crashing — proving the route never depended on extra.
-      expect(find.text('Opportunity not found'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets('No redirect loop occurs for the opportunities list route', (
-    tester,
-  ) async {
-    await _pumpAsRole(
-      tester,
-      role: 'organization',
-      initialPath: AppRoutes.organizationOpportunities,
-      organizationProfile: _approvedProfile,
-    );
+  testWidgets('No redirect loop occurs for the admin route', (tester) async {
+    await _pumpAsRole(tester, role: 'admin', initialPath: AppRoutes.adminHome);
 
     // Settling completed without a pumpAndSettle timeout (which throws if
     // frames never stop scheduling, e.g. from a redirect loop).
-    expect(find.text('Opportunities'), findsOneWidget);
+    expect(find.text('Admin Dashboard'), findsOneWidget);
   });
 }

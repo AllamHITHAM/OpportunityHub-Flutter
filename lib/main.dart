@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'core/api/api_client.dart';
 import 'core/storage/token_storage_service.dart';
 import 'core/theme/app_theme.dart';
+import 'features/admin/data/admin_dashboard_repository.dart';
 import 'features/applications/data/application_repository.dart';
 import 'features/assessments/data/assessment_repository.dart';
 import 'features/auth/data/auth_repository.dart';
@@ -11,6 +12,7 @@ import 'features/cv/data/cv_repository.dart';
 import 'features/opportunities/data/opportunity_repository.dart';
 import 'features/organization/data/organization_profile_repository.dart';
 import 'features/student/data/student_profile_repository.dart';
+import 'providers/admin_dashboard_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/organization_applications_provider.dart';
 import 'providers/organization_assessment_provider.dart';
@@ -133,6 +135,17 @@ class MyApp extends StatelessWidget {
         >(
           create: (context) => OrganizationAssessmentProvider(
             repository: context.read<AssessmentRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, AdminDashboardRepository>(
+          update: (_, apiClient, _) =>
+              AdminDashboardRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, AdminDashboardProvider>(
+          create: (context) => AdminDashboardProvider(
+            repository: context.read<AdminDashboardRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,

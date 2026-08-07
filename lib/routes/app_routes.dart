@@ -2,11 +2,12 @@
 /// outside [AppRouter] (e.g. from a button on another screen).
 ///
 /// [login] is included because registration screens navigate back to it
-/// directly. [studentHome]/[organizationHome] are included because
-/// registration navigates there directly on success. Routes that are only
-/// ever reached through the router's own redirect logic (splash and the
-/// admin home screen) don't need an entry here — they stay as private
-/// constants inside `app_router.dart`.
+/// directly. [studentHome]/[organizationHome]/[adminHome] are included
+/// because registration navigates there directly on success, and tests
+/// reference them the same way every other route constant is referenced.
+/// Splash is the only route that's still purely reached through the
+/// router's own redirect logic and never needs an entry here — it stays a
+/// private constant inside `app_router.dart`.
 class AppRoutes {
   AppRoutes._();
 
@@ -27,6 +28,13 @@ class AppRoutes {
 
   static const String studentHome = '/student';
   static const String organizationHome = '/organization';
+
+  /// Admin-only dashboard home — see `AppRouter` for the role gating
+  /// applied to it. Unlike the student/organization home paths, admin has
+  /// no profile-completion concept and no feature-area sub-routes yet
+  /// (Users/Organizations/Skills management are later phases), so this is
+  /// currently the only admin route constant.
+  static const String adminHome = '/admin';
 
   /// Organization-only opportunity management — see `AppRouter` for the
   /// role/profile-completion gating applied to all of these.

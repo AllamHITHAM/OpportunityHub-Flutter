@@ -8,14 +8,17 @@ import 'package:provider/provider.dart';
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
+import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
+import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
+import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
@@ -66,6 +69,16 @@ class _FakeCvRepository extends CvRepository {
 
   @override
   Future<List<CvModel>> getStudentCvs() async => [];
+}
+
+class _FakeAdminDashboardRepository extends AdminDashboardRepository {
+  _FakeAdminDashboardRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<AdminDashboardStatsModel> getDashboardStats() async {
+    throw ApiException('Not used in these router tests');
+  }
 }
 
 void _setViewSize(WidgetTester tester, Size size) {
@@ -119,6 +132,13 @@ Future<void> _pumpAsRole(
     repository: _FakeCvRepository(),
     authProvider: authProvider,
   );
+  // Not exercised by every test in this file, but registered because a
+  // role='admin' request for a non-admin route redirects to
+  // AdminHomeScreen, which now requires this provider to exist in the tree.
+  final adminDashboardProvider = AdminDashboardProvider(
+    repository: _FakeAdminDashboardRepository(),
+    authProvider: authProvider,
+  );
   final appRouter = AppRouter(
     authProvider,
     studentProfileProvider,
@@ -131,6 +151,9 @@ Future<void> _pumpAsRole(
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
         ChangeNotifierProvider<StudentProfileProvider>.value(
           value: studentProfileProvider,
+        ),
+        ChangeNotifierProvider<AdminDashboardProvider>.value(
+          value: adminDashboardProvider,
         ),
         ChangeNotifierProvider<OrganizationProfileProvider>.value(
           value: organizationProfileProvider,
