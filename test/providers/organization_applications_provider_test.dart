@@ -609,4 +609,145 @@ void main() {
       await expectLater(authProvider.logout(), completes);
     },
   );
+
+  group('patchApplication', () {
+    test('a changed application patches the matching list item', () async {
+      repository.listResult = [_application(id: 1, status: 'shortlisted')];
+      await provider.loadApplicationsForOpportunity(5);
+
+      provider.patchApplication(
+        _application(id: 1, status: 'interview_scheduled'),
+      );
+
+      expect(provider.applications.single.status, 'interview_scheduled');
+    });
+
+    test(
+      'a changed application patches selectedApplication when IDs match',
+      () async {
+        repository.listResult = [
+          _application(id: 1, status: 'shortlisted', withOpportunity: true),
+        ];
+        await provider.loadApplicationsForOpportunity(5);
+        await provider.loadApplicationDetails(1);
+        expect(provider.selectedApplication?.status, 'shortlisted');
+
+        provider.patchApplication(
+          _application(id: 1, status: 'interview_scheduled'),
+        );
+
+        expect(provider.selectedApplication?.status, 'interview_scheduled');
+      },
+    );
+
+    test(
+      'list and selectedApplication stay consistent, patched together in one notification',
+      () async {
+        repository.listResult = [
+          _application(id: 1, status: 'shortlisted', withOpportunity: true),
+        ];
+        await provider.loadApplicationsForOpportunity(5);
+        await provider.loadApplicationDetails(1);
+
+        var notifyCount = 0;
+        provider.addListener(() => notifyCount++);
+
+        provider.patchApplication(
+          _application(id: 1, status: 'interview_scheduled'),
+        );
+
+        expect(provider.applications.single.status, 'interview_scheduled');
+        expect(provider.selectedApplication?.status, 'interview_scheduled');
+        expect(notifyCount, 1);
+      },
+    );
+
+    test(
+      'an effectively identical model produces zero notifications',
+      () async {
+        repository.listResult = [_application(id: 1, status: 'shortlisted')];
+        await provider.loadApplicationsForOpportunity(5);
+
+        var notifyCount = 0;
+        provider.addListener(() => notifyCount++);
+
+        // A separately-constructed model carrying the exact same data —
+        // never `identical()` to the one already in `applications`, but
+        // content-equal.
+        provider.patchApplication(_application(id: 1, status: 'shortlisted'));
+
+        expect(notifyCount, 0);
+      },
+    );
+
+    test(
+      'an unrelated application ID produces zero notifications and no change',
+      () async {
+        repository.listResult = [_application(id: 1, status: 'shortlisted')];
+        await provider.loadApplicationsForOpportunity(5);
+
+        var notifyCount = 0;
+        provider.addListener(() => notifyCount++);
+
+        provider.patchApplication(
+          _application(id: 999, status: 'interview_scheduled'),
+        );
+
+        expect(notifyCount, 0);
+        expect(provider.applications.single.id, 1);
+        expect(provider.applications.single.status, 'shortlisted');
+      },
+    );
+
+    test(
+      'patches selectedApplication even when the matching list item is absent',
+      () async {
+        repository.detailsResult = _application(
+          id: 7,
+          status: 'shortlisted',
+          withOpportunity: true,
+        );
+        await provider.loadApplicationDetails(7);
+        expect(provider.selectedApplication?.status, 'shortlisted');
+
+        provider.patchApplication(
+          _application(id: 7, status: 'interview_scheduled'),
+        );
+
+        expect(provider.selectedApplication?.status, 'interview_scheduled');
+        expect(provider.applications, isEmpty);
+      },
+    );
+
+    test(
+      'patches the list item even when it is not the selected application',
+      () async {
+        repository.listResult = [_application(id: 1, status: 'shortlisted')];
+        await provider.loadApplicationsForOpportunity(5);
+        expect(provider.selectedApplication, isNull);
+
+        provider.patchApplication(
+          _application(id: 1, status: 'interview_scheduled'),
+        );
+
+        expect(provider.applications.single.status, 'interview_scheduled');
+        expect(provider.selectedApplication, isNull);
+      },
+    );
+
+    test('does not reload data — no repository call is made', () async {
+      repository.listResult = [_application(id: 1, status: 'shortlisted')];
+      await provider.loadApplicationsForOpportunity(5);
+      final callCountBefore = repository.getApplicationsForOpportunityCallCount;
+
+      provider.patchApplication(
+        _application(id: 1, status: 'interview_scheduled'),
+      );
+
+      expect(
+        repository.getApplicationsForOpportunityCallCount,
+        callCountBefore,
+      );
+    });
+  });
 }

@@ -20,6 +20,33 @@ extension on _AllowedStatus {
   };
 }
 
+/// A focused content comparison for [ApplicationModel], used by
+/// [OrganizationApplicationsProvider.patchApplication]. [ApplicationModel]
+/// has no `==` override, and two separately-parsed responses for the same
+/// underlying row are never `identical()`, so patching needs this instead
+/// of relying on object identity. Compares every field that can
+/// meaningfully change from an organization-facing action (status
+/// review/shortlist/reject, or Assessment creation's `reviewed_at`/status
+/// side effect); nested relations are compared by their own identifying ID
+/// rather than deep field-by-field, which is enough to detect the only
+/// kind of nested change these actions actually produce (nothing here
+/// ever changes which opportunity/CV/applicant an application belongs to).
+bool _sameApplicationData(ApplicationModel a, ApplicationModel b) {
+  return a.id == b.id &&
+      a.studentId == b.studentId &&
+      a.opportunityId == b.opportunityId &&
+      a.cvId == b.cvId &&
+      a.status == b.status &&
+      a.matchScore == b.matchScore &&
+      a.coverLetter == b.coverLetter &&
+      a.appliedAt == b.appliedAt &&
+      a.reviewedAt == b.reviewedAt &&
+      a.createdAt == b.createdAt &&
+      a.updatedAt == b.updatedAt &&
+      a.opportunity?.id == b.opportunity?.id &&
+      a.applicant?.id == b.applicant?.id;
+}
+
 /// Holds the authenticated organization's applicant list (for one
 /// opportunity at a time) and application-detail state, and exposes the
 /// reviewed/shortlist/reject actions to the UI.
@@ -228,6 +255,42 @@ class OrganizationApplicationsProvider extends ChangeNotifier {
       notifyListeners();
     }
     return success;
+  }
+
+  /// Patches a single application's data in place — for use by other
+  /// features (e.g. Assessment creation) that change an [ApplicationModel]
+  /// outside this provider's own [markReviewed]/[shortlist]/[reject].
+  /// Mirrors those methods' existing patch logic (replace the matching
+  /// list entry, replace [selectedApplication] when it's the same one)
+  /// but is additionally guarded so it never reloads data and never
+  /// notifies listeners unless something about the application actually
+  /// changed — [ApplicationModel] has no `==` override, and two
+  /// separately-parsed responses for the same underlying row are never
+  /// `identical()`, so [_sameApplicationData] is used instead of relying
+  /// on object identity.
+  void patchApplication(ApplicationModel updated) {
+    var changed = false;
+
+    final index = applications.indexWhere(
+      (application) => application.id == updated.id,
+    );
+    if (index != -1 && !_sameApplicationData(applications[index], updated)) {
+      applications = [
+        for (final application in applications)
+          if (application.id == updated.id) updated else application,
+      ];
+      changed = true;
+    }
+
+    if (selectedApplication?.id == updated.id &&
+        !_sameApplicationData(selectedApplication!, updated)) {
+      selectedApplication = updated;
+      changed = true;
+    }
+
+    if (changed) {
+      notifyListeners();
+    }
   }
 
   void clearActionError() {

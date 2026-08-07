@@ -53,6 +53,13 @@ class AppRoutes {
   static String organizationApplicationDetails(int id) =>
       '$organizationApplications/$id';
 
+  /// Organization-only Interview scheduling for one application's
+  /// Assessment — nested under the same `organizationApplications` prefix
+  /// that already gates the details route above, so no new router guard
+  /// is needed.
+  static String organizationScheduleInterview(int applicationId) =>
+      '$organizationApplications/$applicationId/assessment/interview';
+
   /// Student-only opportunity browsing — see `AppRouter` for the
   /// role/profile-completion gating applied to these.
   static const String studentOpportunities = '/student/opportunities';

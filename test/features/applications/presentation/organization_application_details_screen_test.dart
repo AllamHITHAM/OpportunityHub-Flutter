@@ -11,13 +11,19 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/applications/presentation/organization_application_details_screen.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
+import 'package:opportunityhub_flutter/features/assessments/presentation/schedule_interview_screen.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/applicant_summary_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/assessment_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
+import 'package:opportunityhub_flutter/models/interview_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
 class _FakeAuthRepository extends AuthRepository {
@@ -87,6 +93,63 @@ ApplicationModel _application({
   );
 }
 
+AssessmentModel _assessment({int id = 1, int applicationId = 1}) {
+  return AssessmentModel(
+    id: id,
+    applicationId: applicationId,
+    type: 'interview',
+    status: 'scheduled',
+    interview: InterviewModel(
+      id: 1,
+      assessmentId: id,
+      interviewType: 'online',
+      status: 'scheduled',
+      decision: 'pending',
+      scheduledAt: DateTime(2026, 9, 1, 14, 30),
+      meetingLink: 'https://meet.example.com/room',
+    ),
+  );
+}
+
+class _FakeAssessmentRepository extends AssessmentRepository {
+  _FakeAssessmentRepository({
+    this.getResult,
+    this.getError,
+    this.getDelay = Duration.zero,
+    this.createResult,
+  }) : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  AssessmentModel? getResult;
+  ApiException? getError;
+  Duration getDelay;
+  int getCallCount = 0;
+
+  AssessmentModel? createResult;
+  InterviewCreateInput? lastInterviewInput;
+
+  @override
+  Future<AssessmentModel?> getAssessmentForApplication(
+    int applicationId,
+  ) async {
+    getCallCount++;
+    if (getDelay > Duration.zero) {
+      await Future<void>.delayed(getDelay);
+    }
+    if (getError != null) throw getError!;
+    return getResult;
+  }
+
+  @override
+  Future<AssessmentModel> createAssessment({
+    required int applicationId,
+    required String type,
+    InterviewCreateInput? interviewInput,
+  }) async {
+    lastInterviewInput = interviewInput;
+    return createResult ?? _assessment(applicationId: applicationId);
+  }
+}
+
 class _FakeApplicationRepository extends ApplicationRepository {
   _FakeApplicationRepository({
     this.detailsResult,
@@ -97,6 +160,7 @@ class _FakeApplicationRepository extends ApplicationRepository {
   ApplicationModel? detailsResult;
   ApiException? detailsError;
   Duration detailsDelay;
+  int getOrganizationApplicationCallCount = 0;
 
   ApplicationModel? statusUpdateResult;
   ApiException? statusUpdateError;
@@ -106,6 +170,7 @@ class _FakeApplicationRepository extends ApplicationRepository {
 
   @override
   Future<ApplicationModel> getOrganizationApplication(int applicationId) async {
+    getOrganizationApplicationCallCount++;
     if (detailsDelay > Duration.zero) {
       await Future<void>.delayed(detailsDelay);
     }
@@ -128,9 +193,40 @@ class _FakeApplicationRepository extends ApplicationRepository {
   }
 }
 
-Future<OrganizationApplicationsProvider> _pumpDetails(
+class _Providers {
+  _Providers({required this.applications, required this.assessment});
+
+  final OrganizationApplicationsProvider applications;
+  final OrganizationAssessmentProvider assessment;
+}
+
+GoRouter _detailsRouter(int applicationId) {
+  return GoRouter(
+    initialLocation: AppRoutes.organizationApplicationDetails(applicationId),
+    routes: [
+      GoRoute(
+        path: '${AppRoutes.organizationApplications}/:id',
+        builder: (_, state) => OrganizationApplicationDetailsScreen(
+          applicationId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      // Registered so the real "Choose Assessment" -> Interview -> Continue
+      // flow can navigate all the way to the real screen in tests that
+      // exercise it, exactly like AppRouter's own route table.
+      GoRoute(
+        path: '${AppRoutes.organizationApplications}/:id/assessment/interview',
+        builder: (_, state) => ScheduleInterviewScreen(
+          applicationId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+    ],
+  );
+}
+
+Future<_Providers> _pumpDetails(
   WidgetTester tester, {
   required _FakeApplicationRepository repository,
+  AssessmentRepository? assessmentRepository,
   int applicationId = 1,
   Size size = const Size(420, 1400),
 }) async {
@@ -140,26 +236,27 @@ Future<OrganizationApplicationsProvider> _pumpDetails(
   addTearDown(tester.view.resetDevicePixelRatio);
 
   final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
-  final provider = OrganizationApplicationsProvider(
+  final applicationsProvider = OrganizationApplicationsProvider(
     repository: repository,
     authProvider: authProvider,
   );
-
-  final router = GoRouter(
-    initialLocation: AppRoutes.organizationApplicationDetails(applicationId),
-    routes: [
-      GoRoute(
-        path: '${AppRoutes.organizationApplications}/:id',
-        builder: (_, state) => OrganizationApplicationDetailsScreen(
-          applicationId: int.parse(state.pathParameters['id']!),
-        ),
-      ),
-    ],
+  final assessmentProvider = OrganizationAssessmentProvider(
+    repository: assessmentRepository ?? _FakeAssessmentRepository(),
+    authProvider: authProvider,
   );
 
+  final router = _detailsRouter(applicationId);
+
   await tester.pumpWidget(
-    ChangeNotifierProvider<OrganizationApplicationsProvider>.value(
-      value: provider,
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<OrganizationApplicationsProvider>.value(
+          value: applicationsProvider,
+        ),
+        ChangeNotifierProvider<OrganizationAssessmentProvider>.value(
+          value: assessmentProvider,
+        ),
+      ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
         routerConfig: router,
@@ -168,7 +265,10 @@ Future<OrganizationApplicationsProvider> _pumpDetails(
   );
   await tester.pumpAndSettle();
 
-  return provider;
+  return _Providers(
+    applications: applicationsProvider,
+    assessment: assessmentProvider,
+  );
 }
 
 void main() {
@@ -185,25 +285,26 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
-    final provider = OrganizationApplicationsProvider(
+    final applicationsProvider = OrganizationApplicationsProvider(
       repository: repository,
       authProvider: authProvider,
     );
-    final router = GoRouter(
-      initialLocation: AppRoutes.organizationApplicationDetails(1),
-      routes: [
-        GoRoute(
-          path: '${AppRoutes.organizationApplications}/:id',
-          builder: (_, state) => OrganizationApplicationDetailsScreen(
-            applicationId: int.parse(state.pathParameters['id']!),
-          ),
-        ),
-      ],
+    final assessmentProvider = OrganizationAssessmentProvider(
+      repository: _FakeAssessmentRepository(),
+      authProvider: authProvider,
     );
+    final router = _detailsRouter(1);
 
     await tester.pumpWidget(
-      ChangeNotifierProvider<OrganizationApplicationsProvider>.value(
-        value: provider,
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<OrganizationApplicationsProvider>.value(
+            value: applicationsProvider,
+          ),
+          ChangeNotifierProvider<OrganizationAssessmentProvider>.value(
+            value: assessmentProvider,
+          ),
+        ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,
           routerConfig: router,
@@ -213,7 +314,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(provider.isLoadingDetails, isTrue);
+    expect(applicationsProvider.isLoadingDetails, isTrue);
 
     await tester.pumpAndSettle();
   });
@@ -380,16 +481,40 @@ void main() {
     expect(find.text('Reject'), findsOneWidget);
   });
 
-  testWidgets('Shortlisted status shows only Reject', (tester) async {
-    final repository = _FakeApplicationRepository(
-      detailsResult: _application(status: 'shortlisted'),
-    );
-    await _pumpDetails(tester, repository: repository);
+  testWidgets(
+    'Shortlisted status shows Reject and Choose Assessment when no assessment exists',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'shortlisted'),
+      );
+      await _pumpDetails(tester, repository: repository);
 
-    expect(find.text('Mark Reviewed'), findsNothing);
-    expect(find.text('Shortlist'), findsNothing);
-    expect(find.text('Reject'), findsOneWidget);
-  });
+      expect(find.text('Mark Reviewed'), findsNothing);
+      expect(find.text('Shortlist'), findsNothing);
+      expect(find.text('Reject'), findsOneWidget);
+      expect(find.text('Choose Assessment'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Shortlisted status hides Choose Assessment when an assessment already exists',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'shortlisted'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _assessment(applicationId: 1),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Choose Assessment'), findsNothing);
+      expect(find.text('Reject'), findsOneWidget);
+    },
+  );
 
   testWidgets('Rejected status shows no action buttons', (tester) async {
     final repository = _FakeApplicationRepository(
@@ -425,6 +550,128 @@ void main() {
     expect(find.text('Mark Reviewed'), findsNothing);
     expect(find.text('Shortlist'), findsNothing);
     expect(find.text('Reject'), findsNothing);
+  });
+
+  testWidgets(
+    'interview_scheduled with an assessment shows the read-only Assessment section',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'interview_scheduled'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _assessment(applicationId: 1),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Assessment'), findsOneWidget);
+      expect(find.text('Online'), findsOneWidget); // interview type label
+      expect(find.text('https://meet.example.com/room'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'interview_scheduled with no assessment record shows a controlled warning',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'interview_scheduled'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(getResult: null);
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Assessment Not Found'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Assessment section shows a compact spinner while loading', (
+    tester,
+  ) async {
+    final repository = _FakeApplicationRepository(
+      detailsResult: _application(status: 'interview_scheduled'),
+    );
+    final assessmentRepository = _FakeAssessmentRepository(
+      getResult: _assessment(applicationId: 1),
+      getDelay: const Duration(milliseconds: 200),
+    );
+
+    tester.view.physicalSize = const Size(420, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+    final applicationsProvider = OrganizationApplicationsProvider(
+      repository: repository,
+      authProvider: authProvider,
+    );
+    final assessmentProvider = OrganizationAssessmentProvider(
+      repository: assessmentRepository,
+      authProvider: authProvider,
+    );
+    final router = _detailsRouter(1);
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<OrganizationApplicationsProvider>.value(
+            value: applicationsProvider,
+          ),
+          ChangeNotifierProvider<OrganizationAssessmentProvider>.value(
+            value: assessmentProvider,
+          ),
+        ],
+        child: MaterialApp.router(
+          theme: AppTheme.lightTheme,
+          routerConfig: router,
+        ),
+      ),
+    );
+    // Two pumps: one for the initial frame, one for the post-frame callback
+    // that kicks off both loads — same pattern as the top-level "Loading
+    // state" test above.
+    await tester.pump();
+    await tester.pump();
+
+    expect(assessmentProvider.isLoading, isTrue);
+    expect(find.byType(CircularProgressIndicator), findsWidgets);
+
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Assessment section shows a backend error with a working retry', (
+    tester,
+  ) async {
+    final repository = _FakeApplicationRepository(
+      detailsResult: _application(status: 'interview_scheduled'),
+    );
+    final assessmentRepository = _FakeAssessmentRepository(
+      getError: ApiException('Could not load the assessment'),
+    );
+    await _pumpDetails(
+      tester,
+      repository: repository,
+      assessmentRepository: assessmentRepository,
+    );
+
+    expect(find.text('Could not load the assessment'), findsOneWidget);
+    expect(assessmentRepository.getCallCount, 1);
+
+    assessmentRepository.getError = null;
+    assessmentRepository.getResult = _assessment(applicationId: 1);
+    await tester.tap(find.text('Try Again'));
+    await tester.pumpAndSettle();
+
+    expect(assessmentRepository.getCallCount, 2);
+    expect(find.text('Assessment'), findsOneWidget);
+    expect(find.text('Could not load the assessment'), findsNothing);
   });
 
   testWidgets('accepted status is read-only — no Phase 3D actions', (
@@ -572,4 +819,85 @@ void main() {
 
     await tester.pumpAndSettle();
   });
+
+  testWidgets(
+    'Choosing Interview, scheduling it, and returning updates status and '
+    'Assessment display immediately, without a details reload',
+    (tester) async {
+      final application = _application(id: 1, status: 'shortlisted');
+      final repository = _FakeApplicationRepository(detailsResult: application);
+      final assessmentRepository = _FakeAssessmentRepository(
+        createResult: AssessmentModel(
+          id: 9,
+          applicationId: 1,
+          type: 'interview',
+          status: 'scheduled',
+          application: _application(id: 1, status: 'interview_scheduled'),
+          interview: InterviewModel(
+            id: 9,
+            assessmentId: 9,
+            interviewType: 'online',
+            status: 'scheduled',
+            decision: 'pending',
+          ),
+        ),
+      );
+
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+      expect(repository.getOrganizationApplicationCallCount, 1);
+
+      await tester.tap(find.text('Choose Assessment'));
+      await tester.pumpAndSettle();
+
+      // Interview is preselected by ChooseAssessmentTypeSheet -- Continue
+      // navigates straight to the real Schedule Interview screen.
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Schedule Interview'), findsWidgets);
+
+      await tester.tap(find.byKey(const Key('scheduledDateField')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('scheduledTimeField')));
+      await tester.pumpAndSettle();
+      final timeFields = find.descendant(
+        of: find.byType(Dialog),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(timeFields.at(0), '11');
+      await tester.enterText(timeFields.at(1), '59');
+      await tester.pumpAndSettle();
+      final pm = find.text('PM');
+      if (pm.evaluate().isNotEmpty) {
+        await tester.tap(pm.first);
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Meeting Link'),
+        'https://meet.example.com/room',
+      );
+      await tester.tap(
+        find.widgetWithText(ElevatedButton, 'Schedule Interview'),
+      );
+      await tester.pumpAndSettle();
+
+      // Back on Application Details -- updated in place from the created
+      // Assessment's own application payload, not a fresh network fetch.
+      expect(find.text('Assessment created successfully'), findsOneWidget);
+      expect(find.text('Interview Scheduled'), findsOneWidget);
+      expect(find.text('Assessment'), findsOneWidget);
+      expect(find.text('Choose Assessment'), findsNothing);
+      expect(repository.getOrganizationApplicationCallCount, 1);
+    },
+  );
 }

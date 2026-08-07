@@ -15,6 +15,7 @@ import '../features/applications/presentation/organization_applicants_screen.dar
 import '../features/applications/presentation/organization_application_details_screen.dart';
 import '../features/applications/presentation/student_application_details_screen.dart';
 import '../features/applications/presentation/student_applications_screen.dart';
+import '../features/assessments/presentation/schedule_interview_screen.dart';
 import '../features/cv/presentation/student_cv_screen.dart';
 import '../features/opportunities/presentation/opportunity_form_screen.dart';
 import '../features/opportunities/presentation/organization_opportunities_screen.dart';
@@ -187,6 +188,13 @@ class AppRouter {
         GoRoute(
           path: '${AppRoutes.organizationApplications}/:id',
           builder: (_, state) => OrganizationApplicationDetailsScreen(
+            applicationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
+        GoRoute(
+          path:
+              '${AppRoutes.organizationApplications}/:id/assessment/interview',
+          builder: (_, state) => ScheduleInterviewScreen(
             applicationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
           ),
         ),

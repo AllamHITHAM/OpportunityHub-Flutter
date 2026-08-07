@@ -9,15 +9,19 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/assessment_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
@@ -75,6 +79,27 @@ class _FakeApplicationRepository extends ApplicationRepository {
   }
 }
 
+class _FakeAssessmentRepository extends AssessmentRepository {
+  _FakeAssessmentRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<AssessmentModel?> getAssessmentForApplication(
+    int applicationId,
+  ) async {
+    return null;
+  }
+
+  @override
+  Future<AssessmentModel> createAssessment({
+    required int applicationId,
+    required String type,
+    InterviewCreateInput? interviewInput,
+  }) async {
+    throw ApiException('Not used in router tests');
+  }
+}
+
 void _setViewSize(WidgetTester tester, Size size) {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -127,6 +152,10 @@ Future<void> _pumpAsRole(
     repository: _FakeApplicationRepository(),
     authProvider: authProvider,
   );
+  final assessmentProvider = OrganizationAssessmentProvider(
+    repository: _FakeAssessmentRepository(),
+    authProvider: authProvider,
+  );
   final appRouter = AppRouter(
     authProvider,
     studentProfileProvider,
@@ -145,6 +174,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<OrganizationApplicationsProvider>.value(
           value: applicationsProvider,
+        ),
+        ChangeNotifierProvider<OrganizationAssessmentProvider>.value(
+          value: assessmentProvider,
         ),
       ],
       child: MaterialApp.router(
@@ -218,6 +250,68 @@ void main() {
     expect(find.text('Login'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'Unauthenticated users are redirected to login from the Schedule Interview route',
+    (tester) async {
+      _setViewSize(tester, const Size(420, 1400));
+
+      final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+      final studentProfileProvider = StudentProfileProvider(
+        repository: _FakeStudentProfileRepository(),
+        authProvider: authProvider,
+      );
+      final organizationProfileProvider = OrganizationProfileProvider(
+        repository: _FakeOrganizationProfileRepository(),
+        authProvider: authProvider,
+      );
+      final applicationsProvider = OrganizationApplicationsProvider(
+        repository: _FakeApplicationRepository(),
+        authProvider: authProvider,
+      );
+      final assessmentProvider = OrganizationAssessmentProvider(
+        repository: _FakeAssessmentRepository(),
+        authProvider: authProvider,
+      );
+      final appRouter = AppRouter(
+        authProvider,
+        studentProfileProvider,
+        organizationProfileProvider,
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+            ChangeNotifierProvider<StudentProfileProvider>.value(
+              value: studentProfileProvider,
+            ),
+            ChangeNotifierProvider<OrganizationProfileProvider>.value(
+              value: organizationProfileProvider,
+            ),
+            ChangeNotifierProvider<OrganizationApplicationsProvider>.value(
+              value: applicationsProvider,
+            ),
+            ChangeNotifierProvider<OrganizationAssessmentProvider>.value(
+              value: assessmentProvider,
+            ),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            routerConfig: appRouter.router,
+          ),
+        ),
+      );
+
+      appRouter.router.go(AppRoutes.organizationScheduleInterview(1));
+      await authProvider.initialize();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Schedule Interview'), findsNothing);
+      expect(find.text('Login'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('An approved organization can open the applicants route', (
     tester,
@@ -348,4 +442,77 @@ void main() {
     // frames never stop scheduling, e.g. from a redirect loop).
     expect(find.text('No Applicants Yet'), findsOneWidget);
   });
+
+  testWidgets(
+    'An approved organization can open the Schedule Interview route directly by URL',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: AppRoutes.organizationScheduleInterview(123),
+        organizationProfile: _approvedProfile,
+      );
+
+      expect(find.text('Schedule Interview'), findsWidgets);
+      expect(find.text('Interview Type'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Students cannot access the Schedule Interview route', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'student',
+      initialPath: AppRoutes.organizationScheduleInterview(1),
+    );
+
+    expect(find.text('Schedule Interview'), findsNothing);
+    expect(find.text('Role: Student'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Admins cannot access the Schedule Interview route', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: AppRoutes.organizationScheduleInterview(1),
+    );
+
+    expect(find.text('Schedule Interview'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'An organization with an incomplete profile is not routed to Schedule Interview',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: AppRoutes.organizationScheduleInterview(1),
+        organizationProfile: null,
+      );
+
+      expect(find.text('Schedule Interview'), findsNothing);
+      expect(find.text('Company Profile Setup Incomplete'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'A malformed application ID on the Schedule Interview route does not crash',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath:
+            '${AppRoutes.organizationApplications}/not-a-number/assessment/interview',
+        organizationProfile: _approvedProfile,
+      );
+
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

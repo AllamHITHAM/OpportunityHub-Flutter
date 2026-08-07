@@ -5,17 +5,23 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../models/application_model.dart';
+import '../../../models/assessment_model.dart';
 import '../../../providers/organization_applications_provider.dart';
+import '../../../providers/organization_assessment_provider.dart';
+import '../../assessments/presentation/assessment_display.dart';
+import '../../assessments/presentation/choose_assessment_type_sheet.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
 import 'application_display.dart';
 
-/// The three Phase 3D status actions available for a given application
-/// status. Deliberately does not include interview/accepted actions —
-/// applications already at `interview_scheduled`/`accepted` are read-only
-/// in this phase, and `rejected`/`withdrawn` expose no forward actions.
-enum _StatusAction { markReviewed, shortlist, reject }
+/// The status actions available for a given application status/assessment
+/// combination. `chooseAssessment` (Phase 4B-1) only ever appears for
+/// `shortlisted` applications that don't already have an assessment —
+/// `interview_scheduled`/`accepted` remain read-only for status actions
+/// (a read-only Assessment section covers `interview_scheduled` instead),
+/// and `rejected`/`withdrawn` expose no forward actions.
+enum _StatusAction { markReviewed, shortlist, reject, chooseAssessment }
 
-List<_StatusAction> _actionsFor(String status) {
+List<_StatusAction> _actionsFor(String status, {required bool hasAssessment}) {
   switch (status) {
     case 'pending':
       return [
@@ -26,11 +32,15 @@ List<_StatusAction> _actionsFor(String status) {
     case 'reviewed':
       return [_StatusAction.shortlist, _StatusAction.reject];
     case 'shortlisted':
-      return [_StatusAction.reject];
+      return [
+        if (!hasAssessment) _StatusAction.chooseAssessment,
+        _StatusAction.reject,
+      ];
     default:
-      // rejected, withdrawn, interview_scheduled, accepted — no Phase 3D
+      // rejected, withdrawn, interview_scheduled, accepted — no status
       // actions; this phase never downgrades or exposes further controls
-      // for any of them.
+      // for any of them. interview_scheduled instead gets a read-only
+      // Assessment section (see _AssessmentSection).
       return [];
   }
 }
@@ -66,6 +76,13 @@ class _OrganizationApplicationDetailsScreenState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<OrganizationApplicationsProvider>().loadApplicationDetails(
+        widget.applicationId,
+      );
+      // Assessment loading is independent of the application details
+      // fetch above and must never block the rest of this screen — see
+      // _AssessmentSection, which renders its own section-level
+      // loading/error state.
+      context.read<OrganizationAssessmentProvider>().loadForApplication(
         widget.applicationId,
       );
     });
@@ -139,6 +156,7 @@ class _OrganizationApplicationDetailsScreenState
           ),
           const SizedBox(height: AppSpacing.lg),
           _StatusActionsSection(application: application),
+          _AssessmentSection(application: application),
           const SizedBox(height: AppSpacing.lg),
           AppCard(
             child: Column(
@@ -327,8 +345,15 @@ class _StatusActionsSectionState extends State<_StatusActionsSection> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<OrganizationApplicationsProvider>();
+    final assessmentProvider = context.watch<OrganizationAssessmentProvider>();
     final isBusy = provider.isUpdating(widget.application.id);
-    final actions = _actionsFor(widget.application.status);
+    final hasAssessment = assessmentProvider.hasAssessmentFor(
+      widget.application.id,
+    );
+    final actions = _actionsFor(
+      widget.application.status,
+      hasAssessment: hasAssessment,
+    );
 
     if (actions.isEmpty) {
       return const SizedBox.shrink();
@@ -365,6 +390,16 @@ class _StatusActionsSectionState extends State<_StatusActionsSection> {
           ),
           const SizedBox(height: AppSpacing.sm),
         ],
+        if (actions.contains(_StatusAction.chooseAssessment)) ...[
+          PrimaryButton(
+            label: 'Choose Assessment',
+            onPressed: () => showChooseAssessmentTypeSheet(
+              context,
+              applicationId: widget.application.id,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
         if (actions.contains(_StatusAction.reject))
           DangerButton(
             label: 'Reject',
@@ -372,6 +407,182 @@ class _StatusActionsSectionState extends State<_StatusActionsSection> {
             onPressed: isBusy ? null : () => _confirmReject(provider),
           ),
       ],
+    );
+  }
+}
+
+/// Read-only Assessment display for an application that has one, plus the
+/// controlled "backend says interview_scheduled but no assessment record
+/// exists" recovery state. Renders nothing for every other
+/// status/assessment combination — in particular, a shortlisted
+/// application with no assessment yet shows nothing here; the "Choose
+/// Assessment" action in [_StatusActionsSection] is the only affordance
+/// for that case, so this section never duplicates it with an empty card.
+class _AssessmentSection extends StatelessWidget {
+  const _AssessmentSection({required this.application});
+
+  final ApplicationModel application;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<OrganizationAssessmentProvider>();
+    final applicationId = application.id;
+    final isThisOne = provider.loadedApplicationId == applicationId;
+
+    // Only show a loading spinner when there's nothing already loaded for
+    // this exact application to keep showing in the meantime — a
+    // force-refresh of an already-displayed assessment shouldn't cause it
+    // to disappear and flash a spinner in its place.
+    if (provider.isLoading && !(isThisOne && provider.assessment != null)) {
+      return const Padding(
+        padding: EdgeInsets.only(top: AppSpacing.md),
+        child: AppLoading(compact: true),
+      );
+    }
+
+    if (isThisOne && provider.assessment != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: _AssessmentDetailsCard(assessment: provider.assessment!),
+      );
+    }
+
+    if (isThisOne && provider.errorMessage != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: AppErrorView(
+          compact: true,
+          message: provider.errorMessage!,
+          onRetry: () =>
+              provider.loadForApplication(applicationId, forceRefresh: true),
+        ),
+      );
+    }
+
+    if (application.status == 'interview_scheduled') {
+      // A genuine backend inconsistency (the application says an
+      // interview was scheduled, but no assessment record backs it up) —
+      // a controlled warning with retry, deliberately not another
+      // creation button, since automatically offering to create a second
+      // assessment here would risk exactly the duplicate this phase must
+      // prevent.
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: AppErrorView(
+          compact: true,
+          icon: Icons.warning_amber_rounded,
+          title: 'Assessment Not Found',
+          message:
+              'This application is marked Interview Scheduled, but no '
+              'assessment record could be found.',
+          onRetry: () =>
+              provider.loadForApplication(applicationId, forceRefresh: true),
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+/// The read-only fields of an existing [AssessmentModel] — Interview
+/// detail is shown only when [AssessmentModel.interview] is present
+/// (always true for `type == 'interview'` once created, per this phase's
+/// backend contract).
+class _AssessmentDetailsCard extends StatelessWidget {
+  const _AssessmentDetailsCard({required this.assessment});
+
+  final AssessmentModel assessment;
+
+  @override
+  Widget build(BuildContext context) {
+    final interview = assessment.interview;
+    final notes = cleanDisplayText(interview?.notes);
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SectionHeader(title: 'Assessment'),
+          OpportunityDetailRow(
+            label: 'Type',
+            value: assessmentTypeLabels[assessment.type] ?? assessment.type,
+          ),
+          OpportunityDetailRow(
+            label: 'Status',
+            value:
+                assessmentStatusLabels[assessment.status] ?? assessment.status,
+          ),
+          if (assessment.result != null)
+            OpportunityDetailRow(
+              label: 'Result',
+              value:
+                  assessmentResultLabels[assessment.result] ??
+                  assessment.result!,
+            ),
+          if (interview != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            OpportunityDetailRow(
+              label: 'Interview Type',
+              value:
+                  interviewTypeLabels[interview.interviewType] ??
+                  interview.interviewType,
+            ),
+            OpportunityDetailRow(
+              label: 'Scheduled Date',
+              value: interview.scheduledAt != null
+                  ? formatDate(interview.scheduledAt!)
+                  : 'Not specified',
+            ),
+            OpportunityDetailRow(
+              label: 'Scheduled Time',
+              value: interview.scheduledAt != null
+                  ? formatTime(interview.scheduledAt!)
+                  : 'Not specified',
+            ),
+            if (interview.durationMinutes != null)
+              OpportunityDetailRow(
+                label: 'Duration',
+                value: '${interview.durationMinutes} minutes',
+              ),
+            if (cleanDisplayText(interview.meetingLink) != null)
+              OpportunityDetailRow(
+                label: 'Meeting Link',
+                value: cleanDisplayText(interview.meetingLink)!,
+              ),
+            if (cleanDisplayText(interview.location) != null)
+              OpportunityDetailRow(
+                label: 'Location',
+                value: cleanDisplayText(interview.location)!,
+              ),
+            if (cleanDisplayText(interview.interviewerName) != null)
+              OpportunityDetailRow(
+                label: 'Interviewer Name',
+                value: cleanDisplayText(interview.interviewerName)!,
+              ),
+            if (cleanDisplayText(interview.interviewerEmail) != null)
+              OpportunityDetailRow(
+                label: 'Interviewer Email',
+                value: cleanDisplayText(interview.interviewerEmail)!,
+              ),
+            OpportunityDetailRow(
+              label: 'Interview Status',
+              value:
+                  interviewStatusLabels[interview.status] ?? interview.status,
+            ),
+            OpportunityDetailRow(
+              label: 'Decision',
+              value:
+                  interviewDecisionLabels[interview.decision] ??
+                  interview.decision,
+            ),
+            if (notes != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Text(notes, style: Theme.of(context).textTheme.bodyMedium),
+            ],
+          ],
+        ],
+      ),
     );
   }
 }
