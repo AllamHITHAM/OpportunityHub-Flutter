@@ -11,12 +11,16 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
+import 'package:opportunityhub_flutter/features/admin/data/admin_users_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_home_screen.dart';
+import 'package:opportunityhub_flutter/features/admin/presentation/admin_users_screen.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
+import 'package:opportunityhub_flutter/providers/admin_users_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository()
@@ -92,11 +96,35 @@ class _FakeAdminDashboardRepository extends AdminDashboardRepository {
   }
 }
 
+class _FakeAdminUsersRepository extends AdminUsersRepository {
+  _FakeAdminUsersRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<UserModel>> getUsers() async => [];
+}
+
 class _Providers {
   _Providers({required this.auth, required this.dashboard});
 
   final AuthProvider auth;
   final AdminDashboardProvider dashboard;
+}
+
+/// A router with both /admin and /admin/users registered, matching the
+/// real AppRouter's route table — needed now that "Manage Users" actually
+/// navigates there.
+GoRouter _adminRouter() {
+  return GoRouter(
+    initialLocation: '/admin',
+    routes: [
+      GoRoute(path: '/admin', builder: (_, _) => const AdminHomeScreen()),
+      GoRoute(
+        path: AppRoutes.adminUsers,
+        builder: (_, _) => const AdminUsersScreen(),
+      ),
+    ],
+  );
 }
 
 Future<_Providers> _pumpScreen(
@@ -115,13 +143,12 @@ Future<_Providers> _pumpScreen(
     repository: repository,
     authProvider: authProvider,
   );
-
-  final router = GoRouter(
-    initialLocation: '/admin',
-    routes: [
-      GoRoute(path: '/admin', builder: (_, _) => const AdminHomeScreen()),
-    ],
+  final usersProvider = AdminUsersProvider(
+    repository: _FakeAdminUsersRepository(),
+    authProvider: authProvider,
   );
+
+  final router = _adminRouter();
 
   await tester.pumpWidget(
     MultiProvider(
@@ -130,6 +157,7 @@ Future<_Providers> _pumpScreen(
         ChangeNotifierProvider<AdminDashboardProvider>.value(
           value: dashboardProvider,
         ),
+        ChangeNotifierProvider<AdminUsersProvider>.value(value: usersProvider),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -378,7 +406,7 @@ void main() {
   });
 
   testWidgets(
-    'Manage Users/Organizations/Skills are shown as Coming Soon and never navigate',
+    'Manage Organizations/Skills are shown as Coming Soon and never navigate',
     (tester) async {
       final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
       await _pumpScreen(tester, repository: repository);
@@ -386,11 +414,10 @@ void main() {
       expect(find.text('Manage Users'), findsOneWidget);
       expect(find.text('Manage Organizations'), findsOneWidget);
       expect(find.text('Manage Skills'), findsOneWidget);
-      expect(find.text('Coming Soon'), findsNWidgets(3));
+      // Only Organizations and Skills remain "Coming Soon" — Manage Users
+      // is enabled this phase.
+      expect(find.text('Coming Soon'), findsNWidgets(2));
 
-      await tester.ensureVisible(find.text('Manage Users'));
-      await tester.tap(find.text('Manage Users'));
-      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Manage Organizations'));
       await tester.tap(find.text('Manage Organizations'));
       await tester.pumpAndSettle();
@@ -405,4 +432,24 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('Manage Users is enabled and navigates to /admin/users', (
+    tester,
+  ) async {
+    final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+    await _pumpScreen(tester, repository: repository);
+
+    expect(find.text('Manage Users'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Manage Users'));
+    await tester.tap(find.text('Manage Users'));
+    await tester.pumpAndSettle();
+
+    // Now on AdminUsersScreen -- its own AppBar title is also "Manage
+    // Users", so this only proves navigation happened when combined with
+    // the dashboard's own title being gone.
+    expect(find.text('Manage Users'), findsOneWidget);
+    expect(find.text('Admin Dashboard'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

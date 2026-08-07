@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/admin/presentation/admin_home_screen.dart';
+import '../features/admin/presentation/admin_users_screen.dart';
 import '../features/auth/presentation/account_type_selection_screen.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/auth/presentation/organization_profile_setup_screen.dart';
@@ -34,6 +35,13 @@ const _loginPath = AppRoutes.login;
 const _studentPath = AppRoutes.studentHome;
 const _organizationPath = AppRoutes.organizationHome;
 const _adminPath = '/admin';
+
+/// Admin-only feature area — not onboarding, but off-limits to every
+/// other role. Matched by prefix (not just the exact `_adminPath` the
+/// [_isHomePath] check already covers) so sub-routes like
+/// [AppRoutes.adminUsers] are protected too, the same pattern already
+/// applied to every other role-scoped feature area below.
+const _adminPathPrefix = _adminPath;
 
 /// Routes reachable without being signed in — i.e. [_loginPath] plus the
 /// account-type selection and registration screens added for the sign-up
@@ -146,6 +154,10 @@ class AppRouter {
           builder: (_, _) => const OrganizationHomeScreen(),
         ),
         GoRoute(path: _adminPath, builder: (_, _) => const AdminHomeScreen()),
+        GoRoute(
+          path: AppRoutes.adminUsers,
+          builder: (_, _) => const AdminUsersScreen(),
+        ),
         // The literal "/new" segment is declared before the parameterized
         // "/:id" route below so it's never mistaken for an ID.
         GoRoute(
@@ -294,6 +306,14 @@ class AppRouter {
     // onboarding, but still off-limits to every other role.
     if (role != 'organization' &&
         currentPath.startsWith(_organizationApplicationsPathPrefix)) {
+      return homePath;
+    }
+
+    // Admin management screens (Users, and later Organizations/Skills) —
+    // not onboarding, but still off-limits to every other role. The exact
+    // `_adminPath` match is already covered by the `_isHomePath` check
+    // above; this additionally covers its sub-routes.
+    if (role != 'admin' && currentPath.startsWith(_adminPathPrefix)) {
       return homePath;
     }
 

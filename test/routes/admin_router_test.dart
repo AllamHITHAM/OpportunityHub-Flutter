@@ -11,6 +11,7 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
+import 'package:opportunityhub_flutter/features/admin/data/admin_users_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
@@ -19,6 +20,7 @@ import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
+import 'package:opportunityhub_flutter/providers/admin_users_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
@@ -91,6 +93,14 @@ class _FakeAdminDashboardRepository extends AdminDashboardRepository {
   }
 }
 
+class _FakeAdminUsersRepository extends AdminUsersRepository {
+  _FakeAdminUsersRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<UserModel>> getUsers() async => [];
+}
+
 void _setViewSize(WidgetTester tester, Size size) {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -151,6 +161,10 @@ Future<void> _pumpAsRole(
     repository: _FakeAdminDashboardRepository(loadError: dashboardError),
     authProvider: authProvider,
   );
+  final adminUsersProvider = AdminUsersProvider(
+    repository: _FakeAdminUsersRepository(),
+    authProvider: authProvider,
+  );
   final appRouter = AppRouter(
     authProvider,
     studentProfileProvider,
@@ -169,6 +183,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<AdminDashboardProvider>.value(
           value: adminDashboardProvider,
+        ),
+        ChangeNotifierProvider<AdminUsersProvider>.value(
+          value: adminUsersProvider,
         ),
       ],
       child: MaterialApp.router(
@@ -316,5 +333,118 @@ void main() {
     // Settling completed without a pumpAndSettle timeout (which throws if
     // frames never stop scheduling, e.g. from a redirect loop).
     expect(find.text('Admin Dashboard'), findsOneWidget);
+  });
+
+  testWidgets('An authenticated active admin can open /admin/users', (
+    tester,
+  ) async {
+    await _pumpAsRole(tester, role: 'admin', initialPath: AppRoutes.adminUsers);
+
+    expect(find.text('Manage Users'), findsOneWidget);
+    expect(find.text('No Users Yet'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Direct URL /admin/users works for an admin', (tester) async {
+    await _pumpAsRole(tester, role: 'admin', initialPath: '/admin/users');
+
+    expect(find.text('Manage Users'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Students cannot access /admin/users', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'student',
+      initialPath: AppRoutes.adminUsers,
+    );
+
+    expect(find.text('Manage Users'), findsNothing);
+    expect(find.text('Role: Student'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Organizations cannot access /admin/users', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'organization',
+      initialPath: AppRoutes.adminUsers,
+    );
+
+    expect(find.text('Manage Users'), findsNothing);
+    expect(find.text('Role: Organization'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'An unauthenticated guest is redirected to login from /admin/users',
+    (tester) async {
+      _setViewSize(tester, const Size(420, 1400));
+
+      final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+      final studentProfileProvider = StudentProfileProvider(
+        repository: _FakeStudentProfileRepository(),
+        authProvider: authProvider,
+      );
+      final organizationProfileProvider = OrganizationProfileProvider(
+        repository: _FakeOrganizationProfileRepository(),
+        authProvider: authProvider,
+      );
+      final adminDashboardProvider = AdminDashboardProvider(
+        repository: _FakeAdminDashboardRepository(),
+        authProvider: authProvider,
+      );
+      final adminUsersProvider = AdminUsersProvider(
+        repository: _FakeAdminUsersRepository(),
+        authProvider: authProvider,
+      );
+      final appRouter = AppRouter(
+        authProvider,
+        studentProfileProvider,
+        organizationProfileProvider,
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+            ChangeNotifierProvider<StudentProfileProvider>.value(
+              value: studentProfileProvider,
+            ),
+            ChangeNotifierProvider<OrganizationProfileProvider>.value(
+              value: organizationProfileProvider,
+            ),
+            ChangeNotifierProvider<AdminDashboardProvider>.value(
+              value: adminDashboardProvider,
+            ),
+            ChangeNotifierProvider<AdminUsersProvider>.value(
+              value: adminUsersProvider,
+            ),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            routerConfig: appRouter.router,
+          ),
+        ),
+      );
+
+      appRouter.router.go(AppRoutes.adminUsers);
+      await authProvider.initialize();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Manage Users'), findsNothing);
+      expect(find.text('Login'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('No redirect loop occurs for the admin users route', (
+    tester,
+  ) async {
+    await _pumpAsRole(tester, role: 'admin', initialPath: AppRoutes.adminUsers);
+
+    // Settling completed without a pumpAndSettle timeout (which throws if
+    // frames never stop scheduling, e.g. from a redirect loop).
+    expect(find.text('Manage Users'), findsOneWidget);
   });
 }

@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../providers/admin_dashboard_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../routes/app_routes.dart';
 
-/// The Admin dashboard — platform-wide statistics, plus (disabled, "Coming
-/// Soon") entries for the Users/Organizations/Skills management areas that
-/// later phases will implement. This phase implements Dashboard only.
+/// The Admin dashboard — platform-wide statistics, plus a navigation entry
+/// to Manage Users (implemented) and (disabled, "Coming Soon") entries for
+/// the Organizations/Skills management areas that later phases will
+/// implement.
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
 
@@ -122,17 +125,18 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             const SizedBox(height: AppSpacing.lg),
             const SectionHeader(title: 'Manage'),
             const SizedBox(height: AppSpacing.xs),
-            const _ComingSoonEntry(
+            _ManageEntry(
               icon: Icons.people_outline_rounded,
               label: 'Manage Users',
+              onTap: () => context.push(AppRoutes.adminUsers),
             ),
             const SizedBox(height: AppSpacing.sm),
-            const _ComingSoonEntry(
+            const _ManageEntry(
               icon: Icons.business_outlined,
               label: 'Manage Organizations',
             ),
             const SizedBox(height: AppSpacing.sm),
-            const _ComingSoonEntry(
+            const _ManageEntry(
               icon: Icons.psychology_outlined,
               label: 'Manage Skills',
             ),
@@ -262,33 +266,41 @@ class _StatTile extends StatelessWidget {
   }
 }
 
-/// A disabled placeholder for a management area not implemented yet (Users,
-/// Organizations, Skills — later phases). Deliberately has no `onTap` at
-/// all, so it can never navigate to a route that doesn't exist yet.
-class _ComingSoonEntry extends StatelessWidget {
-  const _ComingSoonEntry({required this.icon, required this.label});
+/// A navigation entry for a management area. With [onTap] omitted, this
+/// renders as a disabled "Coming Soon" placeholder for an area not
+/// implemented yet (Organizations, Skills — later phases) — deliberately
+/// has no `onTap` at all in that case, so it can never navigate to a route
+/// that doesn't exist yet. With [onTap] provided (Users, this phase), it
+/// renders as a normal enabled, tappable entry instead.
+class _ManageEntry extends StatelessWidget {
+  const _ManageEntry({required this.icon, required this.label, this.onTap});
 
   final IconData icon;
   final String label;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final enabled = onTap != null;
+    final color = enabled ? null : Theme.of(context).disabledColor;
 
     return AppCard(
+      onTap: onTap,
       child: Row(
         children: [
-          Icon(icon, color: Theme.of(context).disabledColor),
+          Icon(icon, color: color),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               label,
-              style: textTheme.titleSmall?.copyWith(
-                color: Theme.of(context).disabledColor,
-              ),
+              style: textTheme.titleSmall?.copyWith(color: color),
             ),
           ),
-          const StatusChip(label: 'Coming Soon', compact: true),
+          if (enabled)
+            const Icon(Icons.chevron_right_rounded)
+          else
+            const StatusChip(label: 'Coming Soon', compact: true),
         ],
       ),
     );
