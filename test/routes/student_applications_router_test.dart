@@ -10,11 +10,13 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/assessment_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
@@ -22,6 +24,7 @@ import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_assessment_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
@@ -69,6 +72,16 @@ class _FakeApplicationRepository extends ApplicationRepository {
 
   @override
   Future<List<ApplicationModel>> getStudentApplications() async => [];
+}
+
+class _FakeAssessmentRepository extends AssessmentRepository {
+  _FakeAssessmentRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<AssessmentModel?> getStudentAssessmentForApplication(
+    int applicationId,
+  ) async => null;
 }
 
 class _FakeAdminDashboardRepository extends AdminDashboardRepository {
@@ -132,6 +145,15 @@ Future<void> _pumpAsRole(
     repository: _FakeApplicationRepository(),
     authProvider: authProvider,
   );
+  // Registered because StudentApplicationDetailsScreen now renders a
+  // read-only Assessment section backed by this provider (see
+  // student_application_details_screen_test.dart for its own dedicated
+  // coverage) — not itself under test here, just required for the route to
+  // resolve without a ProviderNotFoundException.
+  final assessmentProvider = StudentAssessmentProvider(
+    repository: _FakeAssessmentRepository(),
+    authProvider: authProvider,
+  );
   // Not exercised by every test in this file, but registered because a
   // role='admin' request for a non-admin route redirects to
   // AdminHomeScreen, which now requires this provider to exist in the tree.
@@ -160,6 +182,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<StudentApplicationsProvider>.value(
           value: applicationsProvider,
+        ),
+        ChangeNotifierProvider<StudentAssessmentProvider>.value(
+          value: assessmentProvider,
         ),
       ],
       child: MaterialApp.router(

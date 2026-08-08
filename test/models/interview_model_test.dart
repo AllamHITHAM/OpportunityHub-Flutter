@@ -204,6 +204,15 @@ void main() {
     expect(interview.decision, 'some_future_decision');
   });
 
+  test('a missing decision key (the Student-facing response shape) parses to '
+      'null, not a crash', () {
+    final json = _interviewJson()..remove('decision');
+
+    final interview = InterviewModel.fromJson(json);
+
+    expect(interview.decision, isNull);
+  });
+
   test('a malformed required id throws rather than silently defaulting', () {
     final json = _interviewJson();
     json['id'] = 'not-an-int';

@@ -21,7 +21,7 @@ class InterviewModel {
     this.interviewerEmail,
     this.notes,
     required this.status,
-    required this.decision,
+    this.decision,
     this.rating,
     this.companyFeedback,
     this.completedAt,
@@ -44,8 +44,15 @@ class InterviewModel {
   /// One of: scheduled, completed, cancelled, rescheduled, no_show.
   final String status;
 
-  /// One of: pending, passed, failed, waiting.
-  final String decision;
+  /// One of: null, pending, passed, failed, waiting. Organization-facing
+  /// responses always send this (never `null` in practice — the backend
+  /// column defaults to `pending`). The Student-facing endpoints
+  /// deliberately omit this field entirely — it's organization-internal
+  /// decision state a candidate must never see raw; see
+  /// `AssessmentRepository`'s student methods and use
+  /// [AssessmentModel.result] instead for the student-facing outcome —
+  /// so it parses to `null` there rather than throwing.
+  final String? decision;
 
   final int? rating;
   final String? companyFeedback;
@@ -64,7 +71,7 @@ class InterviewModel {
       interviewerEmail: json['interviewer_email'] as String?,
       notes: json['notes'] as String?,
       status: json['status'] as String,
-      decision: json['decision'] as String,
+      decision: json['decision'] as String?,
       rating: _parseInt(json['rating']),
       companyFeedback: json['company_feedback'] as String?,
       completedAt: _parseDate(json['completed_at']),

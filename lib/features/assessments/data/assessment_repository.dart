@@ -101,4 +101,65 @@ class AssessmentRepository {
       throw apiClient.handleError(error);
     }
   }
+
+  /// Fetches every assessment belonging to the authenticated student's own
+  /// applications with `GET /api/student/assessments`. The response is a
+  /// flat array, not paginated. A non-list or malformed-item response
+  /// throws instead of silently becoming an empty list, via the same
+  /// forced-cast convention [getAssessmentForApplication] already relies
+  /// on — `AssessmentModel`/`InterviewModel` themselves already use unsafe
+  /// casts for their required fields, so a malformed item throws loudly
+  /// rather than becoming a fake assessment.
+  ///
+  /// Errors: 401, 403.
+  Future<List<AssessmentModel>> getStudentAssessments() async {
+    try {
+      final response = await apiClient.dio.get('/student/assessments');
+      final data = apiClient.parseData(response) as List<dynamic>;
+      return data
+          .map((json) => AssessmentModel.fromJson(json as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Fetches a single assessment belonging to the authenticated student
+  /// with `GET /api/student/assessments/{assessmentId}`.
+  ///
+  /// Errors: 401, 403, 404 (assessment doesn't exist or doesn't belong to
+  /// this student).
+  Future<AssessmentModel> getStudentAssessment(int assessmentId) async {
+    try {
+      final response = await apiClient.dio.get(
+        '/student/assessments/$assessmentId',
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return AssessmentModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Fetches the one assessment (if any) belonging to [applicationId], for
+  /// one of the authenticated student's own applications.
+  ///
+  /// Unlike the organization side, there is no
+  /// `GET /student/applications/{id}/assessment` endpoint — this fetches
+  /// every one of the student's assessments via [getStudentAssessments] and
+  /// filters client-side by `applicationId` instead. Acceptable given a
+  /// student's assessment count is inherently bounded by how many
+  /// applications they have. Returns `null` when none matches, matching
+  /// [getAssessmentForApplication]'s "no assessment yet" contract. Any
+  /// parsing/network failure from [getStudentAssessments] propagates as-is
+  /// — never silently swallowed into a `null`.
+  Future<AssessmentModel?> getStudentAssessmentForApplication(
+    int applicationId,
+  ) async {
+    final assessments = await getStudentAssessments();
+    for (final assessment in assessments) {
+      if (assessment.applicationId == applicationId) return assessment;
+    }
+    return null;
+  }
 }

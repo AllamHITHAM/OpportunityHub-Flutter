@@ -570,12 +570,13 @@ class _AssessmentDetailsCard extends StatelessWidget {
               value:
                   interviewStatusLabels[interview.status] ?? interview.status,
             ),
-            OpportunityDetailRow(
-              label: 'Decision',
-              value:
-                  interviewDecisionLabels[interview.decision] ??
-                  interview.decision,
-            ),
+            if (interview.decision != null)
+              OpportunityDetailRow(
+                label: 'Decision',
+                value:
+                    interviewDecisionLabels[interview.decision] ??
+                    interview.decision!,
+              ),
             if (notes != null) ...[
               const SizedBox(height: AppSpacing.xs),
               Text(notes, style: Theme.of(context).textTheme.bodyMedium),

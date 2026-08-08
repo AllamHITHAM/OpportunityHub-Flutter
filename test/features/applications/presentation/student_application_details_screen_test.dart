@@ -11,13 +11,17 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/applications/presentation/student_application_details_screen.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/assessment_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
+import 'package:opportunityhub_flutter/models/interview_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_assessment_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
 class _FakeAuthRepository extends AuthRepository {
@@ -44,6 +48,32 @@ class _FakeApplicationRepository extends ApplicationRepository {
     callCount++;
     if (listError != null) throw listError!;
     return listResult;
+  }
+}
+
+/// Controllable by `applicationId` so a test can give different
+/// applications different assessments/delays, matching the convention
+/// already used by `student_assessment_provider_test.dart`'s fake.
+class _FakeAssessmentRepository extends AssessmentRepository {
+  _FakeAssessmentRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  Map<int, AssessmentModel?>? resultsByApplication;
+  Map<int, Duration>? delaysByApplication;
+  ApiException? loadError;
+  int getStudentAssessmentForApplicationCallCount = 0;
+
+  @override
+  Future<AssessmentModel?> getStudentAssessmentForApplication(
+    int applicationId,
+  ) async {
+    getStudentAssessmentForApplicationCallCount++;
+    final delay = delaysByApplication?[applicationId] ?? Duration.zero;
+    if (delay > Duration.zero) {
+      await Future<void>.delayed(delay);
+    }
+    if (loadError != null) throw loadError!;
+    return resultsByApplication?[applicationId];
   }
 }
 
@@ -86,11 +116,69 @@ ApplicationModel _application({
   );
 }
 
+/// Builds an [InterviewModel] the way the real Student-facing endpoints
+/// actually shape one — `interviewerEmail`/`companyFeedback`/`rating`/
+/// `decision` default to `null` here too, matching the backend privacy
+/// hotfix. Tests that need to prove defense-in-depth pass them explicitly.
+InterviewModel _interview({
+  int id = 10,
+  int assessmentId = 1,
+  String interviewType = 'online',
+  DateTime? scheduledAt,
+  int? durationMinutes,
+  String? meetingLink,
+  String? location,
+  String? interviewerName,
+  String? interviewerEmail,
+  String? notes,
+  String status = 'scheduled',
+  String? decision,
+  int? rating,
+  String? companyFeedback,
+}) {
+  return InterviewModel(
+    id: id,
+    assessmentId: assessmentId,
+    interviewType: interviewType,
+    scheduledAt: scheduledAt ?? DateTime(2026, 8, 10, 14, 30),
+    durationMinutes: durationMinutes,
+    meetingLink: meetingLink,
+    location: location,
+    interviewerName: interviewerName,
+    interviewerEmail: interviewerEmail,
+    notes: notes,
+    status: status,
+    decision: decision,
+    rating: rating,
+    companyFeedback: companyFeedback,
+  );
+}
+
+AssessmentModel _assessment({
+  int id = 1,
+  int applicationId = 1,
+  String type = 'interview',
+  String status = 'scheduled',
+  String? result,
+  InterviewModel? interview,
+}) {
+  return AssessmentModel(
+    id: id,
+    applicationId: applicationId,
+    type: type,
+    status: status,
+    result: result,
+    interview: interview,
+  );
+}
+
 Future<StudentApplicationsProvider> _pumpDetails(
   WidgetTester tester, {
   required _FakeApplicationRepository repository,
+  _FakeAssessmentRepository? assessmentRepository,
   int applicationId = 1,
   Size size = const Size(420, 1400),
+  bool settle = true,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -100,6 +188,10 @@ Future<StudentApplicationsProvider> _pumpDetails(
   final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
   final provider = StudentApplicationsProvider(
     repository: repository,
+    authProvider: authProvider,
+  );
+  final assessmentProvider = StudentAssessmentProvider(
+    repository: assessmentRepository ?? _FakeAssessmentRepository(),
     authProvider: authProvider,
   );
 
@@ -120,15 +212,27 @@ Future<StudentApplicationsProvider> _pumpDetails(
   );
 
   await tester.pumpWidget(
-    ChangeNotifierProvider<StudentApplicationsProvider>.value(
-      value: provider,
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<StudentApplicationsProvider>.value(
+          value: provider,
+        ),
+        ChangeNotifierProvider<StudentAssessmentProvider>.value(
+          value: assessmentProvider,
+        ),
+      ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
         routerConfig: router,
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    await tester.pump();
+    await tester.pump();
+  }
 
   return provider;
 }
@@ -255,5 +359,549 @@ void main() {
     expect(find.textContaining('Interview'), findsNothing);
     expect(find.textContaining('Quiz'), findsNothing);
     expect(find.textContaining('Offer'), findsNothing);
+  });
+
+  group('Assessment section — status rules', () {
+    testWidgets('pending status shows no Assessment section', (tester) async {
+      final repository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'pending')],
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Assessment'), findsNothing);
+    });
+
+    testWidgets('reviewed status shows no Assessment section', (tester) async {
+      final repository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'reviewed')],
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Assessment'), findsNothing);
+    });
+
+    testWidgets('shortlisted status with no assessment shows no section', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'shortlisted')],
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Assessment'), findsNothing);
+    });
+
+    testWidgets(
+      'interview_scheduled with an assessment shows the Assessment section',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {1: _assessment(interview: _interview())};
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Assessment'), findsOneWidget);
+        expect(find.text('Interview Type'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a stale shortlisted status with a real assessment still shows the '
+      'section — actual data wins over stale status',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'shortlisted')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {1: _assessment(interview: _interview())};
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Assessment'), findsOneWidget);
+        expect(find.text('Interview Type'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'interview_scheduled with no assessment shows a controlled warning '
+      'with retry, never a creation action',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository();
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Assessment Not Found'), findsOneWidget);
+        expect(find.text('Try Again'), findsOneWidget);
+        expect(find.textContaining('Choose Assessment'), findsNothing);
+        // The only interactive control here is the error view's own Retry
+        // — no separate creation/scheduling action button exists.
+        expect(find.byType(ElevatedButton), findsNothing);
+
+        assessmentRepository.resultsByApplication = {
+          1: _assessment(interview: _interview()),
+        };
+        await tester.tap(find.text('Try Again'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Assessment'), findsOneWidget);
+        expect(find.text('Assessment Not Found'), findsNothing);
+      },
+    );
+
+    testWidgets('accepted with no assessment shows no section', (tester) async {
+      final repository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'accepted')],
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Assessment'), findsNothing);
+    });
+
+    testWidgets('accepted with an existing assessment still shows it', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'accepted')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(
+            status: 'completed',
+            result: 'passed',
+            interview: _interview(status: 'completed'),
+          ),
+        };
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Assessment'), findsOneWidget);
+    });
+  });
+
+  group('Assessment section — loading and error', () {
+    testWidgets(
+      'assessment loading does not block the rest of the application UI',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [
+            _application(
+              id: 1,
+              status: 'interview_scheduled',
+              opportunityTitle: 'Backend Developer',
+            ),
+          ],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {1: _assessment(interview: _interview())}
+          ..delaysByApplication = {1: const Duration(milliseconds: 300)};
+
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+          settle: false,
+        );
+
+        // The rest of the screen is already fully rendered even though the
+        // assessment fetch is still in flight.
+        expect(find.text('Backend Developer'), findsOneWidget);
+        expect(find.text('My CV'), findsOneWidget);
+        // The section itself shows a compact loading indicator.
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        expect(find.text('Assessment'), findsNothing);
+
+        // Drain the delayed fetch so no timer is left pending at test end.
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets('assessment error shows a compact view with retry', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..loadError = ApiException('Server error, please try again.');
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Server error, please try again.'), findsOneWidget);
+      expect(find.text('Try Again'), findsOneWidget);
+
+      assessmentRepository.loadError = null;
+      assessmentRepository.resultsByApplication = {
+        1: _assessment(interview: _interview()),
+      };
+      await tester.tap(find.text('Try Again'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Assessment'), findsOneWidget);
+    });
+  });
+
+  group('Assessment section — interview field display', () {
+    testWidgets('online interview shows Meeting Link, not Location', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(
+            interview: _interview(
+              interviewType: 'online',
+              meetingLink: 'https://meet.example.com/room-42',
+              location: null,
+            ),
+          ),
+        };
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Meeting Link'), findsOneWidget);
+      expect(find.text('https://meet.example.com/room-42'), findsOneWidget);
+      expect(find.text('Location'), findsNothing);
+    });
+
+    testWidgets('onsite interview shows Location, not Meeting Link', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(
+            interview: _interview(
+              interviewType: 'onsite',
+              location: 'HQ, 4th Floor',
+              meetingLink: null,
+            ),
+          ),
+        };
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Location'), findsOneWidget);
+      expect(find.text('HQ, 4th Floor'), findsOneWidget);
+      expect(find.text('Meeting Link'), findsNothing);
+    });
+
+    testWidgets(
+      'phone interview shows neither Meeting Link nor Location, unless '
+      'the payload actually has one',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              interview: _interview(
+                interviewType: 'phone',
+                meetingLink: null,
+                location: null,
+              ),
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Meeting Link'), findsNothing);
+        expect(find.text('Location'), findsNothing);
+        expect(find.text('Phone'), findsOneWidget);
+      },
+    );
+
+    testWidgets('optional fields absent parse and render safely', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(
+            interview: _interview(
+              durationMinutes: null,
+              interviewerName: null,
+              notes: null,
+              meetingLink: null,
+              location: null,
+            ),
+          ),
+        };
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Duration'), findsNothing);
+      expect(find.text('Interviewer Name'), findsNothing);
+      expect(tester.takeException(), isNull);
+      // No stray "null" text anywhere in the section.
+      expect(find.textContaining('null'), findsNothing);
+    });
+  });
+
+  group('Assessment section — result', () {
+    testWidgets('a null result renders no Result row', (tester) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(result: null, interview: _interview()),
+        };
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Result'), findsNothing);
+    });
+
+    testWidgets('a non-null result renders the Result row', (tester) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(result: 'passed', interview: _interview()),
+        };
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Result'), findsOneWidget);
+      expect(find.text('Passed'), findsOneWidget);
+    });
+  });
+
+  group('Assessment section — privacy defense-in-depth', () {
+    testWidgets(
+      'interview decision is never rendered, even when present on the model',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              result: null,
+              interview: _interview(decision: 'passed'),
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.textContaining('Decision'), findsNothing);
+        expect(find.text('Passed'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'interviewer email is never rendered, even when present on the model',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              interview: _interview(interviewerEmail: 'jane@hiring.example'),
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.textContaining('jane@hiring.example'), findsNothing);
+        expect(find.text('Interviewer Email'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'company feedback is never rendered, even when present on the model',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              interview: _interview(
+                companyFeedback: 'Strong technical answers, hire.',
+              ),
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.textContaining('Strong technical answers'), findsNothing);
+      },
+    );
+
+    testWidgets('rating is never rendered, even when present on the model', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(interview: _interview(rating: 4)),
+        };
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.textContaining('Rating'), findsNothing);
+    });
+
+    testWidgets('no organization action buttons ever appear', (tester) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {1: _assessment(interview: _interview())};
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.byType(ElevatedButton), findsNothing);
+      expect(find.byType(OutlinedButton), findsNothing);
+    });
+  });
+
+  group('Assessment section — future assessment types', () {
+    testWidgets('a quiz-type assessment shows only the future placeholder', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(type: 'quiz', status: 'pending'),
+        };
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Quiz assessment'), findsOneWidget);
+      expect(
+        find.text('Quiz functionality will be available in a later phase.'),
+        findsOneWidget,
+      );
+      expect(find.text('Interview Type'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'an unknown assessment type renders a generic summary only, no crash',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(type: 'some_future_type', status: 'pending'),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Assessment'), findsOneWidget);
+        expect(find.text('Interview Type'), findsNothing);
+        expect(find.text('Quiz assessment'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  });
+
+  testWidgets('No overflow at a narrow 320-wide viewport', (tester) async {
+    final applicationRepository = _FakeApplicationRepository(
+      listResult: [
+        _application(
+          id: 1,
+          status: 'interview_scheduled',
+          opportunityTitle:
+              'A Very Long Opportunity Title That Might Wrap Or Overflow',
+        ),
+      ],
+    );
+    final assessmentRepository = _FakeAssessmentRepository()
+      ..resultsByApplication = {
+        1: _assessment(
+          result: 'passed',
+          interview: _interview(
+            interviewType: 'online',
+            meetingLink: 'https://meet.example.com/a-very-long-room-name-here',
+            interviewerName: 'A Very Long Interviewer Name Here',
+            notes: 'Please join five minutes early and bring your laptop.',
+          ),
+        ),
+      };
+
+    await _pumpDetails(
+      tester,
+      repository: applicationRepository,
+      assessmentRepository: assessmentRepository,
+      size: const Size(320, 700),
+    );
+
+    expect(tester.takeException(), isNull);
   });
 }

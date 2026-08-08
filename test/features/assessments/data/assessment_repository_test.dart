@@ -125,6 +125,47 @@ Map<String, dynamic> _assessmentJson({
   };
 }
 
+/// The real Student-facing Interview shape — `interviewer_email`,
+/// `company_feedback`, `rating`, and `decision` are omitted entirely (the
+/// backend privacy hotfix), unlike [_interviewJson]'s organization shape.
+Map<String, dynamic> _studentInterviewJson({int id = 1, int assessmentId = 1}) {
+  return {
+    'id': id,
+    'assessment_id': assessmentId,
+    'interview_type': 'online',
+    'scheduled_at': '2026-08-10T10:00:00.000000Z',
+    'duration_minutes': 60,
+    'meeting_link': 'https://meet.example.com/room',
+    'location': null,
+    'interviewer_name': 'Jane Recruiter',
+    'notes': null,
+    'status': 'scheduled',
+    'completed_at': null,
+  };
+}
+
+Map<String, dynamic> _studentAssessmentJson({
+  int id = 1,
+  int applicationId = 5,
+  String type = 'interview',
+  String status = 'scheduled',
+  dynamic result,
+  bool includeInterview = true,
+}) {
+  return {
+    'id': id,
+    'application_id': applicationId,
+    'type': type,
+    'status': status,
+    'result': result,
+    'completed_at': null,
+    'created_at': '2026-08-01T09:00:00.000000Z',
+    'updated_at': '2026-08-01T09:00:00.000000Z',
+    'application': _applicationJson(id: applicationId),
+    if (includeInterview) 'interview': _studentInterviewJson(assessmentId: id),
+  };
+}
+
 InterviewCreateInput _validInput() {
   return InterviewCreateInput(
     interviewType: 'online',
@@ -549,6 +590,269 @@ void main() {
               .having((e) => e.statusCode, 'statusCode', 404)
               .having((e) => e.message, 'message', 'Application not found'),
         ),
+      );
+    });
+  });
+
+  group('getStudentAssessments', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': []}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.getStudentAssessments();
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(adapter.lastRequest?.path, '/student/assessments');
+    });
+
+    test('parses a valid list, including nested interview', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': [
+            _studentAssessmentJson(id: 1, applicationId: 5),
+            _studentAssessmentJson(id: 2, applicationId: 9),
+          ],
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getStudentAssessments();
+
+      expect(result, hasLength(2));
+      expect(result[0].applicationId, 5);
+      expect(result[1].applicationId, 9);
+      expect(result[0].interview?.interviewType, 'online');
+      expect(result[0].interview?.meetingLink, 'https://meet.example.com/room');
+    });
+
+    test('the nested interview never carries the fields the backend omits '
+        '(defense-in-depth: proves the real response shape parses safely '
+        'even without them present at all)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': [_studentAssessmentJson()],
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getStudentAssessments();
+
+      final interview = result.single.interview!;
+      expect(interview.interviewerEmail, isNull);
+      expect(interview.companyFeedback, isNull);
+      expect(interview.rating, isNull);
+      expect(interview.decision, isNull);
+    });
+
+    test('an empty list is represented correctly, not as an error', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': []}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getStudentAssessments();
+
+      expect(result, isEmpty);
+    });
+
+    test(
+      'a malformed response (data is not a list) never becomes an empty list',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'data': {'not': 'a list'},
+          }, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.getStudentAssessments(),
+          throwsA(isA<TypeError>()),
+        );
+      },
+    );
+
+    test('a malformed list item never becomes an empty list', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': [
+            {'id': 'not-an-int'},
+          ],
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentAssessments(),
+        throwsA(isA<TypeError>()),
+      );
+    });
+
+    test('throws ApiException on a 401', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Unauthenticated',
+          'data': null,
+        }, 401);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentAssessments(),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
+        ),
+      );
+    });
+
+    test('throws ApiException on a 403', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'This action is unauthorized for your account type',
+          'data': null,
+        }, 403);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentAssessments(),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 403),
+        ),
+      );
+    });
+  });
+
+  group('getStudentAssessment', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _studentAssessmentJson(id: 7)}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.getStudentAssessment(7);
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(adapter.lastRequest?.path, '/student/assessments/7');
+    });
+
+    test('parses a valid response', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _studentAssessmentJson(id: 7, applicationId: 5),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getStudentAssessment(7);
+
+      expect(result.id, 7);
+      expect(result.applicationId, 5);
+      expect(result.interview?.interviewType, 'online');
+    });
+
+    test('throws ApiException on a 404', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Assessment not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentAssessment(999),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having((e) => e.message, 'message', 'Assessment not found'),
+        ),
+      );
+    });
+
+    test(
+      'a malformed successful response never becomes a fake assessment',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'data': {'id': 'not-an-int'},
+          }, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.getStudentAssessment(7),
+          throwsA(isA<TypeError>()),
+        );
+      },
+    );
+  });
+
+  group('getStudentAssessmentForApplication', () {
+    test('finds the correct assessment by applicationId', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': [
+            _studentAssessmentJson(id: 1, applicationId: 5),
+            _studentAssessmentJson(id: 2, applicationId: 9),
+          ],
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getStudentAssessmentForApplication(9);
+
+      expect(result, isNotNull);
+      expect(result!.id, 2);
+      expect(result.applicationId, 9);
+    });
+
+    test('multiple assessments across different applications each resolve to '
+        'their own application only', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': [
+            _studentAssessmentJson(id: 1, applicationId: 5),
+            _studentAssessmentJson(id: 2, applicationId: 9),
+            _studentAssessmentJson(id: 3, applicationId: 12),
+          ],
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      expect((await repository.getStudentAssessmentForApplication(5))?.id, 1);
+      expect((await repository.getStudentAssessmentForApplication(12))?.id, 3);
+    });
+
+    test('returns null when no assessment matches the applicationId', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': [_studentAssessmentJson(id: 1, applicationId: 5)],
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getStudentAssessmentForApplication(999);
+
+      expect(result, isNull);
+    });
+
+    test('a malformed list propagates safely, never becomes null', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'not': 'a list'},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentAssessmentForApplication(5),
+        throwsA(isA<TypeError>()),
       );
     });
   });

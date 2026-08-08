@@ -25,6 +25,7 @@ import 'providers/organization_assessment_provider.dart';
 import 'providers/organization_opportunities_provider.dart';
 import 'providers/organization_profile_provider.dart';
 import 'providers/student_applications_provider.dart';
+import 'providers/student_assessment_provider.dart';
 import 'providers/student_cv_provider.dart';
 import 'providers/student_opportunities_provider.dart';
 import 'providers/student_profile_provider.dart';
@@ -140,6 +141,13 @@ class MyApp extends StatelessWidget {
           OrganizationAssessmentProvider
         >(
           create: (context) => OrganizationAssessmentProvider(
+            repository: context.read<AssessmentRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, StudentAssessmentProvider>(
+          create: (context) => StudentAssessmentProvider(
             repository: context.read<AssessmentRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
