@@ -131,9 +131,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               onTap: () => context.push(AppRoutes.adminUsers),
             ),
             const SizedBox(height: AppSpacing.sm),
-            const _ManageEntry(
+            _ManageEntry(
               icon: Icons.business_outlined,
               label: 'Manage Organizations',
+              onTap: () => context.push(AppRoutes.adminOrganizations),
             ),
             const SizedBox(height: AppSpacing.sm),
             const _ManageEntry(

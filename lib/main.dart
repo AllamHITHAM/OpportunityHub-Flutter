@@ -5,6 +5,7 @@ import 'core/api/api_client.dart';
 import 'core/storage/token_storage_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/admin/data/admin_dashboard_repository.dart';
+import 'features/admin/data/admin_organizations_repository.dart';
 import 'features/admin/data/admin_users_repository.dart';
 import 'features/applications/data/application_repository.dart';
 import 'features/assessments/data/assessment_repository.dart';
@@ -14,6 +15,7 @@ import 'features/opportunities/data/opportunity_repository.dart';
 import 'features/organization/data/organization_profile_repository.dart';
 import 'features/student/data/student_profile_repository.dart';
 import 'providers/admin_dashboard_provider.dart';
+import 'providers/admin_organizations_provider.dart';
 import 'providers/admin_users_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/organization_applications_provider.dart';
@@ -159,6 +161,17 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, AdminUsersProvider>(
           create: (context) => AdminUsersProvider(
             repository: context.read<AdminUsersRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, AdminOrganizationsRepository>(
+          update: (_, apiClient, _) =>
+              AdminOrganizationsRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, AdminOrganizationsProvider>(
+          create: (context) => AdminOrganizationsProvider(
+            repository: context.read<AdminOrganizationsRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,

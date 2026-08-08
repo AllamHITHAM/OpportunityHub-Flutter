@@ -4,6 +4,8 @@ import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/admin/presentation/admin_home_screen.dart';
+import '../features/admin/presentation/admin_organization_details_screen.dart';
+import '../features/admin/presentation/admin_organizations_screen.dart';
 import '../features/admin/presentation/admin_users_screen.dart';
 import '../features/auth/presentation/account_type_selection_screen.dart';
 import '../features/auth/presentation/login_screen.dart';
@@ -157,6 +159,16 @@ class AppRouter {
         GoRoute(
           path: AppRoutes.adminUsers,
           builder: (_, _) => const AdminUsersScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.adminOrganizations,
+          builder: (_, _) => const AdminOrganizationsScreen(),
+        ),
+        GoRoute(
+          path: '${AppRoutes.adminOrganizations}/:id',
+          builder: (_, state) => AdminOrganizationDetailsScreen(
+            organizationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
         ),
         // The literal "/new" segment is declared before the parameterized
         // "/:id" route below so it's never mistaken for an ID.

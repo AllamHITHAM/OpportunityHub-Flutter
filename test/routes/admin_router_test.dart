@@ -11,6 +11,7 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
+import 'package:opportunityhub_flutter/features/admin/data/admin_organizations_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_users_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
@@ -20,6 +21,7 @@ import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
+import 'package:opportunityhub_flutter/providers/admin_organizations_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_users_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
@@ -101,6 +103,19 @@ class _FakeAdminUsersRepository extends AdminUsersRepository {
   Future<List<UserModel>> getUsers() async => [];
 }
 
+class _FakeAdminOrganizationsRepository extends AdminOrganizationsRepository {
+  _FakeAdminOrganizationsRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<OrganizationProfileModel>> getOrganizations() async => [];
+
+  @override
+  Future<OrganizationProfileModel> getOrganization(int organizationId) async {
+    throw ApiException('No query results.', statusCode: 404);
+  }
+}
+
 void _setViewSize(WidgetTester tester, Size size) {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -165,6 +180,10 @@ Future<void> _pumpAsRole(
     repository: _FakeAdminUsersRepository(),
     authProvider: authProvider,
   );
+  final adminOrganizationsProvider = AdminOrganizationsProvider(
+    repository: _FakeAdminOrganizationsRepository(),
+    authProvider: authProvider,
+  );
   final appRouter = AppRouter(
     authProvider,
     studentProfileProvider,
@@ -186,6 +205,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<AdminUsersProvider>.value(
           value: adminUsersProvider,
+        ),
+        ChangeNotifierProvider<AdminOrganizationsProvider>.value(
+          value: adminOrganizationsProvider,
         ),
       ],
       child: MaterialApp.router(
@@ -446,5 +468,166 @@ void main() {
     // Settling completed without a pumpAndSettle timeout (which throws if
     // frames never stop scheduling, e.g. from a redirect loop).
     expect(find.text('Manage Users'), findsOneWidget);
+  });
+
+  testWidgets('An authenticated active admin can open /admin/organizations', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: AppRoutes.adminOrganizations,
+    );
+
+    expect(find.text('Manage Organizations'), findsOneWidget);
+    expect(find.text('No Organizations Yet'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Direct URL /admin/organizations works for an admin', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: '/admin/organizations',
+    );
+
+    expect(find.text('Manage Organizations'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'An authenticated active admin can open an organization details URL',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'admin',
+        initialPath: AppRoutes.adminOrganizationDetails(5),
+      );
+
+      // The fake repository's getOrganization always 404s — this proves
+      // the route itself resolves and renders a controlled error, not a
+      // crash, for an admin.
+      expect(find.text('Organization Details'), findsOneWidget);
+      expect(find.text('No query results.'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A malformed organization ID in the URL is handled safely, not a crash',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'admin',
+        initialPath: '/admin/organizations/not-a-number',
+      );
+
+      expect(find.text('Organization Details'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Students cannot access /admin/organizations', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'student',
+      initialPath: AppRoutes.adminOrganizations,
+    );
+
+    expect(find.text('Manage Organizations'), findsNothing);
+    expect(find.text('Role: Student'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Organizations cannot access /admin/organizations', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'organization',
+      initialPath: AppRoutes.adminOrganizations,
+    );
+
+    expect(find.text('Manage Organizations'), findsNothing);
+    expect(find.text('Role: Organization'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'An unauthenticated guest is redirected to login from /admin/organizations',
+    (tester) async {
+      _setViewSize(tester, const Size(420, 1400));
+
+      final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+      final studentProfileProvider = StudentProfileProvider(
+        repository: _FakeStudentProfileRepository(),
+        authProvider: authProvider,
+      );
+      final organizationProfileProvider = OrganizationProfileProvider(
+        repository: _FakeOrganizationProfileRepository(),
+        authProvider: authProvider,
+      );
+      final adminDashboardProvider = AdminDashboardProvider(
+        repository: _FakeAdminDashboardRepository(),
+        authProvider: authProvider,
+      );
+      final adminOrganizationsProvider = AdminOrganizationsProvider(
+        repository: _FakeAdminOrganizationsRepository(),
+        authProvider: authProvider,
+      );
+      final appRouter = AppRouter(
+        authProvider,
+        studentProfileProvider,
+        organizationProfileProvider,
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+            ChangeNotifierProvider<StudentProfileProvider>.value(
+              value: studentProfileProvider,
+            ),
+            ChangeNotifierProvider<OrganizationProfileProvider>.value(
+              value: organizationProfileProvider,
+            ),
+            ChangeNotifierProvider<AdminDashboardProvider>.value(
+              value: adminDashboardProvider,
+            ),
+            ChangeNotifierProvider<AdminOrganizationsProvider>.value(
+              value: adminOrganizationsProvider,
+            ),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            routerConfig: appRouter.router,
+          ),
+        ),
+      );
+
+      appRouter.router.go(AppRoutes.adminOrganizations);
+      await authProvider.initialize();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Manage Organizations'), findsNothing);
+      expect(find.text('Login'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('No redirect loop occurs for the admin organizations route', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: AppRoutes.adminOrganizations,
+    );
+
+    // Settling completed without a pumpAndSettle timeout (which throws if
+    // frames never stop scheduling, e.g. from a redirect loop).
+    expect(find.text('Manage Organizations'), findsOneWidget);
   });
 }
