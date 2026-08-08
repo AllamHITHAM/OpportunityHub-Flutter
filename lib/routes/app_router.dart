@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../features/admin/presentation/admin_home_screen.dart';
 import '../features/admin/presentation/admin_organization_details_screen.dart';
 import '../features/admin/presentation/admin_organizations_screen.dart';
+import '../features/admin/presentation/admin_skills_screen.dart';
 import '../features/admin/presentation/admin_users_screen.dart';
 import '../features/auth/presentation/account_type_selection_screen.dart';
 import '../features/auth/presentation/login_screen.dart';
@@ -169,6 +170,10 @@ class AppRouter {
           builder: (_, state) => AdminOrganizationDetailsScreen(
             organizationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
           ),
+        ),
+        GoRoute(
+          path: AppRoutes.adminSkills,
+          builder: (_, _) => const AdminSkillsScreen(),
         ),
         // The literal "/new" segment is declared before the parameterized
         // "/:id" route below so it's never mistaken for an ID.

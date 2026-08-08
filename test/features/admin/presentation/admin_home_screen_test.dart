@@ -12,16 +12,20 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_organizations_repository.dart';
+import 'package:opportunityhub_flutter/features/admin/data/admin_skills_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_users_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_home_screen.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_organizations_screen.dart';
+import 'package:opportunityhub_flutter/features/admin/presentation/admin_skills_screen.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_users_screen.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
+import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_organizations_provider.dart';
+import 'package:opportunityhub_flutter/providers/admin_skills_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_users_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
@@ -116,6 +120,14 @@ class _FakeAdminOrganizationsRepository extends AdminOrganizationsRepository {
   Future<List<OrganizationProfileModel>> getOrganizations() async => [];
 }
 
+class _FakeAdminSkillsRepository extends AdminSkillsRepository {
+  _FakeAdminSkillsRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<SkillModel>> getSkills() async => [];
+}
+
 class _Providers {
   _Providers({required this.auth, required this.dashboard});
 
@@ -123,9 +135,10 @@ class _Providers {
   final AdminDashboardProvider dashboard;
 }
 
-/// A router with /admin, /admin/users, and /admin/organizations registered,
-/// matching the real AppRouter's route table — needed now that both
-/// "Manage Users" and "Manage Organizations" actually navigate.
+/// A router with /admin, /admin/users, /admin/organizations, and
+/// /admin/skills registered, matching the real AppRouter's route table —
+/// needed now that "Manage Users", "Manage Organizations", and "Manage
+/// Skills" all actually navigate.
 GoRouter _adminRouter() {
   return GoRouter(
     initialLocation: '/admin',
@@ -138,6 +151,10 @@ GoRouter _adminRouter() {
       GoRoute(
         path: AppRoutes.adminOrganizations,
         builder: (_, _) => const AdminOrganizationsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.adminSkills,
+        builder: (_, _) => const AdminSkillsScreen(),
       ),
     ],
   );
@@ -167,6 +184,10 @@ Future<_Providers> _pumpScreen(
     repository: _FakeAdminOrganizationsRepository(),
     authProvider: authProvider,
   );
+  final skillsProvider = AdminSkillsProvider(
+    repository: _FakeAdminSkillsRepository(),
+    authProvider: authProvider,
+  );
 
   final router = _adminRouter();
 
@@ -180,6 +201,9 @@ Future<_Providers> _pumpScreen(
         ChangeNotifierProvider<AdminUsersProvider>.value(value: usersProvider),
         ChangeNotifierProvider<AdminOrganizationsProvider>.value(
           value: organizationsProvider,
+        ),
+        ChangeNotifierProvider<AdminSkillsProvider>.value(
+          value: skillsProvider,
         ),
       ],
       child: MaterialApp.router(
@@ -428,29 +452,18 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Manage Skills is shown as Coming Soon and never navigates', (
-    tester,
-  ) async {
-    final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
-    await _pumpScreen(tester, repository: repository);
+  testWidgets(
+    'All three management entries are enabled — no "Coming Soon" remains',
+    (tester) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+      await _pumpScreen(tester, repository: repository);
 
-    expect(find.text('Manage Users'), findsOneWidget);
-    expect(find.text('Manage Organizations'), findsOneWidget);
-    expect(find.text('Manage Skills'), findsOneWidget);
-    // Only Skills remains "Coming Soon" — Manage Users and Manage
-    // Organizations are both enabled this phase.
-    expect(find.text('Coming Soon'), findsOneWidget);
-
-    await tester.ensureVisible(find.text('Manage Skills'));
-    await tester.tap(find.text('Manage Skills'));
-    await tester.pumpAndSettle();
-
-    // Still on the dashboard -- tapping a disabled entry navigated
-    // nowhere and threw no exception.
-    expect(find.text('Admin Dashboard'), findsOneWidget);
-    expect(find.text('42'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+      expect(find.text('Manage Users'), findsOneWidget);
+      expect(find.text('Manage Organizations'), findsOneWidget);
+      expect(find.text('Manage Skills'), findsOneWidget);
+      expect(find.text('Coming Soon'), findsNothing);
+    },
+  );
 
   testWidgets('Manage Users is enabled and navigates to /admin/users', (
     tester,
@@ -492,4 +505,24 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('Manage Skills is enabled and navigates to /admin/skills', (
+    tester,
+  ) async {
+    final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+    await _pumpScreen(tester, repository: repository);
+
+    expect(find.text('Manage Skills'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Manage Skills'));
+    await tester.tap(find.text('Manage Skills'));
+    await tester.pumpAndSettle();
+
+    // Now on AdminSkillsScreen -- its own AppBar title is also "Manage
+    // Skills", so this only proves navigation happened when combined with
+    // the dashboard's own title being gone.
+    expect(find.text('Manage Skills'), findsOneWidget);
+    expect(find.text('Admin Dashboard'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

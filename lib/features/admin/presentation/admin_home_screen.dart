@@ -8,10 +8,8 @@ import '../../../providers/admin_dashboard_provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../routes/app_routes.dart';
 
-/// The Admin dashboard — platform-wide statistics, plus a navigation entry
-/// to Manage Users (implemented) and (disabled, "Coming Soon") entries for
-/// the Organizations/Skills management areas that later phases will
-/// implement.
+/// The Admin dashboard — platform-wide statistics, plus navigation entries
+/// to Manage Users, Manage Organizations, and Manage Skills.
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
 
@@ -137,9 +135,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               onTap: () => context.push(AppRoutes.adminOrganizations),
             ),
             const SizedBox(height: AppSpacing.sm),
-            const _ManageEntry(
+            _ManageEntry(
               icon: Icons.psychology_outlined,
               label: 'Manage Skills',
+              onTap: () => context.push(AppRoutes.adminSkills),
             ),
             const SizedBox(height: AppSpacing.lg),
             SecondaryButton(
@@ -269,10 +268,11 @@ class _StatTile extends StatelessWidget {
 
 /// A navigation entry for a management area. With [onTap] omitted, this
 /// renders as a disabled "Coming Soon" placeholder for an area not
-/// implemented yet (Organizations, Skills — later phases) — deliberately
-/// has no `onTap` at all in that case, so it can never navigate to a route
-/// that doesn't exist yet. With [onTap] provided (Users, this phase), it
-/// renders as a normal enabled, tappable entry instead.
+/// implemented yet — deliberately has no `onTap` at all in that case, so
+/// it can never navigate to a route that doesn't exist yet. With [onTap]
+/// provided, it renders as a normal enabled, tappable entry instead. Every
+/// current entry (Users, Organizations, Skills) is enabled; this still
+/// exists for whatever future management area comes next.
 class _ManageEntry extends StatelessWidget {
   const _ManageEntry({required this.icon, required this.label, this.onTap});
 

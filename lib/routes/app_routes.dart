@@ -45,6 +45,12 @@ class AppRoutes {
 
   static String adminOrganizationDetails(int id) => '$adminOrganizations/$id';
 
+  /// Admin-only skill management — see `AppRouter` for the role gating
+  /// applied to it (shares the same `/admin` prefix guard as [adminHome]).
+  /// No dedicated detail route — create/edit/delete all happen inline via
+  /// dialogs on this one screen.
+  static const String adminSkills = '$adminHome/skills';
+
   /// Organization-only opportunity management — see `AppRouter` for the
   /// role/profile-completion gating applied to all of these.
   static const String organizationOpportunities = '/organization/opportunities';

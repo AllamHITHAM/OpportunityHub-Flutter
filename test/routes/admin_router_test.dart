@@ -12,16 +12,19 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_organizations_repository.dart';
+import 'package:opportunityhub_flutter/features/admin/data/admin_skills_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_users_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
+import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_organizations_provider.dart';
+import 'package:opportunityhub_flutter/providers/admin_skills_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_users_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
@@ -116,6 +119,14 @@ class _FakeAdminOrganizationsRepository extends AdminOrganizationsRepository {
   }
 }
 
+class _FakeAdminSkillsRepository extends AdminSkillsRepository {
+  _FakeAdminSkillsRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<SkillModel>> getSkills() async => [];
+}
+
 void _setViewSize(WidgetTester tester, Size size) {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -184,6 +195,10 @@ Future<void> _pumpAsRole(
     repository: _FakeAdminOrganizationsRepository(),
     authProvider: authProvider,
   );
+  final adminSkillsProvider = AdminSkillsProvider(
+    repository: _FakeAdminSkillsRepository(),
+    authProvider: authProvider,
+  );
   final appRouter = AppRouter(
     authProvider,
     studentProfileProvider,
@@ -208,6 +223,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<AdminOrganizationsProvider>.value(
           value: adminOrganizationsProvider,
+        ),
+        ChangeNotifierProvider<AdminSkillsProvider>.value(
+          value: adminSkillsProvider,
         ),
       ],
       child: MaterialApp.router(
@@ -629,5 +647,126 @@ void main() {
     // Settling completed without a pumpAndSettle timeout (which throws if
     // frames never stop scheduling, e.g. from a redirect loop).
     expect(find.text('Manage Organizations'), findsOneWidget);
+  });
+
+  testWidgets('An authenticated active admin can open /admin/skills', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: AppRoutes.adminSkills,
+    );
+
+    expect(find.text('Manage Skills'), findsOneWidget);
+    expect(find.text('No Skills Yet'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Direct URL /admin/skills works for an admin', (tester) async {
+    await _pumpAsRole(tester, role: 'admin', initialPath: '/admin/skills');
+
+    expect(find.text('Manage Skills'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Students cannot access /admin/skills', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'student',
+      initialPath: AppRoutes.adminSkills,
+    );
+
+    expect(find.text('Manage Skills'), findsNothing);
+    expect(find.text('Role: Student'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Organizations cannot access /admin/skills', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'organization',
+      initialPath: AppRoutes.adminSkills,
+    );
+
+    expect(find.text('Manage Skills'), findsNothing);
+    expect(find.text('Role: Organization'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'An unauthenticated guest is redirected to login from /admin/skills',
+    (tester) async {
+      _setViewSize(tester, const Size(420, 1400));
+
+      final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+      final studentProfileProvider = StudentProfileProvider(
+        repository: _FakeStudentProfileRepository(),
+        authProvider: authProvider,
+      );
+      final organizationProfileProvider = OrganizationProfileProvider(
+        repository: _FakeOrganizationProfileRepository(),
+        authProvider: authProvider,
+      );
+      final adminDashboardProvider = AdminDashboardProvider(
+        repository: _FakeAdminDashboardRepository(),
+        authProvider: authProvider,
+      );
+      final adminSkillsProvider = AdminSkillsProvider(
+        repository: _FakeAdminSkillsRepository(),
+        authProvider: authProvider,
+      );
+      final appRouter = AppRouter(
+        authProvider,
+        studentProfileProvider,
+        organizationProfileProvider,
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+            ChangeNotifierProvider<StudentProfileProvider>.value(
+              value: studentProfileProvider,
+            ),
+            ChangeNotifierProvider<OrganizationProfileProvider>.value(
+              value: organizationProfileProvider,
+            ),
+            ChangeNotifierProvider<AdminDashboardProvider>.value(
+              value: adminDashboardProvider,
+            ),
+            ChangeNotifierProvider<AdminSkillsProvider>.value(
+              value: adminSkillsProvider,
+            ),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            routerConfig: appRouter.router,
+          ),
+        ),
+      );
+
+      appRouter.router.go(AppRoutes.adminSkills);
+      await authProvider.initialize();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Manage Skills'), findsNothing);
+      expect(find.text('Login'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('No redirect loop occurs for the admin skills route', (
+    tester,
+  ) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: AppRoutes.adminSkills,
+    );
+
+    // Settling completed without a pumpAndSettle timeout (which throws if
+    // frames never stop scheduling, e.g. from a redirect loop).
+    expect(find.text('Manage Skills'), findsOneWidget);
   });
 }
