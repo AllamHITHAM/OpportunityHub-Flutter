@@ -1,17 +1,19 @@
 import 'application_model.dart';
 import 'interview_model.dart';
+import 'quiz_model.dart';
 
 /// The generic evaluation path an organization chooses for a shortlisted
-/// application (interview today, quiz in a future phase), as returned by
+/// application (interview or, as of Phase 6B-2, quiz), as returned by
 /// `POST /organization/applications/{application}/assessments` and
 /// `GET /organization/applications/{application}/assessment`.
 ///
-/// [application] and [interview] reuse the existing [ApplicationModel] and
-/// [InterviewModel] rather than duplicating their fields — the same
-/// reasoning [ApplicationModel] already applies to its own nested
-/// [OpportunityModel]/[CvModel]. Neither the backend response shape nor
-/// this model's parsing has any notion of "legacy" vs. "generic" source —
-/// see `AssessmentRepository` for the endpoint-specific concerns.
+/// [application], [interview], and [quiz] reuse the existing
+/// [ApplicationModel], [InterviewModel], and [QuizModel] rather than
+/// duplicating their fields — the same reasoning [ApplicationModel] already
+/// applies to its own nested [OpportunityModel]/[CvModel]. Neither the
+/// backend response shape nor this model's parsing has any notion of
+/// "legacy" vs. "generic" source — see `AssessmentRepository` for the
+/// endpoint-specific concerns.
 class AssessmentModel {
   const AssessmentModel({
     required this.id,
@@ -24,6 +26,7 @@ class AssessmentModel {
     this.updatedAt,
     this.application,
     this.interview,
+    this.quiz,
   });
 
   final int id;
@@ -52,9 +55,13 @@ class AssessmentModel {
   /// eager-loads it.
   final InterviewModel? interview;
 
+  /// Only populated when [type] is `quiz` and the response eager-loads it.
+  final QuizModel? quiz;
+
   factory AssessmentModel.fromJson(Map<String, dynamic> json) {
     final applicationJson = json['application'];
     final interviewJson = json['interview'];
+    final quizJson = json['quiz'];
 
     return AssessmentModel(
       id: json['id'] as int,
@@ -70,6 +77,9 @@ class AssessmentModel {
           : null,
       interview: interviewJson is Map<String, dynamic>
           ? InterviewModel.fromJson(interviewJson)
+          : null,
+      quiz: quizJson is Map<String, dynamic>
+          ? QuizModel.fromJson(quizJson)
           : null,
     );
   }

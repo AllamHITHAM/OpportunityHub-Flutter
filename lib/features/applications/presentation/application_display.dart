@@ -7,6 +7,11 @@ const applicationStatusLabels = {
   'pending': 'Pending',
   'reviewed': 'Reviewed',
   'shortlisted': 'Shortlisted',
+  'in_assessment': 'Under Assessment',
+  // Legacy compatibility only — no code path writes this status for new
+  // assessments any more (see docs/BUSINESS_RULES.md on the backend), but
+  // existing records may still carry it, so it stays a real, labeled value
+  // here rather than falling through to the raw status string.
   'interview_scheduled': 'Interview Scheduled',
   'accepted': 'Accepted',
   'rejected': 'Rejected',
@@ -21,6 +26,7 @@ AppStatusType applicationStatusChipType(String status) {
     case 'withdrawn':
       return AppStatusType.neutral;
     case 'shortlisted':
+    case 'in_assessment':
     case 'interview_scheduled':
       return AppStatusType.info;
     case 'pending':

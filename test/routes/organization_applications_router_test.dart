@@ -12,6 +12,7 @@ import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repos
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_input.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
@@ -19,6 +20,7 @@ import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
+import 'package:opportunityhub_flutter/models/quiz_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
@@ -26,6 +28,7 @@ import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_quiz_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
@@ -98,8 +101,14 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     required int applicationId,
     required String type,
     InterviewCreateInput? interviewInput,
+    QuizCreateInput? quizInput,
   }) async {
     throw ApiException('Not used in router tests');
+  }
+
+  @override
+  Future<QuizModel?> getOrganizationQuiz(int assessmentId) async {
+    return null;
   }
 }
 
@@ -169,6 +178,10 @@ Future<void> _pumpAsRole(
     repository: _FakeAssessmentRepository(),
     authProvider: authProvider,
   );
+  final quizProvider = OrganizationQuizProvider(
+    repository: _FakeAssessmentRepository(),
+    authProvider: authProvider,
+  );
   // Not exercised by any test in this file, but registered because a
   // role='admin' request for a non-admin route (see the "Admins cannot
   // access..." tests below) redirects to AdminHomeScreen, which now
@@ -198,6 +211,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<OrganizationAssessmentProvider>.value(
           value: assessmentProvider,
+        ),
+        ChangeNotifierProvider<OrganizationQuizProvider>.value(
+          value: quizProvider,
         ),
         ChangeNotifierProvider<AdminDashboardProvider>.value(
           value: adminDashboardProvider,
@@ -533,6 +549,146 @@ void main() {
         role: 'organization',
         initialPath:
             '${AppRoutes.organizationApplications}/not-a-number/assessment/interview',
+        organizationProfile: _approvedProfile,
+      );
+
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'An approved organization can open the Create Quiz route directly by URL',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: AppRoutes.organizationCreateQuiz(123),
+        organizationProfile: _approvedProfile,
+      );
+
+      expect(find.text('Create Quiz'), findsWidgets);
+      expect(find.text('Passing Score (%)'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Students cannot access the Create Quiz route', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'student',
+      initialPath: AppRoutes.organizationCreateQuiz(1),
+    );
+
+    expect(find.text('Create Quiz'), findsNothing);
+    expect(find.text('Role: Student'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Admins cannot access the Create Quiz route', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: AppRoutes.organizationCreateQuiz(1),
+    );
+
+    expect(find.text('Create Quiz'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'An organization with an incomplete profile is not routed to Create Quiz',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: AppRoutes.organizationCreateQuiz(1),
+        organizationProfile: null,
+      );
+
+      expect(find.text('Create Quiz'), findsNothing);
+      expect(find.text('Company Profile Setup Incomplete'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'A malformed application ID on the Create Quiz route does not crash',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath:
+            '${AppRoutes.organizationApplications}/not-a-number/assessment/quiz',
+        organizationProfile: _approvedProfile,
+      );
+
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'An approved organization can open the Quiz editor route directly by URL',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: AppRoutes.organizationQuizEditor(1),
+        organizationProfile: _approvedProfile,
+      );
+
+      // No quiz found for assessment 1 in this test's fake repository --
+      // the screen's own safe "not found" state proves the route resolved
+      // without depending on `extra`, the same pattern the Application
+      // Details route tests already use for a nonexistent ID.
+      expect(find.text('No Quiz Found'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Students cannot access the Quiz editor route', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'student',
+      initialPath: AppRoutes.organizationQuizEditor(1),
+    );
+
+    expect(find.text('No Quiz Found'), findsNothing);
+    expect(find.text('Role: Student'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Admins cannot access the Quiz editor route', (tester) async {
+    await _pumpAsRole(
+      tester,
+      role: 'admin',
+      initialPath: AppRoutes.organizationQuizEditor(1),
+    );
+
+    expect(find.text('No Quiz Found'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'An organization with an incomplete profile is not routed to the Quiz editor',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: AppRoutes.organizationQuizEditor(1),
+        organizationProfile: null,
+      );
+
+      expect(find.text('No Quiz Found'), findsNothing);
+      expect(find.text('Company Profile Setup Incomplete'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'A malformed assessment ID on the Quiz editor route does not crash',
+    (tester) async {
+      await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: '${AppRoutes.organizationAssessments}/not-a-number/quiz',
         organizationProfile: _approvedProfile,
       );
 

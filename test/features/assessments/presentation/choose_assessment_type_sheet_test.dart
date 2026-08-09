@@ -31,6 +31,11 @@ Future<void> _pumpHostScreen(WidgetTester tester) async {
         builder: (context, state) =>
             const Scaffold(body: Text('SCHEDULE_INTERVIEW_PLACEHOLDER')),
       ),
+      GoRoute(
+        path: '/organization/applications/5/assessment/quiz',
+        builder: (context, state) =>
+            const Scaffold(body: Text('CREATE_QUIZ_PLACEHOLDER')),
+      ),
     ],
   );
 
@@ -55,13 +60,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Interview'), findsOneWidget);
-    // RadioListTile.enabled is nullable and defaults to null ("inherit
-    // enabled from the ancestor RadioGroup") unless explicitly disabled —
-    // only Quiz is explicitly disabled below.
     expect(_radioTile(tester, 'interview').enabled, isNot(false));
   });
 
-  testWidgets('Quiz option is visible, disabled, and shows Coming Soon', (
+  testWidgets('Quiz option is visible and enabled, no Coming Soon', (
     tester,
   ) async {
     await _pumpHostScreen(tester);
@@ -69,11 +71,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Quiz'), findsOneWidget);
-    expect(find.text('Coming Soon'), findsOneWidget);
-    expect(_radioTile(tester, 'quiz').enabled, isFalse);
+    expect(find.text('Coming Soon'), findsNothing);
+    expect(_radioTile(tester, 'quiz').enabled, isNot(false));
   });
 
-  testWidgets('Continue navigates to the Schedule Interview route', (
+  testWidgets('Continue navigates to the Schedule Interview route by default', (
     tester,
   ) async {
     await _pumpHostScreen(tester);
@@ -88,25 +90,41 @@ void main() {
     expect(find.text('Choose Assessment'), findsNothing);
   });
 
-  testWidgets('Quiz cannot be selected or submitted', (tester) async {
-    await _pumpHostScreen(tester);
-    await tester.tap(find.text('Open Sheet'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'Selecting Quiz then Continue navigates to the Create Quiz route',
+    (tester) async {
+      await _pumpHostScreen(tester);
+      await tester.tap(find.text('Open Sheet'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Quiz'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Quiz'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
 
-    // Tapping a disabled RadioListTile changes nothing -- Interview
-    // remains selected, confirmed indirectly: Continue still navigates to
-    // the Interview route, not anywhere Quiz-specific (no Quiz route
-    // exists at all in this test's router, so a Quiz navigation attempt
-    // would throw/leave the sheet open).
-    await tester.tap(find.text('Continue'));
-    await tester.pumpAndSettle();
+      expect(find.text('CREATE_QUIZ_PLACEHOLDER'), findsOneWidget);
+      expect(find.text('Choose Assessment'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
-    expect(find.text('SCHEDULE_INTERVIEW_PLACEHOLDER'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'Selecting Quiz then switching back to Interview navigates to Schedule Interview',
+    (tester) async {
+      await _pumpHostScreen(tester);
+      await tester.tap(find.text('Open Sheet'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Quiz'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Interview'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('SCHEDULE_INTERVIEW_PLACEHOLDER'), findsOneWidget);
+    },
+  );
 
   testWidgets('opening the sheet makes no backend request', (tester) async {
     // ChooseAssessmentTypeSheet takes no repository/provider dependency at
@@ -131,6 +149,7 @@ void main() {
 
     expect(find.text('Choose Assessment'), findsNothing);
     expect(find.text('SCHEDULE_INTERVIEW_PLACEHOLDER'), findsNothing);
+    expect(find.text('CREATE_QUIZ_PLACEHOLDER'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

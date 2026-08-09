@@ -14,6 +14,8 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/question_input.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_input.dart';
 
 const _secureStorageChannel = MethodChannel(
   'plugins.it_nomads.com/flutter_secure_storage',
@@ -175,6 +177,80 @@ InterviewCreateInput _validInput() {
   );
 }
 
+QuizCreateInput _validQuizInput() {
+  return const QuizCreateInput(
+    title: 'Backend Fundamentals',
+    instructions: 'Choose the best answer.',
+    timeLimitMinutes: 30,
+    passingScore: 70,
+  );
+}
+
+Map<String, dynamic> _questionJson({
+  int id = 1,
+  int quizId = 1,
+  String prompt = 'What is the capital of France?',
+  String type = 'multiple_choice',
+  dynamic options = const ['Paris', 'London', 'Berlin'],
+  String correctAnswer = 'Paris',
+  int points = 1,
+  int position = 0,
+}) {
+  return {
+    'id': id,
+    'quiz_id': quizId,
+    'prompt': prompt,
+    'type': type,
+    'options': options,
+    'correct_answer': correctAnswer,
+    'points': points,
+    'position': position,
+    'created_at': '2026-08-01T09:00:00.000000Z',
+    'updated_at': '2026-08-01T09:00:00.000000Z',
+  };
+}
+
+Map<String, dynamic> _quizJson({
+  int id = 1,
+  int assessmentId = 1,
+  String status = 'draft',
+  dynamic questions = const [],
+  dynamic assessment,
+}) {
+  return {
+    'id': id,
+    'assessment_id': assessmentId,
+    'title': 'Backend Fundamentals',
+    'instructions': 'Choose the best answer.',
+    'time_limit_minutes': 30,
+    'passing_score': 70,
+    'status': status,
+    'questions': questions,
+    'created_at': '2026-08-01T09:00:00.000000Z',
+    'updated_at': '2026-08-01T09:00:00.000000Z',
+    'assessment': ?assessment,
+  };
+}
+
+Map<String, dynamic> _quizAssessmentJson({
+  int id = 1,
+  int applicationId = 5,
+  String status = 'pending',
+}) {
+  return {
+    'id': id,
+    'application_id': applicationId,
+    'type': 'quiz',
+    'status': status,
+    'result': null,
+    'completed_at': null,
+    'created_at': '2026-08-01T09:00:00.000000Z',
+    'updated_at': '2026-08-01T09:00:00.000000Z',
+    'application': _applicationJson(id: applicationId),
+    'quiz': _quizJson(assessmentId: id),
+  };
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -254,29 +330,6 @@ void main() {
     });
 
     test(
-      'sends type only (no interview key) for a non-interview type',
-      () async {
-        final adapter = _FakeHttpClientAdapter((options) {
-          return _jsonResponse({
-            'success': false,
-            'message': 'Quiz assessments are not available yet.',
-            'data': null,
-          }, 422);
-        });
-        final repository = _repositoryWithAdapter(adapter);
-
-        await expectLater(
-          repository.createAssessment(applicationId: 5, type: 'quiz'),
-          throwsA(isA<ApiException>()),
-        );
-
-        final body = adapter.lastRequest?.data as Map<String, dynamic>;
-        expect(body['type'], 'quiz');
-        expect(body.containsKey('interview'), isFalse);
-      },
-    );
-
-    test(
       'unsupported local type (interview without interviewInput) fails safely before sending',
       () async {
         final adapter = _FakeHttpClientAdapter((options) {
@@ -289,6 +342,95 @@ void main() {
               repository.createAssessment(applicationId: 5, type: 'interview'),
           throwsA(isA<ArgumentError>()),
         );
+      },
+    );
+
+    test(
+      'unsupported local type (quiz without quizInput) fails safely before sending',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          fail('No request should have been sent.');
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        expect(
+          () => repository.createAssessment(applicationId: 5, type: 'quiz'),
+          throwsA(isA<ArgumentError>()),
+        );
+      },
+    );
+
+    test(
+      'sends the exact nested quiz request body, no interview key',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({'data': _quizAssessmentJson()}, 201);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await repository.createQuizAssessment(
+          applicationId: 5,
+          quizInput: _validQuizInput(),
+        );
+
+        expect(adapter.lastRequest?.method, 'POST');
+        expect(
+          adapter.lastRequest?.path,
+          '/organization/applications/5/assessments',
+        );
+        final body = adapter.lastRequest?.data as Map<String, dynamic>;
+        expect(body['type'], 'quiz');
+        expect(body.containsKey('interview'), isFalse);
+        final quiz = body['quiz'] as Map<String, dynamic>;
+        expect(quiz['title'], 'Backend Fundamentals');
+        expect(quiz['passing_score'], 70);
+      },
+    );
+
+    test('parses the created quiz assessment, including nested quiz', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _quizAssessmentJson()}, 201);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.createQuizAssessment(
+        applicationId: 5,
+        quizInput: _validQuizInput(),
+      );
+
+      expect(result.type, 'quiz');
+      expect(result.status, 'pending');
+      expect(result.quiz, isNotNull);
+      expect(result.quiz!.title, 'Backend Fundamentals');
+      expect(result.quiz!.status, 'draft');
+    });
+
+    test(
+      'sends type only (interview and quiz keys both absent) for an unrecognized type',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': false,
+            'message': 'The given data was invalid.',
+            'errors': {
+              'type': ['The selected type is invalid.'],
+            },
+          }, 422);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.createAssessment(
+            applicationId: 5,
+            type: 'not-a-real-type',
+          ),
+          throwsA(isA<ApiException>()),
+        );
+
+        final body = adapter.lastRequest?.data as Map<String, dynamic>;
+        expect(body['type'], 'not-a-real-type');
+        expect(body.containsKey('interview'), isFalse);
+        expect(body.containsKey('quiz'), isFalse);
       },
     );
 
@@ -853,6 +995,402 @@ void main() {
       await expectLater(
         repository.getStudentAssessmentForApplication(5),
         throwsA(isA<TypeError>()),
+      );
+    });
+  });
+
+  group('getOrganizationQuiz', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': null}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.getOrganizationQuiz(7);
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(adapter.lastRequest?.path, '/organization/assessments/7/quiz');
+    });
+
+    test('parses an existing quiz, including nested questions', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _quizJson(questions: [_questionJson()]),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getOrganizationQuiz(7);
+
+      expect(result, isNotNull);
+      expect(result!.title, 'Backend Fundamentals');
+      expect(result.questions, hasLength(1));
+      expect(result.questions.first.correctAnswer, 'Paris');
+    });
+
+    test('returns null when data is null (no quiz yet)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': null}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getOrganizationQuiz(7);
+
+      expect(result, isNull);
+    });
+
+    test('a non-null malformed response never silently becomes null', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': ['not', 'an', 'object'],
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getOrganizationQuiz(7),
+        throwsA(isA<TypeError>()),
+      );
+    });
+
+    test('throws ApiException on a 404', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Assessment not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getOrganizationQuiz(7),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having((e) => e.message, 'message', 'Assessment not found'),
+        ),
+      );
+    });
+  });
+
+  group('createQuizQuestion', () {
+    QuestionInput input() {
+      return const QuestionInput(
+        prompt: 'What is the capital of France?',
+        type: 'multiple_choice',
+        options: ['Paris', 'London', 'Berlin'],
+        correctAnswer: 'Paris',
+        points: 1,
+        position: 0,
+      );
+    }
+
+    test('uses the exact documented method, path, and body', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _questionJson()}, 201);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.createQuizQuestion(quizId: 3, input: input());
+
+      expect(adapter.lastRequest?.method, 'POST');
+      expect(adapter.lastRequest?.path, '/organization/quizzes/3/questions');
+      final body = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(body['prompt'], 'What is the capital of France?');
+      expect(body['options'], ['Paris', 'London', 'Berlin']);
+    });
+
+    test('parses the created question', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _questionJson()}, 201);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.createQuizQuestion(
+        quizId: 3,
+        input: input(),
+      );
+
+      expect(result.correctAnswer, 'Paris');
+      expect(result.type, 'multiple_choice');
+    });
+
+    test('throws with the exact 422 message for a published quiz', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Published quizzes cannot be modified',
+          'data': null,
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.createQuizQuestion(quizId: 3, input: input()),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'message',
+            'Published quizzes cannot be modified',
+          ),
+        ),
+      );
+    });
+
+    test('throws ApiException on a 404', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Quiz not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.createQuizQuestion(quizId: 3, input: input()),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404),
+        ),
+      );
+    });
+
+    test('preserves field validation errors', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'message': 'The given data was invalid.',
+          'errors': {
+            'correct_answer': ['The correct answer must be True or False.'],
+          },
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.createQuizQuestion(quizId: 3, input: input()),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.errors?['correct_answer'],
+            'errors[correct_answer]',
+            isNotNull,
+          ),
+        ),
+      );
+    });
+
+    test('malformed success response is never silently swallowed', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'id': 'not-an-int'},
+        }, 201);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.createQuizQuestion(quizId: 3, input: input()),
+        throwsA(anything),
+      );
+    });
+  });
+
+  group('updateQuizQuestion', () {
+    QuestionInput input() {
+      return const QuestionInput(
+        prompt: 'What is the capital of Germany?',
+        type: 'multiple_choice',
+        options: ['Berlin', 'Munich'],
+        correctAnswer: 'Berlin',
+        points: 1,
+        position: 0,
+      );
+    }
+
+    test('uses the exact documented method, path, and body', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _questionJson(prompt: 'What is the capital of Germany?'),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.updateQuizQuestion(
+        quizId: 3,
+        questionId: 9,
+        input: input(),
+      );
+
+      expect(adapter.lastRequest?.method, 'PUT');
+      expect(adapter.lastRequest?.path, '/organization/quizzes/3/questions/9');
+      final body = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(body['prompt'], 'What is the capital of Germany?');
+    });
+
+    test('parses the updated question', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _questionJson(prompt: 'What is the capital of Germany?'),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.updateQuizQuestion(
+        quizId: 3,
+        questionId: 9,
+        input: input(),
+      );
+
+      expect(result.prompt, 'What is the capital of Germany?');
+    });
+
+    test('throws ApiException on a 404 (question not on this quiz)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Question not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.updateQuizQuestion(quizId: 3, questionId: 9, input: input()),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having((e) => e.message, 'message', 'Question not found'),
+        ),
+      );
+    });
+  });
+
+  group('deleteQuizQuestion', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': true,
+          'message': 'Question deleted successfully',
+          'data': null,
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.deleteQuizQuestion(quizId: 3, questionId: 9);
+
+      expect(adapter.lastRequest?.method, 'DELETE');
+      expect(adapter.lastRequest?.path, '/organization/quizzes/3/questions/9');
+    });
+
+    test('throws with the exact 422 message for a published quiz', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Published quizzes cannot be modified',
+          'data': null,
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.deleteQuizQuestion(quizId: 3, questionId: 9),
+        throwsA(isA<ApiException>()),
+      );
+    });
+  });
+
+  group('publishQuiz', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _quizJson(status: 'published')}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.publishQuiz(3);
+
+      expect(adapter.lastRequest?.method, 'PUT');
+      expect(adapter.lastRequest?.path, '/organization/quizzes/3/publish');
+    });
+
+    test(
+      'parses the published quiz, including the nested assessment status',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'data': _quizJson(
+              status: 'published',
+              assessment: {
+                'id': 1,
+                'application_id': 5,
+                'type': 'quiz',
+                'status': 'scheduled',
+                'result': null,
+              },
+            ),
+          }, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        final result = await repository.publishQuiz(3);
+
+        expect(result.status, 'published');
+        expect(result.assessmentStatus, 'scheduled');
+      },
+    );
+
+    test('throws with the exact 422 message for zero questions', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message':
+              'A quiz must have at least one question before it can be published',
+          'data': null,
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.publishQuiz(3),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'message',
+            'A quiz must have at least one question before it can be published',
+          ),
+        ),
+      );
+    });
+
+    test('throws with the exact 422 message when already published', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Only draft quizzes can be published',
+          'data': null,
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.publishQuiz(3),
+        throwsA(isA<ApiException>()),
+      );
+    });
+
+    test('throws ApiException on a 401', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Unauthenticated',
+          'data': null,
+        }, 401);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.publishQuiz(3),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
+        ),
       );
     });
   });

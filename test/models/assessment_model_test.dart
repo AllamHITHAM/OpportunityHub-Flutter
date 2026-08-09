@@ -35,6 +35,21 @@ Map<String, dynamic> _applicationJson({int id = 5}) {
   };
 }
 
+Map<String, dynamic> _quizJson({int id = 1, int assessmentId = 1}) {
+  return {
+    'id': id,
+    'assessment_id': assessmentId,
+    'title': 'Backend Fundamentals',
+    'instructions': 'Choose the best answer.',
+    'time_limit_minutes': 30,
+    'passing_score': 70,
+    'status': 'draft',
+    'questions': [],
+    'created_at': '2026-08-01T09:00:00.000000Z',
+    'updated_at': '2026-08-01T09:00:00.000000Z',
+  };
+}
+
 Map<String, dynamic> _interviewJson({int id = 1, int assessmentId = 1}) {
   return {
     'id': id,
@@ -66,6 +81,7 @@ Map<String, dynamic> _assessmentJson({
   dynamic updatedAt = '2026-08-01T09:00:00.000000Z',
   Map<String, dynamic>? application,
   Map<String, dynamic>? interview,
+  Map<String, dynamic>? quiz,
 }) {
   return {
     'id': id,
@@ -78,6 +94,7 @@ Map<String, dynamic> _assessmentJson({
     'updated_at': updatedAt,
     'application': ?application,
     'interview': ?interview,
+    'quiz': ?quiz,
   };
 }
 
@@ -203,5 +220,59 @@ void main() {
     );
 
     expect(model.status, 'some_future_status');
+  });
+
+  test('parses a full quiz assessment response', () {
+    final model = AssessmentModel.fromJson(
+      _assessmentJson(
+        type: 'quiz',
+        status: 'pending',
+        application: _applicationJson(),
+        quiz: _quizJson(),
+      ),
+    );
+
+    expect(model.type, 'quiz');
+    expect(model.status, 'pending');
+    expect(model.application, isNotNull);
+    expect(model.quiz, isNotNull);
+    expect(model.quiz!.title, 'Backend Fundamentals');
+    expect(model.quiz!.passingScore, 70);
+    expect(model.quiz!.status, 'draft');
+    expect(model.interview, isNull);
+  });
+
+  test('interview parsing is unaffected by the new quiz field', () {
+    final model = AssessmentModel.fromJson(
+      _assessmentJson(type: 'interview', interview: _interviewJson()),
+    );
+
+    expect(model.interview, isNotNull);
+    expect(model.interview!.interviewType, 'online');
+    expect(model.quiz, isNull);
+  });
+
+  test('quiz is null when absent from the response', () {
+    final model = AssessmentModel.fromJson(
+      _assessmentJson(type: 'interview', interview: _interviewJson()),
+    );
+
+    expect(model.quiz, isNull);
+  });
+
+  test('a wrong-type nested quiz is treated as absent, not a crash', () {
+    final json = _assessmentJson(type: 'quiz');
+    json['quiz'] = 'not-an-object';
+
+    final model = AssessmentModel.fromJson(json);
+
+    expect(model.quiz, isNull);
+  });
+
+  test('both interview and quiz absent parses safely', () {
+    final model = AssessmentModel.fromJson(_assessmentJson());
+
+    expect(model.interview, isNull);
+    expect(model.quiz, isNull);
   });
 }

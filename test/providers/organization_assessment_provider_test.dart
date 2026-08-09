@@ -10,6 +10,7 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_input.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
@@ -50,6 +51,19 @@ InterviewCreateInput _validInput() {
   );
 }
 
+QuizCreateInput _validQuizInput() {
+  return const QuizCreateInput(title: 'Backend Fundamentals', passingScore: 70);
+}
+
+AssessmentModel _quizAssessment({int id = 1, int applicationId = 5}) {
+  return AssessmentModel(
+    id: id,
+    applicationId: applicationId,
+    type: 'quiz',
+    status: 'pending',
+  );
+}
+
 class _FakeAssessmentRepository extends AssessmentRepository {
   _FakeAssessmentRepository()
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
@@ -74,6 +88,7 @@ class _FakeAssessmentRepository extends AssessmentRepository {
   int createCallCount = 0;
   String? lastCreateType;
   InterviewCreateInput? lastInterviewInput;
+  QuizCreateInput? lastQuizInput;
 
   @override
   Future<AssessmentModel?> getAssessmentForApplication(
@@ -99,10 +114,12 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     required int applicationId,
     required String type,
     InterviewCreateInput? interviewInput,
+    QuizCreateInput? quizInput,
   }) async {
     createCallCount++;
     lastCreateType = type;
     lastInterviewInput = interviewInput;
+    lastQuizInput = quizInput;
     if (createDelay > Duration.zero) {
       await Future<void>.delayed(createDelay);
     }
@@ -270,6 +287,119 @@ void main() {
       expect(provider.actionErrorMessage, isNull);
       expect(provider.fieldErrors, isEmpty);
       expect(repository.lastCreateType, 'interview');
+      expect(repository.lastInterviewInput, isNotNull);
+    },
+  );
+
+  test(
+    'createAssessment quiz success sets the assessment and loadedApplicationId',
+    () async {
+      repository.createResult = _quizAssessment(applicationId: 5);
+
+      final success = await provider.createAssessment(
+        applicationId: 5,
+        type: 'quiz',
+        quizInput: _validQuizInput(),
+      );
+
+      expect(success, isTrue);
+      expect(provider.assessment, isNotNull);
+      expect(provider.assessment!.type, 'quiz');
+      expect(provider.loadedApplicationId, 5);
+      expect(repository.lastCreateType, 'quiz');
+      expect(repository.lastQuizInput, isNotNull);
+      expect(repository.lastInterviewInput, isNull);
+    },
+  );
+
+  test('createAssessment quiz validation error exposes field errors', () async {
+    repository.createError = ApiException(
+      'The given data was invalid.',
+      statusCode: 422,
+      errors: {
+        'quiz.passing_score': ['The quiz.passing score field is required.'],
+      },
+    );
+
+    final success = await provider.createAssessment(
+      applicationId: 5,
+      type: 'quiz',
+      quizInput: _validQuizInput(),
+    );
+
+    expect(success, isFalse);
+    expect(provider.fieldErrors['quiz.passing_score'], isNotNull);
+    expect(provider.assessment, isNull);
+  });
+
+  test(
+    'a duplicate quiz create submission for the same application is blocked',
+    () async {
+      repository.createDelay = const Duration(milliseconds: 50);
+      repository.createResult = _quizAssessment(applicationId: 5);
+
+      final first = provider.createAssessment(
+        applicationId: 5,
+        type: 'quiz',
+        quizInput: _validQuizInput(),
+      );
+      final second = provider.createAssessment(
+        applicationId: 5,
+        type: 'quiz',
+        quizInput: _validQuizInput(),
+      );
+
+      final results = await Future.wait([first, second]);
+
+      expect(repository.createCallCount, 1);
+      expect(results.where((success) => success).length, 1);
+    },
+  );
+
+  test(
+    'createAssessment rejects a quizInput when type is interview (local guard)',
+    () {
+      expect(
+        () => provider.createAssessment(
+          applicationId: 5,
+          type: 'interview',
+          interviewInput: _validInput(),
+          quizInput: _validQuizInput(),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    },
+  );
+
+  test(
+    'createAssessment rejects an interviewInput when type is quiz (local guard)',
+    () {
+      expect(
+        () => provider.createAssessment(
+          applicationId: 5,
+          type: 'quiz',
+          quizInput: _validQuizInput(),
+          interviewInput: _validInput(),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    },
+  );
+
+  test(
+    'interview creation behavior is unchanged by the quiz addition',
+    () async {
+      repository.createResult = _assessment(applicationId: 5);
+
+      final success = await provider.createAssessment(
+        applicationId: 5,
+        type: 'interview',
+        interviewInput: _validInput(),
+      );
+
+      expect(success, isTrue);
+      expect(provider.assessment!.type, 'interview');
+      expect(repository.lastQuizInput, isNull);
       expect(repository.lastInterviewInput, isNotNull);
     },
   );

@@ -13,6 +13,8 @@ import 'package:opportunityhub_flutter/features/applications/data/application_re
 import 'package:opportunityhub_flutter/features/applications/presentation/organization_application_details_screen.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_input.dart';
+import 'package:opportunityhub_flutter/features/assessments/presentation/organization_quiz_editor_screen.dart';
 import 'package:opportunityhub_flutter/features/assessments/presentation/schedule_interview_screen.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/applicant_summary_model.dart';
@@ -21,6 +23,8 @@ import 'package:opportunityhub_flutter/models/assessment_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/interview_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
+import 'package:opportunityhub_flutter/models/quiz_model.dart';
+import 'package:opportunityhub_flutter/providers/organization_quiz_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
@@ -111,6 +115,26 @@ AssessmentModel _assessment({int id = 1, int applicationId = 1}) {
   );
 }
 
+AssessmentModel _quizAssessment({
+  int id = 1,
+  int applicationId = 1,
+  String quizStatus = 'draft',
+}) {
+  return AssessmentModel(
+    id: id,
+    applicationId: applicationId,
+    type: 'quiz',
+    status: quizStatus == 'published' ? 'scheduled' : 'pending',
+    quiz: QuizModel(
+      id: id,
+      assessmentId: id,
+      title: 'Backend Fundamentals',
+      passingScore: 70,
+      status: quizStatus,
+    ),
+  );
+}
+
 class _FakeAssessmentRepository extends AssessmentRepository {
   _FakeAssessmentRepository({
     this.getResult,
@@ -126,6 +150,7 @@ class _FakeAssessmentRepository extends AssessmentRepository {
 
   AssessmentModel? createResult;
   InterviewCreateInput? lastInterviewInput;
+  QuizCreateInput? lastQuizInput;
 
   @override
   Future<AssessmentModel?> getAssessmentForApplication(
@@ -144,10 +169,19 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     required int applicationId,
     required String type,
     InterviewCreateInput? interviewInput,
+    QuizCreateInput? quizInput,
   }) async {
     lastInterviewInput = interviewInput;
+    lastQuizInput = quizInput;
     return createResult ?? _assessment(applicationId: applicationId);
   }
+
+  @override
+  Future<QuizModel?> getOrganizationQuiz(int assessmentId) async {
+    return quizGetResult;
+  }
+
+  QuizModel? quizGetResult;
 }
 
 class _FakeApplicationRepository extends ApplicationRepository {
@@ -194,10 +228,15 @@ class _FakeApplicationRepository extends ApplicationRepository {
 }
 
 class _Providers {
-  _Providers({required this.applications, required this.assessment});
+  _Providers({
+    required this.applications,
+    required this.assessment,
+    required this.quiz,
+  });
 
   final OrganizationApplicationsProvider applications;
   final OrganizationAssessmentProvider assessment;
+  final OrganizationQuizProvider quiz;
 }
 
 GoRouter _detailsRouter(int applicationId) {
@@ -219,6 +258,15 @@ GoRouter _detailsRouter(int applicationId) {
           applicationId: int.parse(state.pathParameters['id']!),
         ),
       ),
+      // Registered so the real "Manage Quiz"/"View Quiz" action can
+      // navigate to the real Quiz editor screen, exactly like AppRouter's
+      // own route table.
+      GoRoute(
+        path: '${AppRoutes.organizationAssessments}/:id/quiz',
+        builder: (_, state) => OrganizationQuizEditorScreen(
+          assessmentId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
     ],
   );
 }
@@ -236,12 +284,18 @@ Future<_Providers> _pumpDetails(
   addTearDown(tester.view.resetDevicePixelRatio);
 
   final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+  final resolvedAssessmentRepository =
+      assessmentRepository ?? _FakeAssessmentRepository();
   final applicationsProvider = OrganizationApplicationsProvider(
     repository: repository,
     authProvider: authProvider,
   );
   final assessmentProvider = OrganizationAssessmentProvider(
-    repository: assessmentRepository ?? _FakeAssessmentRepository(),
+    repository: resolvedAssessmentRepository,
+    authProvider: authProvider,
+  );
+  final quizProvider = OrganizationQuizProvider(
+    repository: resolvedAssessmentRepository,
     authProvider: authProvider,
   );
 
@@ -256,6 +310,9 @@ Future<_Providers> _pumpDetails(
         ChangeNotifierProvider<OrganizationAssessmentProvider>.value(
           value: assessmentProvider,
         ),
+        ChangeNotifierProvider<OrganizationQuizProvider>.value(
+          value: quizProvider,
+        ),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -268,6 +325,7 @@ Future<_Providers> _pumpDetails(
   return _Providers(
     applications: applicationsProvider,
     assessment: assessmentProvider,
+    quiz: quizProvider,
   );
 }
 
@@ -588,6 +646,128 @@ void main() {
 
       expect(find.text('Assessment Not Found'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'in_assessment with an interview-type assessment shows the existing read-only Interview card',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _assessment(applicationId: 1),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Assessment'), findsOneWidget);
+      expect(find.text('Online'), findsOneWidget);
+      expect(find.text('https://meet.example.com/room'), findsOneWidget);
+      expect(find.text('Manage Quiz'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'in_assessment with no assessment record shows a controlled warning (same as legacy)',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(getResult: null);
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Assessment Not Found'), findsOneWidget);
+      expect(find.textContaining('Under Assessment'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'in_assessment with a draft quiz-type assessment shows Manage Quiz',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _quizAssessment(applicationId: 1, quizStatus: 'draft'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Assessment'), findsOneWidget);
+      expect(find.text('Backend Fundamentals'), findsOneWidget);
+      expect(find.text('Manage Quiz'), findsOneWidget);
+      expect(find.text('View Quiz'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'in_assessment with a published quiz-type assessment shows View Quiz',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _quizAssessment(applicationId: 1, quizStatus: 'published'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('View Quiz'), findsOneWidget);
+      expect(find.text('Manage Quiz'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'tapping Manage Quiz navigates to the Quiz editor and refreshes on return',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository =
+          _FakeAssessmentRepository(
+              getResult: _quizAssessment(applicationId: 1, quizStatus: 'draft'),
+            )
+            ..quizGetResult = QuizModel(
+              id: 1,
+              assessmentId: 1,
+              title: 'Backend Fundamentals',
+              passingScore: 70,
+              status: 'draft',
+            );
+
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+      expect(assessmentRepository.getCallCount, 1);
+
+      await tester.tap(find.text('Manage Quiz'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Backend Fundamentals'), findsWidgets);
+
+      // Navigate back to Application Details.
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      // The Assessment is force-refreshed on return.
+      expect(assessmentRepository.getCallCount, 2);
     },
   );
 

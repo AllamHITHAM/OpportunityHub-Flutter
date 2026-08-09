@@ -83,6 +83,24 @@ class AppRoutes {
   static String organizationScheduleInterview(int applicationId) =>
       '$organizationApplications/$applicationId/assessment/interview';
 
+  /// Organization-only Quiz draft creation for one application's
+  /// Assessment — nested under `organizationApplications` for the same
+  /// reason as [organizationScheduleInterview]: no new router guard needed.
+  static String organizationCreateQuiz(int applicationId) =>
+      '$organizationApplications/$applicationId/assessment/quiz';
+
+  /// Organization-only Assessment-addressed routes — currently only the
+  /// Quiz editor below, reached by Assessment ID (not Application ID)
+  /// because the backend's Quiz-authoring routes are themselves addressed
+  /// by assessment/quiz ID, not application ID. See `AppRouter` for the
+  /// role/profile-completion gating applied to this prefix.
+  static const String organizationAssessments = '/organization/assessments';
+
+  /// Organization-only Quiz question authoring/publish for one Assessment
+  /// — see [organizationAssessments].
+  static String organizationQuizEditor(int assessmentId) =>
+      '$organizationAssessments/$assessmentId/quiz';
+
   /// Student-only opportunity browsing — see `AppRouter` for the
   /// role/profile-completion gating applied to these.
   static const String studentOpportunities = '/student/opportunities';

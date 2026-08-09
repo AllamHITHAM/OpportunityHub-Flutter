@@ -7,13 +7,13 @@ import '../../../core/widgets/app_widgets.dart';
 import '../../../routes/app_routes.dart';
 
 /// A compact modal bottom sheet for choosing which assessment path an
-/// organization wants for a shortlisted application — Interview (enabled)
-/// or Quiz (disabled, "Coming Soon"). Call [showChooseAssessmentTypeSheet]
-/// rather than constructing this directly.
+/// organization wants for a shortlisted application — Interview or, as of
+/// Phase 6B-2, Quiz. Call [showChooseAssessmentTypeSheet] rather than
+/// constructing this directly.
 ///
 /// This sheet never makes a backend request itself — Continue only
-/// navigates to the dedicated Schedule Interview screen for the chosen
-/// application; the actual Assessment creation happens there.
+/// navigates to the dedicated Schedule Interview or Create Quiz screen for
+/// the chosen application; the actual Assessment creation happens there.
 class ChooseAssessmentTypeSheet extends StatefulWidget {
   const ChooseAssessmentTypeSheet({super.key, required this.applicationId});
 
@@ -25,16 +25,17 @@ class ChooseAssessmentTypeSheet extends StatefulWidget {
 }
 
 class _ChooseAssessmentTypeSheetState extends State<ChooseAssessmentTypeSheet> {
-  // Interview is the only selectable option today; Quiz is shown disabled.
-  // Kept as real selection state (rather than a hardcoded constant) so a
-  // future Quiz option only needs its `enabled` flag flipped, not a
-  // structural rewrite of this sheet.
   String _selectedType = 'interview';
 
   void _continue() {
-    if (_selectedType != 'interview') return;
     Navigator.of(context).pop();
-    context.push(AppRoutes.organizationScheduleInterview(widget.applicationId));
+    if (_selectedType == 'quiz') {
+      context.push(AppRoutes.organizationCreateQuiz(widget.applicationId));
+    } else {
+      context.push(
+        AppRoutes.organizationScheduleInterview(widget.applicationId),
+      );
+    }
   }
 
   @override
@@ -78,13 +79,8 @@ class _ChooseAssessmentTypeSheetState extends State<ChooseAssessmentTypeSheet> {
                 RadioListTile<String>(
                   contentPadding: EdgeInsets.zero,
                   value: 'quiz',
-                  enabled: false,
                   title: const Text('Quiz'),
                   subtitle: const Text('Assess candidates with a short quiz.'),
-                  secondary: const StatusChip(
-                    label: 'Coming Soon',
-                    compact: true,
-                  ),
                 ),
               ],
             ),

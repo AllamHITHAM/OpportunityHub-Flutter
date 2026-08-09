@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../core/api/api_client.dart';
 import '../features/assessments/data/assessment_repository.dart';
 import '../features/assessments/data/interview_create_input.dart';
+import '../features/assessments/data/quiz_create_input.dart';
 import '../models/assessment_model.dart';
 import 'auth_provider.dart';
 
@@ -135,11 +136,34 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
   /// success. A duplicate submission for the same application while one is
   /// already in flight is ignored (returns `false` immediately, no second
   /// repository call).
+  ///
+  /// Exactly one of [interviewInput]/[quizInput] must be provided, matching
+  /// [type]: `type == 'interview'` requires [interviewInput] (and rejects a
+  /// [quizInput]); `type == 'quiz'` requires [quizInput] (and rejects an
+  /// [interviewInput]). Both present, or the wrong one for [type], is a
+  /// local programming error — this never reaches the network, matching
+  /// [AssessmentRepository.createAssessment]'s own local validation.
   Future<bool> createAssessment({
     required int applicationId,
     required String type,
     InterviewCreateInput? interviewInput,
+    QuizCreateInput? quizInput,
   }) async {
+    if (type == 'interview' && quizInput != null) {
+      throw ArgumentError.value(
+        quizInput,
+        'quizInput',
+        'quizInput must not be provided when type is "interview"',
+      );
+    }
+    if (type == 'quiz' && interviewInput != null) {
+      throw ArgumentError.value(
+        interviewInput,
+        'interviewInput',
+        'interviewInput must not be provided when type is "quiz"',
+      );
+    }
+
     if (busyApplicationIds.contains(applicationId)) return false;
 
     busyApplicationIds.add(applicationId);
@@ -153,6 +177,7 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
         applicationId: applicationId,
         type: type,
         interviewInput: interviewInput,
+        quizInput: quizInput,
       );
       assessment = created;
       loadedApplicationId = applicationId;

@@ -12,6 +12,7 @@ import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
+import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_input.dart';
 import 'package:opportunityhub_flutter/features/assessments/presentation/schedule_interview_screen.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
@@ -100,6 +101,7 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     required int applicationId,
     required String type,
     InterviewCreateInput? interviewInput,
+    QuizCreateInput? quizInput,
   }) async {
     createCallCount++;
     lastInterviewInput = interviewInput;
@@ -679,6 +681,7 @@ class _ThrowingAssessmentRepository extends AssessmentRepository {
     required int applicationId,
     required String type,
     InterviewCreateInput? interviewInput,
+    QuizCreateInput? quizInput,
   }) async {
     createCallCount++;
     throw TypeError();

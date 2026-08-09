@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_spacing.dart';
@@ -8,6 +9,7 @@ import '../../../models/application_model.dart';
 import '../../../models/assessment_model.dart';
 import '../../../providers/organization_applications_provider.dart';
 import '../../../providers/organization_assessment_provider.dart';
+import '../../../routes/app_routes.dart';
 import '../../assessments/presentation/assessment_display.dart';
 import '../../assessments/presentation/choose_assessment_type_sheet.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
@@ -412,12 +414,17 @@ class _StatusActionsSectionState extends State<_StatusActionsSection> {
 }
 
 /// Read-only Assessment display for an application that has one, plus the
-/// controlled "backend says interview_scheduled but no assessment record
-/// exists" recovery state. Renders nothing for every other
+/// controlled "backend says an assessment is active but no assessment
+/// record exists" recovery state. Renders nothing for every other
 /// status/assessment combination — in particular, a shortlisted
 /// application with no assessment yet shows nothing here; the "Choose
 /// Assessment" action in [_StatusActionsSection] is the only affordance
 /// for that case, so this section never duplicates it with an empty card.
+///
+/// Branches on [AssessmentModel.type] (never on `application.status`
+/// alone, which only says an assessment exists, not what kind) — Interview
+/// keeps its existing read-only card; Quiz (Phase 6B-2) gets its own
+/// summary card with a Manage/View Quiz action.
 class _AssessmentSection extends StatelessWidget {
   const _AssessmentSection({required this.application});
 
@@ -441,9 +448,15 @@ class _AssessmentSection extends StatelessWidget {
     }
 
     if (isThisOne && provider.assessment != null) {
+      final assessment = provider.assessment!;
       return Padding(
         padding: const EdgeInsets.only(top: AppSpacing.md),
-        child: _AssessmentDetailsCard(assessment: provider.assessment!),
+        child: assessment.type == 'quiz'
+            ? _QuizAssessmentSummaryCard(
+                assessment: assessment,
+                applicationId: applicationId,
+              )
+            : _AssessmentDetailsCard(assessment: assessment),
       );
     }
 
@@ -459,13 +472,15 @@ class _AssessmentSection extends StatelessWidget {
       );
     }
 
-    if (application.status == 'interview_scheduled') {
+    if (application.status == 'in_assessment' ||
+        application.status == 'interview_scheduled') {
       // A genuine backend inconsistency (the application says an
-      // interview was scheduled, but no assessment record backs it up) —
-      // a controlled warning with retry, deliberately not another
-      // creation button, since automatically offering to create a second
-      // assessment here would risk exactly the duplicate this phase must
-      // prevent.
+      // assessment is active, but no assessment record backs it up) — a
+      // controlled warning with retry, deliberately not another creation
+      // button, since automatically offering to create a second assessment
+      // here would risk exactly the duplicate this phase must prevent.
+      final label =
+          applicationStatusLabels[application.status] ?? application.status;
       return Padding(
         padding: const EdgeInsets.only(top: AppSpacing.md),
         child: AppErrorView(
@@ -473,8 +488,8 @@ class _AssessmentSection extends StatelessWidget {
           icon: Icons.warning_amber_rounded,
           title: 'Assessment Not Found',
           message:
-              'This application is marked Interview Scheduled, but no '
-              'assessment record could be found.',
+              'This application is marked $label, but no assessment '
+              'record could be found.',
           onRetry: () =>
               provider.loadForApplication(applicationId, forceRefresh: true),
         ),
@@ -482,6 +497,75 @@ class _AssessmentSection extends StatelessWidget {
     }
 
     return const SizedBox.shrink();
+  }
+}
+
+/// Quiz-type Assessment summary — the shared Assessment-level fields plus a
+/// compact Quiz summary (title/status/question count) and a single Manage
+/// Quiz (draft) / View Quiz (published) action that opens
+/// [OrganizationQuizEditorScreen]. On return, force-refreshes the
+/// Assessment so a status/quiz change made in the editor (e.g. publishing)
+/// is reflected immediately — `OrganizationQuizProvider` and
+/// `OrganizationAssessmentProvider` are deliberately separate providers
+/// (see `OrganizationQuizProvider`'s own doc comment), so this refresh is
+/// how this screen picks up what changed on the other one.
+class _QuizAssessmentSummaryCard extends StatelessWidget {
+  const _QuizAssessmentSummaryCard({
+    required this.assessment,
+    required this.applicationId,
+  });
+
+  final AssessmentModel assessment;
+  final int applicationId;
+
+  Future<void> _openEditor(BuildContext context) async {
+    await context.push(AppRoutes.organizationQuizEditor(assessment.id));
+    if (!context.mounted) return;
+    context.read<OrganizationAssessmentProvider>().loadForApplication(
+      applicationId,
+      forceRefresh: true,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final quiz = assessment.quiz;
+    final isDraft = quiz?.status == 'draft';
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SectionHeader(title: 'Assessment'),
+          OpportunityDetailRow(
+            label: 'Type',
+            value: assessmentTypeLabels[assessment.type] ?? assessment.type,
+          ),
+          OpportunityDetailRow(
+            label: 'Status',
+            value:
+                assessmentStatusLabels[assessment.status] ?? assessment.status,
+          ),
+          if (quiz != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            OpportunityDetailRow(label: 'Quiz Title', value: quiz.title),
+            OpportunityDetailRow(
+              label: 'Quiz Status',
+              value: quizStatusLabels[quiz.status] ?? quiz.status,
+            ),
+            OpportunityDetailRow(
+              label: 'Questions',
+              value: '${quiz.questions.length}',
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            SecondaryButton(
+              label: isDraft ? 'Manage Quiz' : 'View Quiz',
+              onPressed: () => _openEditor(context),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 

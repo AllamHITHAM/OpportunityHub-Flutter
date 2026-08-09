@@ -68,3 +68,22 @@ const interviewDecisionLabels = {
   'failed': 'Failed',
   'waiting': 'Waiting',
 };
+
+/// User-facing labels for every documented `quiz.status` value.
+const quizStatusLabels = {'draft': 'Draft', 'published': 'Published'};
+
+AppStatusType quizStatusChipType(String status) {
+  switch (status) {
+    case 'published':
+      return AppStatusType.success;
+    case 'draft':
+    default:
+      return AppStatusType.warning;
+  }
+}
+
+/// User-facing labels for every documented `question.type` value.
+const questionTypeLabels = {
+  'multiple_choice': 'Multiple Choice',
+  'true_false': 'True / False',
+};

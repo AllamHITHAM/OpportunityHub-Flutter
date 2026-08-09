@@ -19,6 +19,8 @@ import '../features/applications/presentation/organization_applicants_screen.dar
 import '../features/applications/presentation/organization_application_details_screen.dart';
 import '../features/applications/presentation/student_application_details_screen.dart';
 import '../features/applications/presentation/student_applications_screen.dart';
+import '../features/assessments/presentation/create_quiz_screen.dart';
+import '../features/assessments/presentation/organization_quiz_editor_screen.dart';
 import '../features/assessments/presentation/schedule_interview_screen.dart';
 import '../features/cv/presentation/student_cv_screen.dart';
 import '../features/opportunities/presentation/opportunity_form_screen.dart';
@@ -108,6 +110,12 @@ const _studentApplicationsPathPrefix = AppRoutes.studentApplications;
 /// [_organizationOpportunitiesPathPrefix]; this prefix additionally covers
 /// the standalone `/organization/applications/:id` details route.
 const _organizationApplicationsPathPrefix = AppRoutes.organizationApplications;
+
+/// Organization Quiz editor — a protected feature area, not onboarding.
+/// A separate prefix from [_organizationApplicationsPathPrefix] because
+/// these routes are addressed by Assessment ID
+/// (`AppRoutes.organizationAssessments`), not Application ID.
+const _organizationAssessmentsPathPrefix = AppRoutes.organizationAssessments;
 
 /// Defines the app's navigation routes and redirects based on
 /// [AuthProvider], [StudentProfileProvider], and [OrganizationProfileProvider].
@@ -228,6 +236,18 @@ class AppRouter {
           ),
         ),
         GoRoute(
+          path: '${AppRoutes.organizationApplications}/:id/assessment/quiz',
+          builder: (_, state) => CreateQuizScreen(
+            applicationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
+        GoRoute(
+          path: '${AppRoutes.organizationAssessments}/:id/quiz',
+          builder: (_, state) => OrganizationQuizEditorScreen(
+            assessmentId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
+        GoRoute(
           path: AppRoutes.studentOpportunities,
           builder: (_, _) => const StudentOpportunitiesScreen(),
         ),
@@ -323,6 +343,14 @@ class AppRouter {
     // onboarding, but still off-limits to every other role.
     if (role != 'organization' &&
         currentPath.startsWith(_organizationApplicationsPathPrefix)) {
+      return homePath;
+    }
+
+    // The Quiz editor (Assessment-ID-addressed routes) is an
+    // organization-only feature area — not onboarding, but still
+    // off-limits to every other role.
+    if (role != 'organization' &&
+        currentPath.startsWith(_organizationAssessmentsPathPrefix)) {
       return homePath;
     }
 
