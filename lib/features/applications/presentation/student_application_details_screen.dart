@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -8,8 +9,10 @@ import '../../../core/widgets/app_widgets.dart';
 import '../../../models/application_model.dart';
 import '../../../models/assessment_model.dart';
 import '../../../models/interview_model.dart';
+import '../../../models/quiz_model.dart';
 import '../../../providers/student_applications_provider.dart';
 import '../../../providers/student_assessment_provider.dart';
+import '../../../routes/app_routes.dart';
 import '../../assessments/presentation/assessment_display.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
 import 'application_display.dart';
@@ -196,7 +199,10 @@ class _StudentAssessmentSection extends StatelessWidget {
     if (provider.hasAssessmentFor(application.id)) {
       return Padding(
         padding: const EdgeInsets.only(top: AppSpacing.md),
-        child: _StudentAssessmentDetailsCard(assessment: provider.assessment!),
+        child: _StudentAssessmentDetailsCard(
+          assessment: provider.assessment!,
+          applicationId: application.id,
+        ),
       );
     }
 
@@ -238,9 +244,13 @@ class _StudentAssessmentSection extends StatelessWidget {
 /// allowed to see. Branches on [AssessmentModel.type] so a future Quiz type
 /// only needs a new branch here, not a redesign of this section.
 class _StudentAssessmentDetailsCard extends StatelessWidget {
-  const _StudentAssessmentDetailsCard({required this.assessment});
+  const _StudentAssessmentDetailsCard({
+    required this.assessment,
+    required this.applicationId,
+  });
 
   final AssessmentModel assessment;
+  final int applicationId;
 
   @override
   Widget build(BuildContext context) {
@@ -268,7 +278,10 @@ class _StudentAssessmentDetailsCard extends StatelessWidget {
           if (assessment.type == 'interview')
             _StudentInterviewDetails(interview: assessment.interview)
           else if (assessment.type == 'quiz')
-            const _QuizAssessmentPlaceholder(),
+            _StudentQuizDetails(
+              assessment: assessment,
+              applicationId: applicationId,
+            ),
           // Any other/unknown type: the Type/Status/Result rows above are
           // the entire generic summary — nothing more to render, and
           // nothing to crash on.
@@ -393,31 +406,85 @@ class _MeetingLinkRow extends StatelessWidget {
   }
 }
 
-/// A compact placeholder for `assessment.type == 'quiz'` — Quiz itself is a
-/// future phase (no questions/route/submission/score UI exists yet); this
-/// only proves the section doesn't crash or misrender for that type.
-class _QuizAssessmentPlaceholder extends StatelessWidget {
-  const _QuizAssessmentPlaceholder();
+/// Quiz-specific detail for `assessment.type == 'quiz'` — a compact quiz
+/// summary (title, passing score, time limit, question count) plus a
+/// single Open Quiz action while the quiz is published and not yet
+/// completed, matching [_StudentInterviewDetails]'s role for interviews.
+///
+/// Deliberately doesn't try to distinguish "not started" from "in
+/// progress" — [StudentQuizScreen] itself determines Start vs. Resume the
+/// moment it's opened (see that screen's own doc comment), so a single
+/// "Open Quiz" action covers both without this screen needing to know
+/// which one applies, or fetching the attempt itself (there is no
+/// endpoint to do that without also starting/resuming it).
+///
+/// Reads no answer/score/correct-answer data — [AssessmentModel.result]
+/// (rendered by the parent card once non-null) is the only outcome shown
+/// here; a numeric score is only ever available transiently inside
+/// [StudentQuizScreen] right after the student's own submit — see that
+/// screen's doc comment for why.
+class _StudentQuizDetails extends StatelessWidget {
+  const _StudentQuizDetails({
+    required this.assessment,
+    required this.applicationId,
+  });
+
+  final AssessmentModel assessment;
+  final int applicationId;
+
+  Future<void> _openQuiz(BuildContext context) async {
+    await context.push(AppRoutes.studentQuiz(assessment.id));
+    if (!context.mounted) return;
+    context.read<StudentAssessmentProvider>().loadForApplication(
+      applicationId,
+      forceRefresh: true,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final QuizModel? quiz = assessment.quiz;
     final textTheme = Theme.of(context).textTheme;
 
-    return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.xs),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Quiz assessment', style: textTheme.titleSmall),
-          const SizedBox(height: AppSpacing.xxs),
-          Text(
-            'Quiz functionality will be available in a later phase.',
-            style: textTheme.bodySmall?.copyWith(
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
-      ),
+    if (assessment.status == 'completed') {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.xs),
+        child: Text('Quiz completed', style: textTheme.titleSmall),
+      );
+    }
+
+    if (quiz == null || quiz.status != 'published') {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.xs),
+        child: Text(
+          'Quiz details are not available yet.',
+          style: textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: AppSpacing.xs),
+        OpportunityDetailRow(label: 'Quiz Title', value: quiz.title),
+        OpportunityDetailRow(
+          label: 'Passing Score',
+          value: '${quiz.passingScore}%',
+        ),
+        OpportunityDetailRow(
+          label: 'Time Limit',
+          value: quiz.timeLimitMinutes != null
+              ? '${quiz.timeLimitMinutes} minutes'
+              : 'No time limit',
+        ),
+        OpportunityDetailRow(
+          label: 'Questions',
+          value: '${quiz.questions.length}',
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        PrimaryButton(label: 'Open Quiz', onPressed: () => _openQuiz(context)),
+      ],
     );
   }
 }

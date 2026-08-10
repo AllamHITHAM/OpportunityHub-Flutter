@@ -1,12 +1,18 @@
-/// Organization-authoring-side question detail — nested under a
-/// [QuizModel]'s `questions` list, or returned standalone by
-/// `POST/PUT /organization/quizzes/{quiz}/questions[/{question}]`.
+/// A quiz question — nested under a [QuizModel]'s `questions` list, or
+/// returned standalone by
+/// `POST/PUT /organization/quizzes/{quiz}/questions[/{question}]`
+/// (Organization authoring) and
+/// `GET /student/assessments/{assessment}/quiz` (Student quiz-taking).
 ///
-/// [correctAnswer] is present because this model is exclusively used on the
-/// Organization-authoring side, which is expected to see the answer key it
-/// wrote itself — `correct_answer` is organization-internal and must never
-/// be exposed to a student; there is no Student-facing counterpart to this
-/// model yet, and none should be created from this one.
+/// Shared by both sides rather than split into a separate Student-only
+/// model: every field except [correctAnswer] is identical either way, and
+/// [correctAnswer] itself is `String?` for exactly that reason —
+/// `correct_answer` is organization-internal (the backend's
+/// `HidesInternalQuestionFields` trait strips the key entirely from every
+/// Student-facing response, via `Question::makeHidden`), so it's always
+/// present on the Organization side and always `null` on the Student side.
+/// Student-facing code must never read [correctAnswer]; see
+/// `StudentQuizProvider`/`StudentQuizScreen`, which never reference it.
 class QuestionModel {
   const QuestionModel({
     required this.id,
@@ -14,7 +20,7 @@ class QuestionModel {
     required this.prompt,
     required this.type,
     this.options,
-    required this.correctAnswer,
+    this.correctAnswer,
     required this.points,
     required this.position,
     this.createdAt,
@@ -33,8 +39,10 @@ class QuestionModel {
   /// the backend for that type.
   final List<String>? options;
 
-  /// Organization-internal — see this class's own doc comment.
-  final String correctAnswer;
+  /// Organization-internal — see this class's own doc comment. Always
+  /// present in an Organization response; always `null` in a Student
+  /// response.
+  final String? correctAnswer;
 
   final int points;
   final int position;
@@ -48,7 +56,7 @@ class QuestionModel {
       prompt: json['prompt'] as String,
       type: json['type'] as String,
       options: _parseOptions(json['options']),
-      correctAnswer: json['correct_answer'] as String,
+      correctAnswer: json['correct_answer'] as String?,
       points: json['points'] as int,
       position: json['position'] as int,
       createdAt: _parseDate(json['created_at']),

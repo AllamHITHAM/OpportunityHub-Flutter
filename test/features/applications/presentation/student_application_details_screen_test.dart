@@ -19,6 +19,8 @@ import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/interview_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
+import 'package:opportunityhub_flutter/models/question_model.dart';
+import 'package:opportunityhub_flutter/models/quiz_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_assessment_provider.dart';
@@ -161,6 +163,7 @@ AssessmentModel _assessment({
   String status = 'scheduled',
   String? result,
   InterviewModel? interview,
+  QuizModel? quiz,
 }) {
   return AssessmentModel(
     id: id,
@@ -169,6 +172,36 @@ AssessmentModel _assessment({
     status: status,
     result: result,
     interview: interview,
+    quiz: quiz,
+  );
+}
+
+QuizModel _quiz({
+  int id = 1,
+  int assessmentId = 1,
+  String status = 'published',
+  int? timeLimitMinutes,
+  int passingScore = 70,
+  int questionCount = 2,
+}) {
+  return QuizModel(
+    id: id,
+    assessmentId: assessmentId,
+    title: 'Backend Fundamentals',
+    timeLimitMinutes: timeLimitMinutes,
+    passingScore: passingScore,
+    status: status,
+    questions: List.generate(
+      questionCount,
+      (index) => QuestionModel(
+        id: index + 1,
+        quizId: id,
+        prompt: 'Question ${index + 1}',
+        type: 'true_false',
+        points: 1,
+        position: index,
+      ),
+    ),
   );
 }
 
@@ -206,6 +239,13 @@ Future<StudentApplicationsProvider> _pumpDetails(
         path: '${AppRoutes.studentApplications}/:id',
         builder: (_, state) => StudentApplicationDetailsScreen(
           applicationId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.studentAssessments}/:id/quiz',
+        builder: (_, state) => Scaffold(
+          appBar: AppBar(),
+          body: Text('QUIZ_SCREEN_PLACEHOLDER ${state.pathParameters['id']}'),
         ),
       ),
     ],
@@ -822,31 +862,6 @@ void main() {
   });
 
   group('Assessment section — future assessment types', () {
-    testWidgets('a quiz-type assessment shows only the future placeholder', (
-      tester,
-    ) async {
-      final applicationRepository = _FakeApplicationRepository(
-        listResult: [_application(id: 1, status: 'interview_scheduled')],
-      );
-      final assessmentRepository = _FakeAssessmentRepository()
-        ..resultsByApplication = {
-          1: _assessment(type: 'quiz', status: 'pending'),
-        };
-      await _pumpDetails(
-        tester,
-        repository: applicationRepository,
-        assessmentRepository: assessmentRepository,
-      );
-
-      expect(find.text('Quiz assessment'), findsOneWidget);
-      expect(
-        find.text('Quiz functionality will be available in a later phase.'),
-        findsOneWidget,
-      );
-      expect(find.text('Interview Type'), findsNothing);
-      expect(tester.takeException(), isNull);
-    });
-
     testWidgets(
       'an unknown assessment type renders a generic summary only, no crash',
       (tester) async {
@@ -865,8 +880,154 @@ void main() {
 
         expect(find.text('Assessment'), findsOneWidget);
         expect(find.text('Interview Type'), findsNothing);
-        expect(find.text('Quiz assessment'), findsNothing);
+        expect(find.text('Quiz Title'), findsNothing);
         expect(tester.takeException(), isNull);
+      },
+    );
+  });
+
+  group('Assessment section — quiz type', () {
+    testWidgets(
+      'a draft/unavailable quiz shows a controlled message, no Open Quiz action',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(type: 'quiz', status: 'pending'),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(
+          find.text('Quiz details are not available yet.'),
+          findsOneWidget,
+        );
+        expect(find.text('Open Quiz'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'a published, not-yet-completed quiz shows its summary and an Open Quiz action',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              type: 'quiz',
+              status: 'scheduled',
+              quiz: _quiz(timeLimitMinutes: 30, questionCount: 3),
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Quiz Title'), findsOneWidget);
+        expect(find.text('Backend Fundamentals'), findsOneWidget);
+        expect(find.text('70%'), findsOneWidget);
+        expect(find.text('30 minutes'), findsOneWidget);
+        expect(find.text('3'), findsOneWidget);
+        expect(find.text('Open Quiz'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'an in_progress quiz still shows the Open Quiz action (resume)',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(type: 'quiz', status: 'in_progress', quiz: _quiz()),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Open Quiz'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a completed quiz shows a completed summary and the shared Result row, no Open Quiz action',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              type: 'quiz',
+              status: 'completed',
+              result: 'passed',
+              quiz: _quiz(),
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Quiz completed'), findsOneWidget);
+        expect(find.text('Result'), findsOneWidget);
+        expect(find.text('Passed'), findsOneWidget);
+        expect(find.text('Open Quiz'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'tapping Open Quiz navigates to the quiz route by Assessment ID and '
+      'force-refreshes the Assessment on return',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              id: 9,
+              type: 'quiz',
+              status: 'scheduled',
+              quiz: _quiz(id: 9),
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+        expect(
+          assessmentRepository.getStudentAssessmentForApplicationCallCount,
+          1,
+        );
+
+        await tester.tap(find.text('Open Quiz'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('QUIZ_SCREEN_PLACEHOLDER 9'), findsOneWidget);
+
+        // Simulate the student navigating back from the quiz screen.
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+
+        expect(
+          assessmentRepository.getStudentAssessmentForApplicationCallCount,
+          2,
+        );
       },
     );
   });

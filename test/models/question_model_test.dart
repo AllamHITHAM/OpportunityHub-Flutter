@@ -10,7 +10,7 @@ Map<String, dynamic> _questionJson({
   String prompt = 'What is the capital of France?',
   String type = 'multiple_choice',
   dynamic options = const ['Paris', 'London', 'Berlin'],
-  String correctAnswer = 'Paris',
+  String? correctAnswer = 'Paris',
   int points = 1,
   int position = 0,
   dynamic createdAt = '2026-08-01T09:00:00.000000Z',
@@ -97,11 +97,34 @@ void main() {
     expect(() => QuestionModel.fromJson(json), throwsA(isA<TypeError>()));
   });
 
-  test('a malformed required correct_answer throws', () {
-    final json = _questionJson();
-    json['correct_answer'] = null;
+  test(
+    'an Organization-shaped response with correct_answer present parses it',
+    () {
+      final model = QuestionModel.fromJson(
+        _questionJson(correctAnswer: 'Paris'),
+      );
 
-    expect(() => QuestionModel.fromJson(json), throwsA(isA<TypeError>()));
+      expect(model.correctAnswer, 'Paris');
+    },
+  );
+
+  test('a Student-shaped response with correct_answer explicitly null parses '
+      'to null, not a crash — the backend strips this key entirely rather '
+      'than sending an explicit null, but either shape must be safe', () {
+    final json = _questionJson()..['correct_answer'] = null;
+
+    final model = QuestionModel.fromJson(json);
+
+    expect(model.correctAnswer, isNull);
+  });
+
+  test('a Student-shaped response with correct_answer entirely absent parses '
+      'to null, not a crash', () {
+    final json = _questionJson()..remove('correct_answer');
+
+    final model = QuestionModel.fromJson(json);
+
+    expect(model.correctAnswer, isNull);
   });
 
   test('a malformed required points throws', () {

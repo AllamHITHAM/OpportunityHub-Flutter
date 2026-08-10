@@ -117,4 +117,16 @@ class AppRoutes {
   static const String studentApplications = '/student/applications';
 
   static String studentApplicationDetails(int id) => '$studentApplications/$id';
+
+  /// Student-only Assessment-addressed routes — currently only the Quiz
+  /// taking screen below, reached by Assessment ID (not Application ID)
+  /// because the backend's Student Quiz endpoints are themselves addressed
+  /// by assessment/quiz ID, not application ID — mirrors
+  /// [organizationAssessments] for the same reason. See `AppRouter` for the
+  /// role/profile-completion gating applied to this prefix.
+  static const String studentAssessments = '/student/assessments';
+
+  /// Student-only Quiz taking for one Assessment — see [studentAssessments].
+  static String studentQuiz(int assessmentId) =>
+      '$studentAssessments/$assessmentId/quiz';
 }

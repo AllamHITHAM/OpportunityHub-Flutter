@@ -22,6 +22,7 @@ import '../features/applications/presentation/student_applications_screen.dart';
 import '../features/assessments/presentation/create_quiz_screen.dart';
 import '../features/assessments/presentation/organization_quiz_editor_screen.dart';
 import '../features/assessments/presentation/schedule_interview_screen.dart';
+import '../features/assessments/presentation/student_quiz_screen.dart';
 import '../features/cv/presentation/student_cv_screen.dart';
 import '../features/opportunities/presentation/opportunity_form_screen.dart';
 import '../features/opportunities/presentation/organization_opportunities_screen.dart';
@@ -116,6 +117,13 @@ const _organizationApplicationsPathPrefix = AppRoutes.organizationApplications;
 /// these routes are addressed by Assessment ID
 /// (`AppRoutes.organizationAssessments`), not Application ID.
 const _organizationAssessmentsPathPrefix = AppRoutes.organizationAssessments;
+
+/// Student Quiz taking — a protected feature area, not onboarding. A
+/// separate prefix from [_studentApplicationsPathPrefix] because these
+/// routes are addressed by Assessment ID ([AppRoutes.studentAssessments]),
+/// not Application ID — mirrors [_organizationAssessmentsPathPrefix] for
+/// the same reason.
+const _studentAssessmentsPathPrefix = AppRoutes.studentAssessments;
 
 /// Defines the app's navigation routes and redirects based on
 /// [AuthProvider], [StudentProfileProvider], and [OrganizationProfileProvider].
@@ -271,6 +279,12 @@ class AppRouter {
             applicationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
           ),
         ),
+        GoRoute(
+          path: '${AppRoutes.studentAssessments}/:id/quiz',
+          builder: (_, state) => StudentQuizScreen(
+            assessmentId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
       ],
     );
   }
@@ -379,6 +393,14 @@ class AppRouter {
     // onboarding, but still off-limits to every other role.
     if (role != 'student' &&
         currentPath.startsWith(_studentApplicationsPathPrefix)) {
+      return homePath;
+    }
+
+    // Quiz taking (Assessment-ID-addressed routes) is a student-only
+    // feature area — not onboarding, but still off-limits to every other
+    // role.
+    if (role != 'student' &&
+        currentPath.startsWith(_studentAssessmentsPathPrefix)) {
       return homePath;
     }
 

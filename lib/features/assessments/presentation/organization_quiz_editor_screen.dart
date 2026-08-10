@@ -316,11 +316,13 @@ class _QuestionCard extends StatelessWidget {
                 style: textTheme.bodySmall,
               ),
           ],
-          const SizedBox(height: AppSpacing.xxs),
-          Text(
-            'Correct answer: ${question.correctAnswer}',
-            style: textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-          ),
+          if (question.correctAnswer != null) ...[
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              'Correct answer: ${question.correctAnswer}',
+              style: textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ],
           if (isDraft) ...[
             const SizedBox(height: AppSpacing.xs),
             Row(

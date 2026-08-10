@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../../../core/api/api_client.dart';
 import '../../../models/assessment_model.dart';
 import '../../../models/question_model.dart';
+import '../../../models/quiz_attempt_model.dart';
 import '../../../models/quiz_model.dart';
 import 'interview_create_input.dart';
 import 'question_input.dart';
@@ -295,5 +296,74 @@ class AssessmentRepository {
       if (assessment.applicationId == applicationId) return assessment;
     }
     return null;
+  }
+
+  /// Fetches the published quiz for [assessmentId], student-safe (every
+  /// question's `correct_answer` stripped — see [QuestionModel]) with
+  /// `GET /api/student/assessments/{assessmentId}/quiz`.
+  ///
+  /// Errors: 401, 403, 404 — the backend deliberately returns the same 404
+  /// for "not this student's application", "not a quiz assessment", "no
+  /// quiz yet", and "quiz still draft", never revealing which case applies.
+  Future<QuizModel> getStudentQuiz(int assessmentId) async {
+    try {
+      final response = await apiClient.dio.get(
+        '/student/assessments/$assessmentId/quiz',
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return QuizModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Starts (or resumes) the student's one attempt at [quizId] with
+  /// `POST /api/student/quizzes/{quizId}/start`. Idempotent while the
+  /// attempt is unsubmitted — a repeated call returns that same attempt
+  /// as-is, never resetting its `started_at`.
+  ///
+  /// Errors: 401, 403, 404 (quiz not owned/missing, or not published), 409
+  /// (already submitted — Quiz v1 has no retakes).
+  Future<QuizAttemptModel> startStudentQuiz(int quizId) async {
+    try {
+      final response = await apiClient.dio.post(
+        '/student/quizzes/$quizId/start',
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return QuizAttemptModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Submits the student's answers for [quizId], graded entirely
+  /// server-side, with `POST /api/student/quizzes/{quizId}/submit`.
+  /// [answers] maps question ID to the student's chosen answer text — the
+  /// exact shape the backend expects, reassembled into the
+  /// `[{question_id, answer}, ...]` request body it requires.
+  ///
+  /// Errors: 401, 403, 404 (quiz not owned/missing), 409 (already
+  /// submitted), 422 (no attempt started yet, time limit expired, or
+  /// answer validation — a missing/foreign/duplicate question ID, or an
+  /// answer that doesn't match the question's own options).
+  Future<QuizAttemptModel> submitStudentQuiz({
+    required int quizId,
+    required Map<int, String> answers,
+  }) async {
+    try {
+      final response = await apiClient.dio.post(
+        '/student/quizzes/$quizId/submit',
+        data: {
+          'answers': [
+            for (final entry in answers.entries)
+              {'question_id': entry.key, 'answer': entry.value},
+          ],
+        },
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return QuizAttemptModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
   }
 }

@@ -30,6 +30,7 @@ import 'providers/student_assessment_provider.dart';
 import 'providers/student_cv_provider.dart';
 import 'providers/student_opportunities_provider.dart';
 import 'providers/student_profile_provider.dart';
+import 'providers/student_quiz_provider.dart';
 import 'routes/app_router.dart';
 
 void main() {
@@ -156,6 +157,13 @@ class MyApp extends StatelessWidget {
         ),
         ChangeNotifierProxyProvider<AuthProvider, StudentAssessmentProvider>(
           create: (context) => StudentAssessmentProvider(
+            repository: context.read<AssessmentRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, StudentQuizProvider>(
+          create: (context) => StudentQuizProvider(
             repository: context.read<AssessmentRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),

@@ -16,6 +16,7 @@ import 'package:opportunityhub_flutter/features/assessments/data/assessment_repo
 import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/question_input.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_input.dart';
+import 'package:opportunityhub_flutter/models/quiz_attempt_model.dart';
 
 const _secureStorageChannel = MethodChannel(
   'plugins.it_nomads.com/flutter_secure_storage',
@@ -207,6 +208,51 @@ Map<String, dynamic> _questionJson({
     'position': position,
     'created_at': '2026-08-01T09:00:00.000000Z',
     'updated_at': '2026-08-01T09:00:00.000000Z',
+  };
+}
+
+/// The real Student-facing Question shape — `correct_answer` is omitted
+/// entirely (the backend's `HidesInternalQuestionFields` trait), unlike
+/// [_questionJson]'s organization shape.
+Map<String, dynamic> _studentQuestionJson({
+  int id = 1,
+  int quizId = 1,
+  String prompt = 'What is the capital of France?',
+  String type = 'multiple_choice',
+  dynamic options = const ['Paris', 'London', 'Berlin'],
+  int points = 1,
+  int position = 0,
+}) {
+  return {
+    'id': id,
+    'quiz_id': quizId,
+    'prompt': prompt,
+    'type': type,
+    'options': options,
+    'points': points,
+    'position': position,
+    'created_at': '2026-08-01T09:00:00.000000Z',
+    'updated_at': '2026-08-01T09:00:00.000000Z',
+  };
+}
+
+Map<String, dynamic> _quizAttemptJson({
+  int id = 1,
+  int quizId = 3,
+  int applicationId = 5,
+  dynamic answers,
+  dynamic score,
+  dynamic startedAt = '2026-08-01T09:00:00.000000Z',
+  dynamic submittedAt,
+}) {
+  return {
+    'id': id,
+    'quiz_id': quizId,
+    'application_id': applicationId,
+    'answers': answers,
+    'score': score,
+    'started_at': startedAt,
+    'submitted_at': submittedAt,
   };
 }
 
@@ -1391,6 +1437,364 @@ void main() {
         throwsA(
           isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
         ),
+      );
+    });
+  });
+
+  group('getStudentQuiz', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _quizJson(status: 'published')}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.getStudentQuiz(7);
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(adapter.lastRequest?.path, '/student/assessments/7/quiz');
+    });
+
+    test(
+      'parses a published quiz, including nested student-safe questions',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'data': _quizJson(
+              status: 'published',
+              questions: [_studentQuestionJson()],
+            ),
+          }, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        final result = await repository.getStudentQuiz(7);
+
+        expect(result.title, 'Backend Fundamentals');
+        expect(result.status, 'published');
+        expect(result.questions, hasLength(1));
+        expect(result.questions.first.prompt, isNotEmpty);
+      },
+    );
+
+    test('the nested question never carries correct_answer, even though '
+        'QuestionModel has the field for the Organization side', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _quizJson(
+            status: 'published',
+            questions: [_studentQuestionJson()],
+          ),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getStudentQuiz(7);
+
+      expect(result.questions.single.correctAnswer, isNull);
+    });
+
+    test('throws ApiException on a 404 (also covers "not a quiz assessment", '
+        '"no quiz yet", and "quiz still draft" — the backend returns the same '
+        '404 for all of these)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Quiz not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentQuiz(7),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having((e) => e.message, 'message', 'Quiz not found'),
+        ),
+      );
+    });
+
+    test('throws ApiException on a 401', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Unauthenticated',
+          'data': null,
+        }, 401);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentQuiz(7),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
+        ),
+      );
+    });
+
+    test('malformed success response is never silently swallowed', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'id': 'not-an-int'},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(repository.getStudentQuiz(7), throwsA(anything));
+    });
+  });
+
+  group('startStudentQuiz', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _quizAttemptJson()}, 201);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.startStudentQuiz(3);
+
+      expect(adapter.lastRequest?.method, 'POST');
+      expect(adapter.lastRequest?.path, '/student/quizzes/3/start');
+    });
+
+    test('parses a freshly-created attempt', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _quizAttemptJson()}, 201);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.startStudentQuiz(3);
+
+      expect(result, isA<QuizAttemptModel>());
+      expect(result.quizId, 3);
+      expect(result.isSubmitted, isFalse);
+    });
+
+    test(
+      'parses a resumed (existing, unsubmitted) attempt the same way',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': true,
+            'message': 'Quiz attempt resumed',
+            'data': _quizAttemptJson(id: 9),
+          }, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        final result = await repository.startStudentQuiz(3);
+
+        expect(result.id, 9);
+        expect(result.isSubmitted, isFalse);
+      },
+    );
+
+    test('throws with the exact 409 message when already submitted', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Quiz has already been submitted',
+          'data': null,
+        }, 409);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.startStudentQuiz(3),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 409)
+              .having(
+                (e) => e.message,
+                'message',
+                'Quiz has already been submitted',
+              ),
+        ),
+      );
+    });
+
+    test(
+      'throws ApiException on a 404 (quiz not owned/missing/unpublished)',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': false,
+            'message': 'Quiz not found',
+            'data': null,
+          }, 404);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.startStudentQuiz(3),
+          throwsA(
+            isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404),
+          ),
+        );
+      },
+    );
+
+    test('malformed success response is never silently swallowed', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'id': 'not-an-int'},
+        }, 201);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(repository.startStudentQuiz(3), throwsA(anything));
+    });
+  });
+
+  group('submitStudentQuiz', () {
+    test('uses the exact documented method, path, and body shape', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _quizAttemptJson(
+            submittedAt: '2026-08-01T09:20:00.000000Z',
+            score: 100,
+          ),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.submitStudentQuiz(
+        quizId: 3,
+        answers: {10: 'Option A', 11: 'True'},
+      );
+
+      expect(adapter.lastRequest?.method, 'POST');
+      expect(adapter.lastRequest?.path, '/student/quizzes/3/submit');
+      final body = adapter.lastRequest?.data as Map<String, dynamic>;
+      final answers = body['answers'] as List<dynamic>;
+      expect(answers, hasLength(2));
+      expect(
+        answers,
+        containsAll([
+          {'question_id': 10, 'answer': 'Option A'},
+          {'question_id': 11, 'answer': 'True'},
+        ]),
+      );
+    });
+
+    test('parses the graded attempt', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _quizAttemptJson(
+            submittedAt: '2026-08-01T09:20:00.000000Z',
+            score: 75,
+          ),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.submitStudentQuiz(
+        quizId: 3,
+        answers: {10: 'Option A'},
+      );
+
+      expect(result.score, 75);
+      expect(result.isSubmitted, isTrue);
+    });
+
+    test('throws with the exact 409 message when already submitted', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Quiz has already been submitted',
+          'data': null,
+        }, 409);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.submitStudentQuiz(quizId: 3, answers: {10: 'Option A'}),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 409),
+        ),
+      );
+    });
+
+    test(
+      'throws with the exact 422 message when the time limit has expired',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': false,
+            'message': 'The time limit for this quiz has expired',
+            'data': null,
+          }, 422);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.submitStudentQuiz(quizId: 3, answers: {10: 'Option A'}),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.statusCode, 'statusCode', 422)
+                .having(
+                  (e) => e.message,
+                  'message',
+                  'The time limit for this quiz has expired',
+                ),
+          ),
+        );
+      },
+    );
+
+    test('preserves field validation errors', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'message': 'The given data was invalid.',
+          'errors': {
+            'answers': ['Every quiz question must be answered.'],
+          },
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.submitStudentQuiz(quizId: 3, answers: {10: 'Option A'}),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.errors?['answers'],
+            'errors[answers]',
+            isNotNull,
+          ),
+        ),
+      );
+    });
+
+    test('throws ApiException on a 404', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Quiz not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.submitStudentQuiz(quizId: 3, answers: {10: 'Option A'}),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404),
+        ),
+      );
+    });
+
+    test('malformed success response is never silently swallowed', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'id': 'not-an-int'},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.submitStudentQuiz(quizId: 3, answers: {10: 'Option A'}),
+        throwsA(anything),
       );
     });
   });

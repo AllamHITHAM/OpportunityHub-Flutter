@@ -54,7 +54,10 @@ class _QuestionFormSheetState extends State<QuestionFormSheet> {
         for (final option in options) {
           _optionControllers.add(TextEditingController(text: option));
         }
-        final matchedIndex = options.indexOf(existing.correctAnswer);
+        final correctAnswer = existing.correctAnswer;
+        final matchedIndex = correctAnswer == null
+            ? -1
+            : options.indexOf(correctAnswer);
         _correctOptionIndex = matchedIndex == -1 ? null : matchedIndex;
       } else {
         _trueFalseAnswer = existing.correctAnswer == 'False' ? 'False' : 'True';
