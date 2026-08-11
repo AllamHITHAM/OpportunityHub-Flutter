@@ -366,4 +366,278 @@ void main() {
       );
     });
   });
+
+  group('getStudentOffer', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _offerJson()}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.getStudentOffer(5);
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(adapter.lastRequest?.path, '/student/applications/5/offer');
+    });
+
+    test('parses a valid Offer', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _offerJson()}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getStudentOffer(5);
+
+      expect(result.id, 1);
+      expect(result.applicationId, 5);
+      expect(result.status, 'sent');
+    });
+
+    test('throws ApiException on a 404 (no Offer yet)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Offer not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentOffer(5),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having((e) => e.message, 'message', 'Offer not found'),
+        ),
+      );
+    });
+
+    test(
+      'a malformed successful response never becomes a fake Offer',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'data': {'id': 'not-an-int'},
+          }, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.getStudentOffer(5),
+          throwsA(isA<TypeError>()),
+        );
+      },
+    );
+
+    test('throws ApiException on a 401', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Unauthenticated',
+          'data': null,
+        }, 401);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentOffer(5),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
+        ),
+      );
+    });
+
+    test('throws ApiException on a 403', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'This action is unauthorized for your account type',
+          'data': null,
+        }, 403);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getStudentOffer(5),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 403),
+        ),
+      );
+    });
+  });
+
+  group('acceptStudentOffer', () {
+    test(
+      'uses the exact documented method and path, with no request body',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({'data': _offerJson(status: 'accepted')}, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await repository.acceptStudentOffer(9);
+
+        expect(adapter.lastRequest?.method, 'PUT');
+        expect(adapter.lastRequest?.path, '/student/offers/9/accept');
+        expect(adapter.lastRequest?.data, isNull);
+      },
+    );
+
+    test('parses the accepted Offer', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _offerJson(status: 'accepted')}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.acceptStudentOffer(9);
+
+      expect(result.status, 'accepted');
+    });
+
+    test('throws ApiException on a 404 (offer not owned/missing)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Offer not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.acceptStudentOffer(9),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having((e) => e.message, 'message', 'Offer not found'),
+        ),
+      );
+    });
+
+    test(
+      'throws with the exact 409 message when already responded to',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': false,
+            'message': 'This offer has already been responded to.',
+            'data': null,
+          }, 409);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.acceptStudentOffer(9),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.statusCode, 'statusCode', 409)
+                .having(
+                  (e) => e.message,
+                  'message',
+                  'This offer has already been responded to.',
+                ),
+          ),
+        );
+      },
+    );
+
+    test('malformed success response is never silently swallowed', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'id': 'not-an-int'},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(repository.acceptStudentOffer(9), throwsA(anything));
+    });
+  });
+
+  group('declineStudentOffer', () {
+    test(
+      'uses the exact documented method and path, with no request body',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({'data': _offerJson(status: 'declined')}, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await repository.declineStudentOffer(9);
+
+        expect(adapter.lastRequest?.method, 'PUT');
+        expect(adapter.lastRequest?.path, '/student/offers/9/decline');
+        expect(adapter.lastRequest?.data, isNull);
+      },
+    );
+
+    test('parses the declined Offer', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _offerJson(status: 'declined')}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.declineStudentOffer(9);
+
+      expect(result.status, 'declined');
+    });
+
+    test('throws ApiException on a 404 (offer not owned/missing)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Offer not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.declineStudentOffer(9),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having((e) => e.message, 'message', 'Offer not found'),
+        ),
+      );
+    });
+
+    test(
+      'throws with the exact 409 message when already responded to',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': false,
+            'message': 'This offer has already been responded to.',
+            'data': null,
+          }, 409);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.declineStudentOffer(9),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.statusCode, 'statusCode', 409)
+                .having(
+                  (e) => e.message,
+                  'message',
+                  'This offer has already been responded to.',
+                ),
+          ),
+        );
+      },
+    );
+
+    test('malformed success response is never silently swallowed', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'id': 'not-an-int'},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(repository.declineStudentOffer(9), throwsA(anything));
+    });
+  });
 }

@@ -9,11 +9,14 @@ import '../../../core/widgets/app_widgets.dart';
 import '../../../models/application_model.dart';
 import '../../../models/assessment_model.dart';
 import '../../../models/interview_model.dart';
+import '../../../models/offer_model.dart';
 import '../../../models/quiz_model.dart';
 import '../../../providers/student_applications_provider.dart';
 import '../../../providers/student_assessment_provider.dart';
+import '../../../providers/student_offer_provider.dart';
 import '../../../routes/app_routes.dart';
 import '../../assessments/presentation/assessment_display.dart';
+import '../../offers/presentation/offer_display.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
 import 'application_display.dart';
 
@@ -21,11 +24,13 @@ import 'application_display.dart';
 /// route parameter, never GoRouter `extra`) — since no single-application
 /// GET endpoint exists on the backend, a cached copy from the already-
 /// loaded list is used when available, otherwise the full list is loaded
-/// once and this ID is resolved from it. No applicant-review/shortlist/
-/// offer UI belongs here. A read-only Assessment section (see
-/// `_StudentAssessmentSection`) is the one exception — it's the student's
-/// own view of an assessment an organization already created, not an
-/// action this screen exposes.
+/// once and this ID is resolved from it. No applicant-review/shortlist UI
+/// belongs here. A read-only Assessment section (see
+/// `_StudentAssessmentSection`) and the Offer response section (see
+/// `_StudentOfferSection`, Phase 6C-3) are the two exceptions — the
+/// student's own view of, and one-time response to, records an
+/// organization already created, not applicant-review actions this screen
+/// exposes.
 class StudentApplicationDetailsScreen extends StatefulWidget {
   const StudentApplicationDetailsScreen({
     super.key,
@@ -57,6 +62,11 @@ class _StudentApplicationDetailsScreenState
       // never block the rest of this screen (see
       // `_StudentAssessmentSection`).
       context.read<StudentAssessmentProvider>().loadForApplication(
+        widget.applicationId,
+      );
+      // Likewise independent — the Offer section has its own
+      // section-level loading/error state (see `_StudentOfferSection`).
+      context.read<StudentOfferProvider>().loadForApplication(
         widget.applicationId,
       );
     });
@@ -133,6 +143,17 @@ class _StudentApplicationDetailsScreenState
               ),
             ),
           ],
+          if (provider.detailsErrorMessage != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            AppErrorView(
+              compact: true,
+              message: provider.detailsErrorMessage!,
+              onRetry: () => provider.loadApplicationDetails(
+                widget.applicationId,
+                forceRefresh: true,
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.lg),
           AppCard(
             child: Column(
@@ -162,6 +183,7 @@ class _StudentApplicationDetailsScreenState
             ),
           ],
           _StudentAssessmentSection(application: application),
+          _StudentOfferSection(application: application),
           const SizedBox(height: AppSpacing.xl),
         ],
       ),
@@ -485,6 +507,272 @@ class _StudentQuizDetails extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         PrimaryButton(label: 'Open Quiz', onPressed: () => _openQuiz(context)),
       ],
+    );
+  }
+}
+
+/// Which student Offer response action is currently in flight, if any — so
+/// only the button the student actually tapped shows a spinner, while both
+/// stay disabled together via `StudentOfferProvider.isResponding`. Mirrors
+/// `_StatusAction`/`_pendingAction` in
+/// `organization_application_details_screen.dart`.
+enum _StudentOfferAction { accept, decline }
+
+/// The Offer section for a student's own application (Phase 6C-3) —
+/// section-level loading/error state, entirely independent of the rest of
+/// this screen (see `_StudentApplicationDetailsScreenState.initState`).
+///
+/// Real Offer data always wins over a stale `application.status`: if
+/// [StudentOfferProvider] has an Offer for this application, it's shown
+/// regardless of status — the same "actual data is authoritative" rule
+/// `_StudentAssessmentSection` already follows for Assessments, and
+/// `_OfferSection` follows on the organization side. Only
+/// `application.status == 'offer_sent'` treats a *missing* Offer as a
+/// controlled inconsistency worth calling out; every other status either
+/// can't have one yet or has already moved past it, which is normal, not
+/// an error — see [_StudentApplicationDetailsScreenState] and
+/// `docs/BUSINESS_RULES.md` (backend) section 13 on the rejected-vs-
+/// declined distinction this deliberately does not conflate:
+/// `application.status == 'rejected'` alone never implies an Offer was
+/// declined, since an early-funnel organization rejection reaches the same
+/// status with no Offer at all.
+class _StudentOfferSection extends StatefulWidget {
+  const _StudentOfferSection({required this.application});
+
+  final ApplicationModel application;
+
+  @override
+  State<_StudentOfferSection> createState() => _StudentOfferSectionState();
+}
+
+class _StudentOfferSectionState extends State<_StudentOfferSection> {
+  _StudentOfferAction? _pendingAction;
+
+  Future<void> _run(
+    StudentOfferProvider provider,
+    _StudentOfferAction action,
+    Future<bool> Function() call,
+  ) async {
+    setState(() => _pendingAction = action);
+    final success = await call();
+    if (!mounted) return;
+    setState(() => _pendingAction = null);
+
+    if (success) {
+      // The backend response carries only the Offer, never a nested
+      // Application (see `OfferRepository`'s own doc comment) — a
+      // targeted refresh is the least-coupled way to pick up the real
+      // `accepted`/`rejected` Application status, the same bridging
+      // pattern the organization Send Offer flow already uses.
+      context.read<StudentApplicationsProvider>().loadApplicationDetails(
+        widget.application.id,
+        forceRefresh: true,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            action == _StudentOfferAction.accept
+                ? 'Offer accepted successfully'
+                : 'Offer declined successfully',
+          ),
+        ),
+      );
+    } else if (provider.actionErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.actionErrorMessage!)));
+    }
+  }
+
+  Future<void> _confirmAccept(StudentOfferProvider provider) async {
+    final confirmed = await showAppConfirmationDialog(
+      context,
+      title: 'Accept Offer',
+      message: 'Are you sure you want to accept this offer?',
+      confirmLabel: 'Accept',
+      type: AppConfirmationType.success,
+    );
+    if (!confirmed || !mounted) return;
+
+    await _run(provider, _StudentOfferAction.accept, provider.accept);
+  }
+
+  Future<void> _confirmDecline(StudentOfferProvider provider) async {
+    final confirmed = await showAppConfirmationDialog(
+      context,
+      title: 'Decline Offer',
+      message: 'Are you sure you want to decline this offer?',
+      confirmLabel: 'Decline',
+      type: AppConfirmationType.danger,
+    );
+    if (!confirmed || !mounted) return;
+
+    await _run(provider, _StudentOfferAction.decline, provider.decline);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<StudentOfferProvider>();
+    final applicationId = widget.application.id;
+    final isThisOne = provider.loadedApplicationId == applicationId;
+
+    // Only show a loading spinner when there's nothing already loaded for
+    // this exact application to keep showing in the meantime — a
+    // force-refresh of an already-displayed Offer shouldn't cause it to
+    // disappear and flash a spinner in its place.
+    if (provider.isLoading && !(isThisOne && provider.offer != null)) {
+      return const Padding(
+        padding: EdgeInsets.only(top: AppSpacing.md),
+        child: AppLoading(compact: true),
+      );
+    }
+
+    if (isThisOne && provider.offer != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: _StudentOfferCard(
+          offer: provider.offer!,
+          isBusy: provider.isResponding,
+          pendingAction: _pendingAction,
+          onAccept: () => _confirmAccept(provider),
+          onDecline: () => _confirmDecline(provider),
+        ),
+      );
+    }
+
+    if (isThisOne && provider.errorMessage != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: AppErrorView(
+          compact: true,
+          message: provider.errorMessage!,
+          onRetry: () =>
+              provider.loadForApplication(applicationId, forceRefresh: true),
+        ),
+      );
+    }
+
+    if (widget.application.status == 'offer_sent') {
+      // A genuine backend inconsistency (the application says an Offer was
+      // sent, but no Offer record backs it up) — a controlled warning with
+      // retry, never a fake/fabricated Offer card.
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: AppErrorView(
+          compact: true,
+          icon: Icons.warning_amber_rounded,
+          message: 'Offer details are currently unavailable.',
+          onRetry: () =>
+              provider.loadForApplication(applicationId, forceRefresh: true),
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+/// The read-only Offer fields the student is allowed to see, plus the
+/// Accept/Decline actions while [offer] is still awaiting a response.
+/// Reuses `offer_display.dart`'s label/formatting helpers — the same ones
+/// the organization-side `_OfferSummaryCard` uses — so salary/status
+/// formatting is defined in exactly one place for both roles.
+class _StudentOfferCard extends StatelessWidget {
+  const _StudentOfferCard({
+    required this.offer,
+    required this.isBusy,
+    required this.pendingAction,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  final OfferModel offer;
+  final bool isBusy;
+  final _StudentOfferAction? pendingAction;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = cleanDisplayText(offer.title);
+    final message = cleanDisplayText(offer.message);
+    final salary = formatSalary(
+      amount: offer.salaryAmount,
+      currency: offer.salaryCurrency,
+      period: offer.salaryPeriod,
+    );
+    // The card's own header names the terminal outcome explicitly once one
+    // exists, rather than leaving the student to infer it from the status
+    // chip alone — see this section's own doc comment on why
+    // `Offer.status == 'declined'` (never `Application.status` alone) is
+    // what may ever justify the "Offer Declined" wording appearing
+    // anywhere on this screen.
+    final headerTitle = switch (offer.status) {
+      'accepted' => 'Offer Accepted',
+      'declined' => 'Offer Declined',
+      _ => 'Offer',
+    };
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: SectionHeader(title: headerTitle)),
+              StatusChip(
+                label: offerStatusLabels[offer.status] ?? offer.status,
+                type: offerStatusChipType(offer.status),
+              ),
+            ],
+          ),
+          if (title != null) OpportunityDetailRow(label: 'Title', value: title),
+          if (salary != null)
+            OpportunityDetailRow(label: 'Salary', value: salary),
+          if (offer.startDate != null)
+            OpportunityDetailRow(
+              label: 'Start Date',
+              value: formatDate(offer.startDate!),
+            ),
+          if (offer.sentAt != null)
+            OpportunityDetailRow(
+              label: 'Sent At',
+              value: formatDate(offer.sentAt!),
+            ),
+          if (offer.respondedAt != null)
+            OpportunityDetailRow(
+              label: 'Responded At',
+              value: formatDate(offer.respondedAt!),
+            ),
+          if (message != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(message, style: Theme.of(context).textTheme.bodyMedium),
+          ],
+          if (offer.status == 'sent') ...[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: DangerButton(
+                    label: 'Decline Offer',
+                    isLoading: pendingAction == _StudentOfferAction.decline,
+                    onPressed: isBusy ? null : onDecline,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: PrimaryButton(
+                    label: 'Accept Offer',
+                    isLoading: pendingAction == _StudentOfferAction.accept,
+                    onPressed: isBusy ? null : onAccept,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

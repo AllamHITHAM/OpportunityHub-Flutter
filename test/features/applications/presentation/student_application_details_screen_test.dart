@@ -13,10 +13,12 @@ import 'package:opportunityhub_flutter/features/applications/data/application_re
 import 'package:opportunityhub_flutter/features/applications/presentation/student_application_details_screen.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/offers/data/offer_repository.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/interview_model.dart';
+import 'package:opportunityhub_flutter/models/offer_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/question_model.dart';
@@ -24,6 +26,7 @@ import 'package:opportunityhub_flutter/models/quiz_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_assessment_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_offer_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
 class _FakeAuthRepository extends AuthRepository {
@@ -176,6 +179,89 @@ AssessmentModel _assessment({
   );
 }
 
+OfferModel _offer({
+  int id = 1,
+  int applicationId = 1,
+  String status = 'sent',
+  String? title,
+  String? salaryAmount,
+  String? salaryCurrency,
+  String? salaryPeriod,
+  DateTime? startDate,
+  String? message,
+  DateTime? respondedAt,
+}) {
+  return OfferModel(
+    id: id,
+    applicationId: applicationId,
+    title: title,
+    salaryAmount: salaryAmount,
+    salaryCurrency: salaryCurrency,
+    salaryPeriod: salaryPeriod,
+    startDate: startDate,
+    message: message,
+    status: status,
+    sentAt: DateTime(2026, 8, 10, 9),
+    respondedAt: respondedAt,
+  );
+}
+
+class _FakeOfferRepository extends OfferRepository {
+  _FakeOfferRepository({
+    this.getResult,
+    this.getError,
+    this.getDelay = Duration.zero,
+  }) : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  OfferModel? getResult;
+  ApiException? getError;
+  Duration getDelay;
+  int getCallCount = 0;
+
+  OfferModel? acceptResult;
+  ApiException? acceptError;
+  Duration acceptDelay = Duration.zero;
+  int acceptCallCount = 0;
+
+  OfferModel? declineResult;
+  ApiException? declineError;
+  Duration declineDelay = Duration.zero;
+  int declineCallCount = 0;
+
+  @override
+  Future<OfferModel> getStudentOffer(int applicationId) async {
+    getCallCount++;
+    if (getDelay > Duration.zero) {
+      await Future<void>.delayed(getDelay);
+    }
+    if (getError != null) throw getError!;
+    if (getResult == null) {
+      throw ApiException('Offer not found', statusCode: 404);
+    }
+    return getResult!;
+  }
+
+  @override
+  Future<OfferModel> acceptStudentOffer(int offerId) async {
+    acceptCallCount++;
+    if (acceptDelay > Duration.zero) {
+      await Future<void>.delayed(acceptDelay);
+    }
+    if (acceptError != null) throw acceptError!;
+    return acceptResult ?? _offer(status: 'accepted');
+  }
+
+  @override
+  Future<OfferModel> declineStudentOffer(int offerId) async {
+    declineCallCount++;
+    if (declineDelay > Duration.zero) {
+      await Future<void>.delayed(declineDelay);
+    }
+    if (declineError != null) throw declineError!;
+    return declineResult ?? _offer(status: 'declined');
+  }
+}
+
 QuizModel _quiz({
   int id = 1,
   int assessmentId = 1,
@@ -205,10 +291,18 @@ QuizModel _quiz({
   );
 }
 
-Future<StudentApplicationsProvider> _pumpDetails(
+class _Providers {
+  _Providers({required this.applications, required this.offer});
+
+  final StudentApplicationsProvider applications;
+  final StudentOfferProvider offer;
+}
+
+Future<_Providers> _pumpDetails(
   WidgetTester tester, {
   required _FakeApplicationRepository repository,
   _FakeAssessmentRepository? assessmentRepository,
+  _FakeOfferRepository? offerRepository,
   int applicationId = 1,
   Size size = const Size(420, 1400),
   bool settle = true,
@@ -225,6 +319,10 @@ Future<StudentApplicationsProvider> _pumpDetails(
   );
   final assessmentProvider = StudentAssessmentProvider(
     repository: assessmentRepository ?? _FakeAssessmentRepository(),
+    authProvider: authProvider,
+  );
+  final offerProvider = StudentOfferProvider(
+    repository: offerRepository ?? _FakeOfferRepository(),
     authProvider: authProvider,
   );
 
@@ -260,6 +358,9 @@ Future<StudentApplicationsProvider> _pumpDetails(
         ChangeNotifierProvider<StudentAssessmentProvider>.value(
           value: assessmentProvider,
         ),
+        ChangeNotifierProvider<StudentOfferProvider>.value(
+          value: offerProvider,
+        ),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -274,7 +375,7 @@ Future<StudentApplicationsProvider> _pumpDetails(
     await tester.pump();
   }
 
-  return provider;
+  return _Providers(applications: provider, offer: offerProvider);
 }
 
 void main() {
@@ -284,13 +385,13 @@ void main() {
     final repository = _FakeApplicationRepository(
       listResult: [_application(id: 42, opportunityTitle: 'Data Analyst')],
     );
-    final provider = await _pumpDetails(
+    final providers = await _pumpDetails(
       tester,
       repository: repository,
       applicationId: 1,
     );
     // Pre-populate the cache the same way the list screen would have.
-    await provider.loadApplications();
+    await providers.applications.loadApplications();
 
     expect(tester.takeException(), isNull);
   });
@@ -1030,6 +1131,558 @@ void main() {
         );
       },
     );
+  });
+
+  group('Offer section — loading and error (Phase 6C-3)', () {
+    testWidgets(
+      'the Offer section shows a compact spinner while loading, without '
+      'blocking the rest of the page',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [
+            _application(
+              id: 1,
+              status: 'offer_sent',
+              opportunityTitle: 'Backend Developer',
+            ),
+          ],
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(status: 'sent'),
+          getDelay: const Duration(milliseconds: 300),
+        );
+
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+          settle: false,
+        );
+
+        expect(find.text('Backend Developer'), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        expect(find.text('Accept Offer'), findsNothing);
+
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets('a non-404 Offer load error shows a compact view with retry', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'offer_sent')],
+      );
+      final offerRepository = _FakeOfferRepository(
+        getError: ApiException('Server error, please try again.'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Server error, please try again.'), findsOneWidget);
+      expect(find.text('Try Again'), findsOneWidget);
+
+      offerRepository.getError = null;
+      offerRepository.getResult = _offer(status: 'sent');
+      await tester.tap(find.text('Try Again'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Accept Offer'), findsOneWidget);
+      expect(find.text('Server error, please try again.'), findsNothing);
+    });
+  });
+
+  group('Offer section — visibility (Phase 6C-3)', () {
+    testWidgets('no Offer and a normal status renders no Offer section', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'pending')],
+      );
+      final offerRepository = _FakeOfferRepository();
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Offer'), findsNothing);
+      expect(
+        find.text('Offer details are currently unavailable.'),
+        findsNothing,
+      );
+    });
+
+    testWidgets(
+      'offer_sent with no Offer shows a controlled inconsistency, with retry',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'offer_sent')],
+        );
+        final offerRepository = _FakeOfferRepository();
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+        );
+
+        expect(
+          find.text('Offer details are currently unavailable.'),
+          findsOneWidget,
+        );
+        expect(find.text('Try Again'), findsOneWidget);
+
+        offerRepository.getResult = _offer(status: 'sent');
+        await tester.tap(find.text('Try Again'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Offer'), findsOneWidget);
+        expect(
+          find.text('Offer details are currently unavailable.'),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'an actual sent Offer renders regardless of a stale Application status',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'in_assessment')],
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(status: 'sent'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+        );
+
+        expect(find.text('Accept Offer'), findsOneWidget);
+        expect(find.text('Decline Offer'), findsOneWidget);
+      },
+    );
+  });
+
+  group('Offer section — actions (Phase 6C-3)', () {
+    testWidgets('a sent Offer shows Accept Offer and Decline Offer', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'offer_sent')],
+      );
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(status: 'sent'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Accept Offer'), findsOneWidget);
+      expect(find.text('Decline Offer'), findsOneWidget);
+    });
+
+    testWidgets('an accepted Offer shows no action buttons', (tester) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'accepted')],
+      );
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(
+          status: 'accepted',
+          respondedAt: DateTime(2026, 8, 12),
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Accept Offer'), findsNothing);
+      expect(find.text('Decline Offer'), findsNothing);
+    });
+
+    testWidgets('a declined Offer shows no action buttons', (tester) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'rejected')],
+      );
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(
+          status: 'declined',
+          respondedAt: DateTime(2026, 8, 12),
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Accept Offer'), findsNothing);
+      expect(find.text('Decline Offer'), findsNothing);
+    });
+  });
+
+  group('Offer section — card fields (Phase 6C-3)', () {
+    testWidgets('salary/date/message render when present', (tester) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'offer_sent')],
+      );
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(
+          status: 'sent',
+          title: 'Backend Engineer',
+          salaryAmount: '90000.00',
+          salaryCurrency: 'USD',
+          salaryPeriod: 'yearly',
+          startDate: DateTime(2026, 9, 1),
+          message: 'Welcome aboard.',
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Backend Engineer'), findsOneWidget);
+      expect(find.text('USD 90,000.00 / year'), findsOneWidget);
+      expect(find.text('Start Date'), findsOneWidget);
+      expect(find.text('Sent At'), findsOneWidget);
+      expect(find.text('Welcome aboard.'), findsOneWidget);
+    });
+
+    testWidgets('omits the Salary row entirely when no compensation was set', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'offer_sent')],
+      );
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(status: 'sent'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Salary'), findsNothing);
+    });
+  });
+
+  group('Offer section — accept (Phase 6C-3)', () {
+    testWidgets(
+      'cancelling the accept confirmation does not accept the Offer',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'offer_sent')],
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(status: 'sent'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+        );
+
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Accept Offer'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+
+        expect(offerRepository.acceptCallCount, 0);
+        expect(find.text('Accept Offer'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'accept success updates the Offer, refreshes the Application, and '
+      'shows a success SnackBar',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'offer_sent')],
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(status: 'sent'),
+        )..acceptResult = _offer(status: 'accepted');
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+        );
+
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Accept Offer'));
+        await tester.pumpAndSettle();
+
+        // Once the Offer is actually accepted, the next details fetch must
+        // reflect the real new status.
+        applicationRepository.listResult = [
+          _application(id: 1, status: 'accepted'),
+        ];
+
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Accept'));
+        await tester.pumpAndSettle();
+
+        expect(offerRepository.acceptCallCount, 1);
+        expect(find.text('Offer accepted successfully'), findsOneWidget);
+        expect(find.text('Offer Accepted'), findsOneWidget);
+        expect(find.text('Accept Offer'), findsNothing);
+        expect(find.text('Decline Offer'), findsNothing);
+        expect(applicationRepository.callCount, greaterThanOrEqualTo(2));
+      },
+    );
+
+    testWidgets(
+      'responding disables both actions and shows the tapped action loading',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'offer_sent')],
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(status: 'sent'),
+        )..acceptDelay = const Duration(milliseconds: 200);
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+        );
+
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Accept Offer'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Accept'));
+        await tester.pump();
+
+        final declineButton = tester.widget<OutlinedButton>(
+          find.widgetWithText(OutlinedButton, 'Decline Offer'),
+        );
+        expect(declineButton.onPressed, isNull);
+
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'a failed Application refresh after a successful accept keeps the '
+      'updated Offer visible with a compact retry',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'offer_sent')],
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(status: 'sent'),
+        )..acceptResult = _offer(status: 'accepted');
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+        );
+
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Accept Offer'));
+        await tester.pumpAndSettle();
+
+        applicationRepository.listError = ApiException(
+          'Server error, please try again later.',
+        );
+
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Accept'));
+        await tester.pumpAndSettle();
+
+        // The Offer response itself succeeded and stays visible/updated
+        // even though the Application refresh that followed it failed.
+        expect(find.text('Offer Accepted'), findsOneWidget);
+        expect(
+          find.text('Server error, please try again later.'),
+          findsOneWidget,
+        );
+        expect(find.text('Try Again'), findsOneWidget);
+      },
+    );
+  });
+
+  group('Offer section — decline (Phase 6C-3)', () {
+    testWidgets(
+      'cancelling the decline confirmation does not decline the Offer',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'offer_sent')],
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(status: 'sent'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+        );
+
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Decline Offer'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+
+        expect(offerRepository.declineCallCount, 0);
+        expect(find.text('Decline Offer'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'decline success updates the Offer, refreshes the Application, and '
+      'shows a success SnackBar',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'offer_sent')],
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(status: 'sent'),
+        )..declineResult = _offer(status: 'declined');
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+        );
+
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Decline Offer'));
+        await tester.pumpAndSettle();
+
+        applicationRepository.listResult = [
+          _application(id: 1, status: 'rejected'),
+        ];
+
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Decline'));
+        await tester.pumpAndSettle();
+
+        expect(offerRepository.declineCallCount, 1);
+        expect(find.text('Offer declined successfully'), findsOneWidget);
+        expect(find.text('Offer Declined'), findsOneWidget);
+        expect(find.text('Rejected'), findsOneWidget);
+        expect(find.text('Accept Offer'), findsNothing);
+        expect(find.text('Decline Offer'), findsNothing);
+        expect(applicationRepository.callCount, greaterThanOrEqualTo(2));
+      },
+    );
+  });
+
+  group('Offer section — rejected vs. declined (Phase 6C-3)', () {
+    testWidgets('an accepted Offer shows "Offer Accepted"', (tester) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'accepted')],
+      );
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(
+          status: 'accepted',
+          respondedAt: DateTime(2026, 8, 12),
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Offer Accepted'), findsOneWidget);
+    });
+
+    testWidgets('a declined Offer shows "Offer Declined"', (tester) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'rejected')],
+      );
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(
+          status: 'declined',
+          respondedAt: DateTime(2026, 8, 12),
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Offer Declined'), findsOneWidget);
+    });
+
+    testWidgets(
+      'a rejected Application with no Offer never shows "Offer Declined"',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'rejected')],
+        );
+        final offerRepository = _FakeOfferRepository();
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          offerRepository: offerRepository,
+        );
+
+        expect(find.text('Offer Declined'), findsNothing);
+        expect(find.text('Offer'), findsNothing);
+      },
+    );
+  });
+
+  testWidgets(
+    'Assessment history remains visible alongside an accepted Offer',
+    (tester) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'accepted')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(
+            status: 'completed',
+            result: 'passed',
+            interview: _interview(status: 'completed'),
+          ),
+        };
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(status: 'accepted'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+        offerRepository: offerRepository,
+      );
+
+      expect(find.text('Assessment'), findsOneWidget);
+      expect(find.text('Offer Accepted'), findsOneWidget);
+    },
+  );
+
+  testWidgets('narrow viewport does not overflow with the Offer card visible', (
+    tester,
+  ) async {
+    final applicationRepository = _FakeApplicationRepository(
+      listResult: [_application(id: 1, status: 'offer_sent')],
+    );
+    final offerRepository = _FakeOfferRepository(
+      getResult: _offer(
+        status: 'sent',
+        title: 'A Very Long Offer Title That Might Wrap Or Overflow',
+        salaryAmount: '125000.00',
+        salaryCurrency: 'USD',
+        salaryPeriod: 'yearly',
+        message:
+            'We are excited to extend this offer and look forward to you '
+            'joining the team on the agreed start date.',
+      ),
+    );
+    await _pumpDetails(
+      tester,
+      repository: applicationRepository,
+      offerRepository: offerRepository,
+      size: const Size(320, 700),
+    );
+
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('No overflow at a narrow 320-wide viewport', (tester) async {

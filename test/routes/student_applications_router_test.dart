@@ -12,11 +12,13 @@ import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repos
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/offers/data/offer_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
+import 'package:opportunityhub_flutter/models/offer_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
@@ -25,6 +27,7 @@ import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_assessment_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_offer_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
@@ -82,6 +85,16 @@ class _FakeAssessmentRepository extends AssessmentRepository {
   Future<AssessmentModel?> getStudentAssessmentForApplication(
     int applicationId,
   ) async => null;
+}
+
+class _FakeOfferRepository extends OfferRepository {
+  _FakeOfferRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<OfferModel> getStudentOffer(int applicationId) async {
+    throw ApiException('Offer not found', statusCode: 404);
+  }
 }
 
 class _FakeAdminDashboardRepository extends AdminDashboardRepository {
@@ -154,6 +167,13 @@ Future<void> _pumpAsRole(
     repository: _FakeAssessmentRepository(),
     authProvider: authProvider,
   );
+  // Registered for the same reason as `assessmentProvider` above — the
+  // Offer section (Phase 6C-3) is another read-only, section-level piece
+  // of `StudentApplicationDetailsScreen`.
+  final offerProvider = StudentOfferProvider(
+    repository: _FakeOfferRepository(),
+    authProvider: authProvider,
+  );
   // Not exercised by every test in this file, but registered because a
   // role='admin' request for a non-admin route redirects to
   // AdminHomeScreen, which now requires this provider to exist in the tree.
@@ -185,6 +205,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<StudentAssessmentProvider>.value(
           value: assessmentProvider,
+        ),
+        ChangeNotifierProvider<StudentOfferProvider>.value(
+          value: offerProvider,
         ),
       ],
       child: MaterialApp.router(

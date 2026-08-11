@@ -173,7 +173,15 @@ class StudentApplicationsProvider extends ChangeNotifier {
 
     if (listErrorMessage != null) {
       detailsErrorMessage = listErrorMessage;
-      selectedApplication = null;
+      // A refresh failure must never blank out an application the student
+      // is already looking at (the same principle
+      // `StudentAssessmentProvider._performLoad` already documents for its
+      // own refresh failures) — only clear `selectedApplication` when
+      // there wasn't already a matching one loaded, e.g. the very first
+      // load for this ID failed outright.
+      if (selectedApplication?.id != id) {
+        selectedApplication = null;
+      }
     } else {
       final match = applications.where((application) => application.id == id);
       selectedApplication = match.isEmpty ? null : match.first;
