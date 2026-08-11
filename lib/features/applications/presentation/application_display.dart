@@ -8,6 +8,10 @@ const applicationStatusLabels = {
   'reviewed': 'Reviewed',
   'shortlisted': 'Shortlisted',
   'in_assessment': 'Under Assessment',
+  // Phase 6C-0/6C-1: the organization has sent a final Offer and the
+  // student's response is pending — see docs/BUSINESS_RULES.md (backend)
+  // section 5/7b.
+  'offer_sent': 'Offer Sent',
   // Legacy compatibility only — no code path writes this status for new
   // assessments any more (see docs/BUSINESS_RULES.md on the backend), but
   // existing records may still carry it, so it stays a real, labeled value
@@ -27,6 +31,7 @@ AppStatusType applicationStatusChipType(String status) {
       return AppStatusType.neutral;
     case 'shortlisted':
     case 'in_assessment':
+    case 'offer_sent':
     case 'interview_scheduled':
       return AppStatusType.info;
     case 'pending':

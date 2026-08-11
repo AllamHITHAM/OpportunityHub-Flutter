@@ -7,11 +7,15 @@ import '../../../core/utils/date_formatter.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../models/application_model.dart';
 import '../../../models/assessment_model.dart';
+import '../../../models/offer_model.dart';
 import '../../../providers/organization_applications_provider.dart';
 import '../../../providers/organization_assessment_provider.dart';
+import '../../../providers/organization_offer_provider.dart';
 import '../../../routes/app_routes.dart';
 import '../../assessments/presentation/assessment_display.dart';
 import '../../assessments/presentation/choose_assessment_type_sheet.dart';
+import '../../offers/presentation/offer_display.dart';
+import '../../offers/presentation/send_offer_sheet.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
 import 'application_display.dart';
 
@@ -21,9 +25,31 @@ import 'application_display.dart';
 /// `interview_scheduled`/`accepted` remain read-only for status actions
 /// (a read-only Assessment section covers `interview_scheduled` instead),
 /// and `rejected`/`withdrawn` expose no forward actions.
-enum _StatusAction { markReviewed, shortlist, reject, chooseAssessment }
+///
+/// `sendOffer` (Phase 6C-2) only ever appears for `in_assessment`
+/// applications whose Assessment is `completed` and which don't already
+/// have an Offer — `Assessment.result` is deliberately never checked (see
+/// `_StatusActionsSection`/docs/BUSINESS_RULES.md on the backend: the
+/// organization retains final hiring authority regardless of
+/// passed/failed/waiting/no result). `reject` remains available at
+/// `in_assessment` too, at any Assessment state, matching the backend's
+/// own unrestricted rejection rule — but once an Offer has actually been
+/// sent (`offer_sent`), no status action is offered at all; the
+/// organization waits for the student's response (see `_OfferSection`).
+enum _StatusAction {
+  markReviewed,
+  shortlist,
+  reject,
+  chooseAssessment,
+  sendOffer,
+}
 
-List<_StatusAction> _actionsFor(String status, {required bool hasAssessment}) {
+List<_StatusAction> _actionsFor(
+  String status, {
+  required bool hasAssessment,
+  required bool assessmentCompleted,
+  required bool hasOffer,
+}) {
   switch (status) {
     case 'pending':
       return [
@@ -38,11 +64,18 @@ List<_StatusAction> _actionsFor(String status, {required bool hasAssessment}) {
         if (!hasAssessment) _StatusAction.chooseAssessment,
         _StatusAction.reject,
       ];
+    case 'in_assessment':
+      return [
+        if (hasAssessment && assessmentCompleted && !hasOffer)
+          _StatusAction.sendOffer,
+        _StatusAction.reject,
+      ];
     default:
-      // rejected, withdrawn, interview_scheduled, accepted — no status
-      // actions; this phase never downgrades or exposes further controls
-      // for any of them. interview_scheduled instead gets a read-only
-      // Assessment section (see _AssessmentSection).
+      // offer_sent, rejected, withdrawn, interview_scheduled, accepted —
+      // no status actions; this phase never downgrades or exposes further
+      // controls for any of them. interview_scheduled instead gets a
+      // read-only Assessment section (see _AssessmentSection); offer_sent
+      // (and beyond) gets a read-only Offer section (see _OfferSection).
       return [];
   }
 }
@@ -50,10 +83,6 @@ List<_StatusAction> _actionsFor(String status, {required bool hasAssessment}) {
 /// Organization-side application details. Reached by ID alone (a route
 /// parameter, never GoRouter `extra`), so a direct URL visit or a browser
 /// refresh renders correctly instead of crashing.
-///
-/// No interview/quiz/assessment-selection/offer UI belongs here — this
-/// phase covers reviewing an application and moving it through
-/// reviewed/shortlisted/rejected only.
 class OrganizationApplicationDetailsScreen extends StatefulWidget {
   const OrganizationApplicationDetailsScreen({
     super.key,
@@ -85,6 +114,11 @@ class _OrganizationApplicationDetailsScreenState
       // _AssessmentSection, which renders its own section-level
       // loading/error state.
       context.read<OrganizationAssessmentProvider>().loadForApplication(
+        widget.applicationId,
+      );
+      // Offer loading is likewise independent and section-level only —
+      // see _OfferSection.
+      context.read<OrganizationOfferProvider>().loadForApplication(
         widget.applicationId,
       );
     });
@@ -159,6 +193,7 @@ class _OrganizationApplicationDetailsScreenState
           const SizedBox(height: AppSpacing.lg),
           _StatusActionsSection(application: application),
           _AssessmentSection(application: application),
+          _OfferSection(application: application),
           const SizedBox(height: AppSpacing.lg),
           AppCard(
             child: Column(
@@ -344,17 +379,46 @@ class _StatusActionsSectionState extends State<_StatusActionsSection> {
     );
   }
 
+  /// Opens [SendOfferSheet] and, only on a successful send, refreshes the
+  /// real Application from the backend so this screen picks up
+  /// `status = offer_sent` — the send response itself carries only the
+  /// Offer, never a nested Application (see `OfferRepository`'s own doc
+  /// comment), so a targeted refresh is the least-coupled way to stay in
+  /// sync, the same bridging pattern `_QuizAssessmentSummaryCard._openEditor`
+  /// already uses for Quiz publishing.
+  Future<void> _openSendOfferSheet(BuildContext context) async {
+    final sent = await showSendOfferSheet(
+      context,
+      applicationId: widget.application.id,
+    );
+    if (!sent || !context.mounted) return;
+
+    context.read<OrganizationApplicationsProvider>().loadApplicationDetails(
+      widget.application.id,
+      forceRefresh: true,
+    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Offer sent successfully')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<OrganizationApplicationsProvider>();
     final assessmentProvider = context.watch<OrganizationAssessmentProvider>();
+    final offerProvider = context.watch<OrganizationOfferProvider>();
     final isBusy = provider.isUpdating(widget.application.id);
     final hasAssessment = assessmentProvider.hasAssessmentFor(
       widget.application.id,
     );
+    final assessmentCompleted =
+        hasAssessment && assessmentProvider.assessment?.status == 'completed';
+    final hasOffer = offerProvider.hasOfferFor(widget.application.id);
     final actions = _actionsFor(
       widget.application.status,
       hasAssessment: hasAssessment,
+      assessmentCompleted: assessmentCompleted,
+      hasOffer: hasOffer,
     );
 
     if (actions.isEmpty) {
@@ -399,6 +463,13 @@ class _StatusActionsSectionState extends State<_StatusActionsSection> {
               context,
               applicationId: widget.application.id,
             ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        if (actions.contains(_StatusAction.sendOffer)) ...[
+          PrimaryButton(
+            label: 'Send Offer',
+            onPressed: () => _openSendOfferSheet(context),
           ),
           const SizedBox(height: AppSpacing.sm),
         ],
@@ -665,6 +736,141 @@ class _AssessmentDetailsCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.xs),
               Text(notes, style: Theme.of(context).textTheme.bodyMedium),
             ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Read-only Offer display for an application, plus the controlled
+/// "backend says an Offer was sent but no Offer record exists" recovery
+/// state — the same posture `_AssessmentSection` already takes for its own
+/// analogous inconsistency. Renders nothing for every other status/Offer
+/// combination.
+///
+/// The actual Offer, once loaded, is always shown as-is regardless of
+/// `application.status` — a stale/lagging Application status must never
+/// hide real Offer data the organization already has (see
+/// `OrganizationOfferProvider`'s own doc comment on why this section never
+/// infers an Offer's existence from `application.status` alone).
+class _OfferSection extends StatelessWidget {
+  const _OfferSection({required this.application});
+
+  final ApplicationModel application;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<OrganizationOfferProvider>();
+    final applicationId = application.id;
+    final isThisOne = provider.loadedApplicationId == applicationId;
+
+    // Only show a loading spinner when there's nothing already loaded for
+    // this exact application to keep showing in the meantime — a
+    // force-refresh of an already-displayed Offer shouldn't cause it to
+    // disappear and flash a spinner in its place.
+    if (provider.isLoading && !(isThisOne && provider.offer != null)) {
+      return const Padding(
+        padding: EdgeInsets.only(top: AppSpacing.md),
+        child: AppLoading(compact: true),
+      );
+    }
+
+    if (isThisOne && provider.offer != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: _OfferSummaryCard(offer: provider.offer!),
+      );
+    }
+
+    if (isThisOne && provider.errorMessage != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: AppErrorView(
+          compact: true,
+          message: provider.errorMessage!,
+          onRetry: () =>
+              provider.loadForApplication(applicationId, forceRefresh: true),
+        ),
+      );
+    }
+
+    if (application.status == 'offer_sent') {
+      // A genuine backend inconsistency (the application says an Offer was
+      // sent, but no Offer record backs it up) — a controlled warning with
+      // retry, never a fake/fabricated Offer card.
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: AppErrorView(
+          compact: true,
+          icon: Icons.warning_amber_rounded,
+          title: 'Offer Not Found',
+          message:
+              'This application is marked Offer Sent, but no offer '
+              'record could be found.',
+          onRetry: () =>
+              provider.loadForApplication(applicationId, forceRefresh: true),
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+/// The read-only fields of an existing [OfferModel]. No organization
+/// action appears here in v1 for any [OfferModel.status] — sent, accepted,
+/// or declined are all equally read-only; there is no edit/cancel/resend.
+class _OfferSummaryCard extends StatelessWidget {
+  const _OfferSummaryCard({required this.offer});
+
+  final OfferModel offer;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = cleanDisplayText(offer.title);
+    final message = cleanDisplayText(offer.message);
+    final salary = formatSalary(
+      amount: offer.salaryAmount,
+      currency: offer.salaryCurrency,
+      period: offer.salaryPeriod,
+    );
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Expanded(child: SectionHeader(title: 'Offer')),
+              StatusChip(
+                label: offerStatusLabels[offer.status] ?? offer.status,
+                type: offerStatusChipType(offer.status),
+              ),
+            ],
+          ),
+          if (title != null) OpportunityDetailRow(label: 'Title', value: title),
+          if (salary != null)
+            OpportunityDetailRow(label: 'Salary', value: salary),
+          if (offer.startDate != null)
+            OpportunityDetailRow(
+              label: 'Start Date',
+              value: formatDate(offer.startDate!),
+            ),
+          if (offer.sentAt != null)
+            OpportunityDetailRow(
+              label: 'Sent At',
+              value: formatDate(offer.sentAt!),
+            ),
+          if (offer.respondedAt != null)
+            OpportunityDetailRow(
+              label: 'Responded At',
+              value: formatDate(offer.respondedAt!),
+            ),
+          if (message != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(message, style: Theme.of(context).textTheme.bodyMedium),
           ],
         ],
       ),

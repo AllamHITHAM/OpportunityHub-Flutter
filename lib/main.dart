@@ -12,6 +12,7 @@ import 'features/applications/data/application_repository.dart';
 import 'features/assessments/data/assessment_repository.dart';
 import 'features/auth/data/auth_repository.dart';
 import 'features/cv/data/cv_repository.dart';
+import 'features/offers/data/offer_repository.dart';
 import 'features/opportunities/data/opportunity_repository.dart';
 import 'features/organization/data/organization_profile_repository.dart';
 import 'features/student/data/student_profile_repository.dart';
@@ -22,6 +23,7 @@ import 'providers/admin_users_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/organization_applications_provider.dart';
 import 'providers/organization_assessment_provider.dart';
+import 'providers/organization_offer_provider.dart';
 import 'providers/organization_opportunities_provider.dart';
 import 'providers/organization_profile_provider.dart';
 import 'providers/organization_quiz_provider.dart';
@@ -151,6 +153,16 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, OrganizationQuizProvider>(
           create: (context) => OrganizationQuizProvider(
             repository: context.read<AssessmentRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, OfferRepository>(
+          update: (_, apiClient, _) => OfferRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, OrganizationOfferProvider>(
+          create: (context) => OrganizationOfferProvider(
+            repository: context.read<OfferRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,

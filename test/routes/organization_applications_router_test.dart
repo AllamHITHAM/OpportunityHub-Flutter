@@ -14,11 +14,13 @@ import 'package:opportunityhub_flutter/features/assessments/data/assessment_repo
 import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_input.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/offers/data/offer_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
+import 'package:opportunityhub_flutter/models/offer_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/quiz_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
@@ -27,6 +29,7 @@ import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_offer_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_quiz_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
@@ -112,6 +115,16 @@ class _FakeAssessmentRepository extends AssessmentRepository {
   }
 }
 
+class _FakeOfferRepository extends OfferRepository {
+  _FakeOfferRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<OfferModel> getOrganizationOffer(int applicationId) async {
+    throw ApiException('This application has no offer yet', statusCode: 404);
+  }
+}
+
 class _FakeAdminDashboardRepository extends AdminDashboardRepository {
   _FakeAdminDashboardRepository()
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
@@ -182,6 +195,10 @@ Future<void> _pumpAsRole(
     repository: _FakeAssessmentRepository(),
     authProvider: authProvider,
   );
+  final offerProvider = OrganizationOfferProvider(
+    repository: _FakeOfferRepository(),
+    authProvider: authProvider,
+  );
   // Not exercised by any test in this file, but registered because a
   // role='admin' request for a non-admin route (see the "Admins cannot
   // access..." tests below) redirects to AdminHomeScreen, which now
@@ -214,6 +231,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<OrganizationQuizProvider>.value(
           value: quizProvider,
+        ),
+        ChangeNotifierProvider<OrganizationOfferProvider>.value(
+          value: offerProvider,
         ),
         ChangeNotifierProvider<AdminDashboardProvider>.value(
           value: adminDashboardProvider,
