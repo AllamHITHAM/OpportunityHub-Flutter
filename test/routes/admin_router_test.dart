@@ -15,9 +15,11 @@ import 'package:opportunityhub_flutter/features/admin/data/admin_organizations_r
 import 'package:opportunityhub_flutter/features/admin/data/admin_skills_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_users_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
+import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
@@ -27,6 +29,7 @@ import 'package:opportunityhub_flutter/providers/admin_organizations_provider.da
 import 'package:opportunityhub_flutter/providers/admin_skills_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_users_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
@@ -127,6 +130,14 @@ class _FakeAdminSkillsRepository extends AdminSkillsRepository {
   Future<List<SkillModel>> getSkills() async => [];
 }
 
+class _FakeNotificationRepository extends NotificationRepository {
+  _FakeNotificationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<NotificationModel>> getNotifications() async => [];
+}
+
 void _setViewSize(WidgetTester tester, Size size) {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -199,6 +210,10 @@ Future<void> _pumpAsRole(
     repository: _FakeAdminSkillsRepository(),
     authProvider: authProvider,
   );
+  final notificationProvider = NotificationProvider(
+    repository: _FakeNotificationRepository(),
+    authProvider: authProvider,
+  );
   final appRouter = AppRouter(
     authProvider,
     studentProfileProvider,
@@ -226,6 +241,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<AdminSkillsProvider>.value(
           value: adminSkillsProvider,
+        ),
+        ChangeNotifierProvider<NotificationProvider>.value(
+          value: notificationProvider,
         ),
       ],
       child: MaterialApp.router(

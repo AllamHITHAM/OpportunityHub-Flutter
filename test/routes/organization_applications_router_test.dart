@@ -14,12 +14,14 @@ import 'package:opportunityhub_flutter/features/assessments/data/assessment_repo
 import 'package:opportunityhub_flutter/features/assessments/data/interview_create_input.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_input.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/offers/data/offer_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
+import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/offer_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/quiz_model.dart';
@@ -27,6 +29,7 @@ import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_offer_provider.dart';
@@ -135,6 +138,14 @@ class _FakeAdminDashboardRepository extends AdminDashboardRepository {
   }
 }
 
+class _FakeNotificationRepository extends NotificationRepository {
+  _FakeNotificationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<NotificationModel>> getNotifications() async => [];
+}
+
 void _setViewSize(WidgetTester tester, Size size) {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -207,6 +218,13 @@ Future<void> _pumpAsRole(
     repository: _FakeAdminDashboardRepository(),
     authProvider: authProvider,
   );
+  // See the AdminDashboardProvider comment above — the same reasoning
+  // applies here, since AdminHomeScreen and the Student/Organization Home
+  // screens all now render a NotificationBellAction unconditionally.
+  final notificationProvider = NotificationProvider(
+    repository: _FakeNotificationRepository(),
+    authProvider: authProvider,
+  );
   final appRouter = AppRouter(
     authProvider,
     studentProfileProvider,
@@ -237,6 +255,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<AdminDashboardProvider>.value(
           value: adminDashboardProvider,
+        ),
+        ChangeNotifierProvider<NotificationProvider>.value(
+          value: notificationProvider,
         ),
       ],
       child: MaterialApp.router(

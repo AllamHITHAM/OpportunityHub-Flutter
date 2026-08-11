@@ -6,7 +6,9 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../providers/admin_dashboard_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/notification_provider.dart';
 import '../../../routes/app_routes.dart';
+import '../../notifications/presentation/notification_bell_action.dart';
 
 /// The Admin dashboard — platform-wide statistics, plus navigation entries
 /// to Manage Users, Manage Organizations, and Manage Skills.
@@ -27,6 +29,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<AdminDashboardProvider>().load();
+      // Independent of the dashboard load above — see StudentHomeScreen's
+      // own initState doc comment on why this fires once per Home-screen
+      // entry rather than being polled.
+      context.read<NotificationProvider>().load();
     });
   }
 
@@ -36,7 +42,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     final authProvider = context.watch<AuthProvider>();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Admin Dashboard')),
+      appBar: AppBar(
+        title: const Text('Admin Dashboard'),
+        actions: const [NotificationBellAction()],
+      ),
       body: SafeArea(child: _buildBody(provider, authProvider)),
     );
   }

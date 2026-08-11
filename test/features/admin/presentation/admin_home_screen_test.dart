@@ -19,7 +19,9 @@ import 'package:opportunityhub_flutter/features/admin/presentation/admin_organiz
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_skills_screen.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_users_screen.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
+import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
@@ -28,6 +30,7 @@ import 'package:opportunityhub_flutter/providers/admin_organizations_provider.da
 import 'package:opportunityhub_flutter/providers/admin_skills_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_users_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
 class _FakeAuthRepository extends AuthRepository {
@@ -128,11 +131,26 @@ class _FakeAdminSkillsRepository extends AdminSkillsRepository {
   Future<List<SkillModel>> getSkills() async => [];
 }
 
+class _FakeNotificationRepository extends NotificationRepository {
+  _FakeNotificationRepository({this.listResult = const []})
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  List<NotificationModel> listResult;
+
+  @override
+  Future<List<NotificationModel>> getNotifications() async => listResult;
+}
+
 class _Providers {
-  _Providers({required this.auth, required this.dashboard});
+  _Providers({
+    required this.auth,
+    required this.dashboard,
+    required this.notifications,
+  });
 
   final AuthProvider auth;
   final AdminDashboardProvider dashboard;
+  final NotificationProvider notifications;
 }
 
 /// A router with /admin, /admin/users, /admin/organizations, and
@@ -156,6 +174,10 @@ GoRouter _adminRouter() {
         path: AppRoutes.adminSkills,
         builder: (_, _) => const AdminSkillsScreen(),
       ),
+      GoRoute(
+        path: AppRoutes.notifications,
+        builder: (_, _) => const Scaffold(body: Text('NOTIFICATIONS_SCREEN')),
+      ),
     ],
   );
 }
@@ -164,6 +186,7 @@ Future<_Providers> _pumpScreen(
   WidgetTester tester, {
   required AdminDashboardRepository repository,
   Size size = const Size(420, 1200),
+  List<NotificationModel> notificationListResult = const [],
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -188,6 +211,10 @@ Future<_Providers> _pumpScreen(
     repository: _FakeAdminSkillsRepository(),
     authProvider: authProvider,
   );
+  final notificationProvider = NotificationProvider(
+    repository: _FakeNotificationRepository(listResult: notificationListResult),
+    authProvider: authProvider,
+  );
 
   final router = _adminRouter();
 
@@ -205,6 +232,9 @@ Future<_Providers> _pumpScreen(
         ChangeNotifierProvider<AdminSkillsProvider>.value(
           value: skillsProvider,
         ),
+        ChangeNotifierProvider<NotificationProvider>.value(
+          value: notificationProvider,
+        ),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -214,7 +244,11 @@ Future<_Providers> _pumpScreen(
   );
   await tester.pumpAndSettle();
 
-  return _Providers(auth: authProvider, dashboard: dashboardProvider);
+  return _Providers(
+    auth: authProvider,
+    dashboard: dashboardProvider,
+    notifications: notificationProvider,
+  );
 }
 
 void main() {
@@ -236,6 +270,10 @@ void main() {
       repository: repository,
       authProvider: authProvider,
     );
+    final notificationProvider = NotificationProvider(
+      repository: _FakeNotificationRepository(),
+      authProvider: authProvider,
+    );
     final router = GoRouter(
       initialLocation: '/admin',
       routes: [
@@ -249,6 +287,9 @@ void main() {
           ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
           ChangeNotifierProvider<AdminDashboardProvider>.value(
             value: dashboardProvider,
+          ),
+          ChangeNotifierProvider<NotificationProvider>.value(
+            value: notificationProvider,
           ),
         ],
         child: MaterialApp.router(
@@ -524,5 +565,60 @@ void main() {
     expect(find.text('Manage Skills'), findsOneWidget);
     expect(find.text('Admin Dashboard'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('The notification bell is present in the AppBar', (tester) async {
+    final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+    await _pumpScreen(tester, repository: repository);
+
+    expect(find.byIcon(Icons.notifications_outlined), findsOneWidget);
+  });
+
+  testWidgets('The badge is hidden when there is no unread notification', (
+    tester,
+  ) async {
+    final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+    await _pumpScreen(tester, repository: repository);
+
+    final badge = tester.widget<Badge>(find.byType(Badge));
+    expect(badge.isLabelVisible, isFalse);
+  });
+
+  testWidgets('The badge shows the unread count', (tester) async {
+    final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+    await _pumpScreen(
+      tester,
+      repository: repository,
+      notificationListResult: [
+        const NotificationModel(
+          id: 1,
+          userId: 1,
+          title: 'Notice',
+          message: 'A notification.',
+          priority: 'normal',
+          type: 'system',
+          isRead: false,
+        ),
+      ],
+    );
+
+    final badge = tester.widget<Badge>(find.byType(Badge));
+    expect(badge.isLabelVisible, isTrue);
+    expect(
+      find.descendant(of: find.byType(Badge), matching: find.text('1')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Tapping the bell opens the Notifications screen', (
+    tester,
+  ) async {
+    final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+    await _pumpScreen(tester, repository: repository);
+
+    await tester.tap(find.byIcon(Icons.notifications_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text('NOTIFICATIONS_SCREEN'), findsOneWidget);
   });
 }

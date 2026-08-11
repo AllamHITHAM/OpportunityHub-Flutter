@@ -15,12 +15,15 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
+import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
@@ -131,6 +134,17 @@ class _FakeOrganizationProfileRepository extends OrganizationProfileRepository {
   Future<OrganizationProfileModel?> getProfile() async => null;
 }
 
+/// A fake repository that never touches the network — unused by this
+/// file's tests, but the Home screens' NotificationBellAction requires a
+/// NotificationProvider wherever the router can land after registration.
+class _FakeNotificationRepository extends NotificationRepository {
+  _FakeNotificationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<NotificationModel>> getNotifications() async => [];
+}
+
 Widget _buildApp(
   AuthProvider authProvider,
   StudentProfileProvider studentProfileProvider,
@@ -145,6 +159,12 @@ Widget _buildApp(
       ),
       ChangeNotifierProvider<OrganizationProfileProvider>.value(
         value: organizationProfileProvider,
+      ),
+      ChangeNotifierProvider<NotificationProvider>(
+        create: (_) => NotificationProvider(
+          repository: _FakeNotificationRepository(),
+          authProvider: authProvider,
+        ),
       ),
     ],
     child: MaterialApp.router(

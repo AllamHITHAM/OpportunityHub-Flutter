@@ -29,6 +29,12 @@ class AppRoutes {
   static const String studentHome = '/student';
   static const String organizationHome = '/organization';
 
+  /// Shared across all three roles — the backend's own
+  /// `GET/PUT /api/notifications*` endpoints are role-agnostic (see
+  /// `NotificationRepository`), so there is exactly one route here, not a
+  /// role-prefixed one per role like every other feature area below.
+  static const String notifications = '/notifications';
+
   /// Admin-only dashboard home — see `AppRouter` for the role gating
   /// applied to it. Unlike the student/organization home paths, admin has
   /// no profile-completion concept.

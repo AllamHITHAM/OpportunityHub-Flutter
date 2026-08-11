@@ -3,11 +3,34 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../providers/auth_provider.dart';
+import '../../../providers/notification_provider.dart';
 import '../../../routes/app_routes.dart';
+import '../../notifications/presentation/notification_bell_action.dart';
 
 /// A temporary home screen for logged-in students.
-class StudentHomeScreen extends StatelessWidget {
+class StudentHomeScreen extends StatefulWidget {
   const StudentHomeScreen({super.key});
+
+  @override
+  State<StudentHomeScreen> createState() => _StudentHomeScreenState();
+}
+
+class _StudentHomeScreenState extends State<StudentHomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Deferred to the post-frame callback — see
+    // StudentOpportunitiesScreen.initState for why calling this directly
+    // here would violate Flutter's build-phase constraints. Only one Home
+    // screen is ever active at a time (the router only ever shows one
+    // role's Home), so this is the single load for the badge on app entry
+    // — the provider's own duplicate-load guard makes a second call from
+    // NotificationScreen safe regardless.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<NotificationProvider>().load();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -15,7 +38,10 @@ class StudentHomeScreen extends StatelessWidget {
     final user = authProvider.user;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Student')),
+      appBar: AppBar(
+        title: const Text('Student'),
+        actions: const [NotificationBellAction()],
+      ),
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,

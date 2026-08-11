@@ -12,6 +12,7 @@ import 'features/applications/data/application_repository.dart';
 import 'features/assessments/data/assessment_repository.dart';
 import 'features/auth/data/auth_repository.dart';
 import 'features/cv/data/cv_repository.dart';
+import 'features/notifications/data/notification_repository.dart';
 import 'features/offers/data/offer_repository.dart';
 import 'features/opportunities/data/opportunity_repository.dart';
 import 'features/organization/data/organization_profile_repository.dart';
@@ -21,6 +22,7 @@ import 'providers/admin_organizations_provider.dart';
 import 'providers/admin_skills_provider.dart';
 import 'providers/admin_users_provider.dart';
 import 'providers/auth_provider.dart';
+import 'providers/notification_provider.dart';
 import 'providers/organization_applications_provider.dart';
 import 'providers/organization_assessment_provider.dart';
 import 'providers/organization_offer_provider.dart';
@@ -229,6 +231,17 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, AdminSkillsProvider>(
           create: (context) => AdminSkillsProvider(
             repository: context.read<AdminSkillsRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, NotificationRepository>(
+          update: (_, apiClient, _) =>
+              NotificationRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, NotificationProvider>(
+          create: (context) => NotificationProvider(
+            repository: context.read<NotificationRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,

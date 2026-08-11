@@ -29,6 +29,7 @@ import '../features/opportunities/presentation/organization_opportunities_screen
 import '../features/opportunities/presentation/organization_opportunity_details_screen.dart';
 import '../features/opportunities/presentation/student_opportunities_screen.dart';
 import '../features/opportunities/presentation/student_opportunity_details_screen.dart';
+import '../features/notifications/presentation/notification_screen.dart';
 import '../features/organization/presentation/organization_home_screen.dart';
 import '../features/student/presentation/student_home_screen.dart';
 import '../providers/auth_provider.dart';
@@ -173,6 +174,16 @@ class AppRouter {
           builder: (_, _) => const OrganizationHomeScreen(),
         ),
         GoRoute(path: _adminPath, builder: (_, _) => const AdminHomeScreen()),
+        // Shared across all three roles -- deliberately not gated by any
+        // role-specific prefix check in `_redirect` below, unlike every
+        // other feature area. A student/organization with an incomplete
+        // profile is still redirected here the same as any other protected
+        // route, via the same generic `profileIncomplete` fallthrough
+        // those roles' own redirect helpers already apply everywhere else.
+        GoRoute(
+          path: AppRoutes.notifications,
+          builder: (_, _) => const NotificationScreen(),
+        ),
         GoRoute(
           path: AppRoutes.adminUsers,
           builder: (_, _) => const AdminUsersScreen(),

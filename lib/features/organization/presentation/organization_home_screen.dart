@@ -2,12 +2,29 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-import '../../../routes/app_routes.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/notification_provider.dart';
+import '../../../routes/app_routes.dart';
+import '../../notifications/presentation/notification_bell_action.dart';
 
 /// A temporary home screen for logged-in organizations.
-class OrganizationHomeScreen extends StatelessWidget {
+class OrganizationHomeScreen extends StatefulWidget {
   const OrganizationHomeScreen({super.key});
+
+  @override
+  State<OrganizationHomeScreen> createState() => _OrganizationHomeScreenState();
+}
+
+class _OrganizationHomeScreenState extends State<OrganizationHomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // See StudentHomeScreen's own initState doc comment — same reasoning.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<NotificationProvider>().load();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -15,7 +32,10 @@ class OrganizationHomeScreen extends StatelessWidget {
     final user = authProvider.user;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Organization')),
+      appBar: AppBar(
+        title: const Text('Organization'),
+        actions: const [NotificationBellAction()],
+      ),
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
