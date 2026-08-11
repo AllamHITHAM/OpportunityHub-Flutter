@@ -1345,6 +1345,35 @@ void main() {
         expect(find.text('Offer'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'an existing Offer hides Reject too, even while application.status '
+      'still reads in_assessment (Phase 6C-4)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _assessment(status: 'completed', result: 'passed'),
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(status: 'sent'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+          offerRepository: offerRepository,
+        );
+
+        // The backend now hard-blocks the generic status endpoint once an
+        // Offer exists (Phase 6C-4) -- Reject must never be offered here,
+        // the same way Send Offer already isn't.
+        expect(find.text('Reject'), findsNothing);
+        expect(find.text('Send Offer'), findsNothing);
+        expect(find.text('Offer'), findsOneWidget);
+      },
+    );
   });
 
   group('Offer — summary card (Phase 6C-2)', () {
@@ -1528,6 +1557,36 @@ void main() {
         );
 
         expect(find.text('Declined'), findsOneWidget);
+        expect(find.byType(ElevatedButton), findsNothing);
+        expect(find.byType(OutlinedButton), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'Assessment history remains visible alongside an accepted Offer '
+      '(Phase 6C-4)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'accepted'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _assessment(status: 'completed', result: 'passed'),
+        );
+        final offerRepository = _FakeOfferRepository(
+          getResult: _offer(
+            status: 'accepted',
+            respondedAt: DateTime(2026, 8, 12),
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+          offerRepository: offerRepository,
+        );
+
+        expect(find.text('Assessment'), findsOneWidget);
+        expect(find.text('Offer'), findsOneWidget);
         expect(find.byType(ElevatedButton), findsNothing);
         expect(find.byType(OutlinedButton), findsNothing);
       },

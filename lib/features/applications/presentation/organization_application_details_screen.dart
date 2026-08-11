@@ -32,10 +32,16 @@ import 'application_display.dart';
 /// `_StatusActionsSection`/docs/BUSINESS_RULES.md on the backend: the
 /// organization retains final hiring authority regardless of
 /// passed/failed/waiting/no result). `reject` remains available at
-/// `in_assessment` too, at any Assessment state, matching the backend's
-/// own unrestricted rejection rule — but once an Offer has actually been
-/// sent (`offer_sent`), no status action is offered at all; the
-/// organization waits for the student's response (see `_OfferSection`).
+/// `in_assessment`, at any Assessment state, matching the backend's own
+/// unrestricted rejection rule — but (Phase 6C-4) never once an Offer
+/// exists: the backend now hard-blocks the generic status endpoint the
+/// moment an Offer exists (`Organization\ApplicationController::
+/// updateStatus()`, since v1 has no Offer cancel/rescind workflow), so
+/// `reject` is hidden the same way `sendOffer` already was — via the real
+/// Offer data (`hasOffer`), never `application.status` alone, since that
+/// can be transiently stale (see `_OfferSection`). Once an Offer has
+/// actually been sent (`offer_sent`), no status action is offered at all;
+/// the organization waits for the student's response.
 enum _StatusAction {
   markReviewed,
   shortlist,
@@ -68,7 +74,14 @@ List<_StatusAction> _actionsFor(
       return [
         if (hasAssessment && assessmentCompleted && !hasOffer)
           _StatusAction.sendOffer,
-        _StatusAction.reject,
+        // Phase 6C-4: the backend now hard-blocks the generic status
+        // endpoint once an Offer exists (see
+        // Organization\ApplicationController::updateStatus()), so Reject
+        // must never be offered once `hasOffer` is true either — even
+        // while `application.status` hasn't yet caught up from
+        // `in_assessment` to `offer_sent`. Matches Send Offer's own
+        // `!hasOffer` guard just above.
+        if (!hasOffer) _StatusAction.reject,
       ];
     default:
       // offer_sent, rejected, withdrawn, interview_scheduled, accepted —
