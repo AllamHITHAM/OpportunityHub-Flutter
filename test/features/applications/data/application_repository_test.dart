@@ -141,6 +141,26 @@ Map<String, dynamic> _applicationJson({
   };
 }
 
+Map<String, dynamic> _analysisJson({
+  dynamic overallMatchScore = 87,
+  dynamic skillsMatchScore = 90,
+  dynamic fieldMatchScore = 100,
+  dynamic experienceMatchScore = 66.67,
+  dynamic strengths = const ['Matches required skill: Laravel'],
+  dynamic weaknesses = const ['Missing preferred skill: Docker'],
+  dynamic recommendation = 'Strong candidate, recommended for interview.',
+}) {
+  return {
+    'overall_match_score': overallMatchScore,
+    'skills_match_score': skillsMatchScore,
+    'field_match_score': fieldMatchScore,
+    'experience_match_score': experienceMatchScore,
+    'strengths': strengths,
+    'weaknesses': weaknesses,
+    'recommendation': recommendation,
+  };
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -782,6 +802,229 @@ void main() {
           status: 'reviewed',
         ),
         throwsA(anything),
+      );
+    });
+  });
+
+  group('getApplicationAnalysis', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _analysisJson()}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.getApplicationAnalysis(1);
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(
+        adapter.lastRequest?.path,
+        '/organization/applications/1/analysis',
+      );
+    });
+
+    test('parses a valid analysis response', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _analysisJson(overallMatchScore: 72.5),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getApplicationAnalysis(1);
+
+      expect(result.overallMatchScore, 72.5);
+    });
+
+    test('a null factor score parses correctly', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _analysisJson(fieldMatchScore: null),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getApplicationAnalysis(1);
+
+      expect(result.fieldMatchScore, isNull);
+    });
+
+    test('throws ApiException on a 404 (never analyzed / not owned)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Application analysis not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getApplicationAnalysis(1),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having(
+                (e) => e.message,
+                'message',
+                'Application analysis not found',
+              ),
+        ),
+      );
+    });
+
+    test('throws ApiException on a 401', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Unauthenticated',
+          'data': null,
+        }, 401);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getApplicationAnalysis(1),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
+        ),
+      );
+    });
+
+    test('throws ApiException on a 403', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'This action is unauthorized for your account type',
+          'data': null,
+        }, 403);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getApplicationAnalysis(1),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 403),
+        ),
+      );
+    });
+
+    test('malformed success response is never silently swallowed', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'overall_match_score': 'not-a-number'},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.getApplicationAnalysis(1),
+        throwsA(isA<TypeError>()),
+      );
+    });
+  });
+
+  group('analyzeApplication', () {
+    test(
+      'uses the exact documented method and path, with no request body',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({'data': _analysisJson()}, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await repository.analyzeApplication(1);
+
+        expect(adapter.lastRequest?.method, 'POST');
+        expect(
+          adapter.lastRequest?.path,
+          '/organization/applications/1/analyze',
+        );
+        expect(adapter.lastRequest?.data, isNull);
+      },
+    );
+
+    test('parses the returned analysis', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _analysisJson(overallMatchScore: 88),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.analyzeApplication(1);
+
+      expect(result.overallMatchScore, 88.0);
+    });
+
+    test(
+      'throws ApiException on a 404 (application not owned/missing)',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': false,
+            'message': 'Application not found',
+            'data': null,
+          }, 404);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.analyzeApplication(1),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.statusCode, 'statusCode', 404)
+                .having((e) => e.message, 'message', 'Application not found'),
+          ),
+        );
+      },
+    );
+
+    test('throws ApiException on a 403', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'This action is unauthorized for your account type',
+          'data': null,
+        }, 403);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.analyzeApplication(1),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 403),
+        ),
+      );
+    });
+
+    test('throws ApiException on a 422', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'message': 'The given data was invalid.',
+          'data': null,
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.analyzeApplication(1),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 422),
+        ),
+      );
+    });
+
+    test('malformed success response is never silently swallowed', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'overall_match_score': 'not-a-number'},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.analyzeApplication(1),
+        throwsA(isA<TypeError>()),
       );
     });
   });

@@ -32,6 +32,7 @@ import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_match_analysis_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_offer_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_quiz_provider.dart';
@@ -210,6 +211,10 @@ Future<void> _pumpAsRole(
     repository: _FakeOfferRepository(),
     authProvider: authProvider,
   );
+  final matchAnalysisProvider = OrganizationMatchAnalysisProvider(
+    repository: _FakeApplicationRepository(),
+    authProvider: authProvider,
+  );
   // Not exercised by any test in this file, but registered because a
   // role='admin' request for a non-admin route (see the "Admins cannot
   // access..." tests below) redirects to AdminHomeScreen, which now
@@ -252,6 +257,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<OrganizationOfferProvider>.value(
           value: offerProvider,
+        ),
+        ChangeNotifierProvider<OrganizationMatchAnalysisProvider>.value(
+          value: matchAnalysisProvider,
         ),
         ChangeNotifierProvider<AdminDashboardProvider>.value(
           value: adminDashboardProvider,

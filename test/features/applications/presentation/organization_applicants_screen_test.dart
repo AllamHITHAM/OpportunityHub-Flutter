@@ -111,9 +111,17 @@ Future<OrganizationApplicationsProvider> _pumpScreen(
       ),
       GoRoute(
         path: '${AppRoutes.organizationApplications}/:id',
-        builder: (_, state) => Scaffold(
-          body: Text(
-            'APPLICATION_DETAILS_PLACEHOLDER_${state.pathParameters['id']}',
+        builder: (context, state) => Scaffold(
+          body: Column(
+            children: [
+              Text(
+                'APPLICATION_DETAILS_PLACEHOLDER_${state.pathParameters['id']}',
+              ),
+              ElevatedButton(
+                onPressed: () => context.pop(),
+                child: const Text('Go Back'),
+              ),
+            ],
           ),
         ),
       ),
@@ -234,7 +242,9 @@ void main() {
     },
   );
 
-  testWidgets('Match score is omitted when not present', (tester) async {
+  testWidgets('Match score is omitted when not present (null, not 0%)', (
+    tester,
+  ) async {
     final repository = _FakeApplicationRepository(
       listResult: [
         _application(
@@ -245,6 +255,25 @@ void main() {
     await _pumpScreen(tester, repository: repository);
 
     expect(find.textContaining('Match'), findsNothing);
+    // A never-calculated (null) score must never be confused with a
+    // genuine 0% -- see ApplicationModel.matchScore's own doc comment.
+    expect(find.text('Match 0%'), findsNothing);
+  });
+
+  testWidgets('A genuine 0 match score is shown, not omitted like null', (
+    tester,
+  ) async {
+    final repository = _FakeApplicationRepository(
+      listResult: [
+        _application(
+          matchScore: 0,
+          applicant: const ApplicantSummaryModel(id: 1, name: 'Jane Student'),
+        ),
+      ],
+    );
+    await _pumpScreen(tester, repository: repository);
+
+    expect(find.text('Match 0%'), findsOneWidget);
   });
 
   testWidgets('Missing name falls back to "Unnamed applicant"', (tester) async {
@@ -381,6 +410,44 @@ void main() {
 
     expect(find.text('APPLICATION_DETAILS_PLACEHOLDER_42'), findsOneWidget);
   });
+
+  testWidgets(
+    'Returning from Application Details force-refreshes the applicant list '
+    '(Phase 8A-3: picks up an updated match_score/ranking)',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        listResult: [
+          _application(
+            id: 42,
+            matchScore: 40,
+            applicant: const ApplicantSummaryModel(id: 1, name: 'Jane Student'),
+          ),
+        ],
+      );
+      await _pumpScreen(tester, repository: repository);
+      expect(repository.callCount, 1);
+
+      await tester.tap(find.text('Jane Student'));
+      await tester.pumpAndSettle();
+      expect(find.text('APPLICATION_DETAILS_PLACEHOLDER_42'), findsOneWidget);
+
+      // Simulate the score having changed while on Details (e.g. a
+      // Recalculate) -- the next list fetch should reflect it.
+      repository.listResult = [
+        _application(
+          id: 42,
+          matchScore: 95,
+          applicant: const ApplicantSummaryModel(id: 1, name: 'Jane Student'),
+        ),
+      ];
+
+      await tester.tap(find.text('Go Back'));
+      await tester.pumpAndSettle();
+
+      expect(repository.callCount, 2);
+      expect(find.text('Match 95%'), findsOneWidget);
+    },
+  );
 
   testWidgets('Does not overflow at a narrow 320x720 viewport', (tester) async {
     final repository = _FakeApplicationRepository(

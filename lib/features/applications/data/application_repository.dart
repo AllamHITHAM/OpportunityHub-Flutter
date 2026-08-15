@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../models/application_model.dart';
+import '../../../models/match_analysis_model.dart';
 
 /// Talks to the Laravel application endpoints — both the student-facing
 /// ones (listing and applying) and the organization-facing ones (listing
@@ -115,6 +116,53 @@ class ApplicationRepository {
       );
       final data = apiClient.parseData(response) as Map<String, dynamic>;
       return ApplicationModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Fetches the current stored match analysis for [applicationId] with
+  /// `GET /api/organization/applications/{applicationId}/analysis`.
+  ///
+  /// Purely read-only — the backend recomputes a fresh factor breakdown
+  /// from current student/opportunity data but forces `overall_match_score`
+  /// to the already-stored `applications.match_score`, so it never drifts
+  /// from what [analyzeApplication] last saved (see
+  /// `Organization\ApplicationAnalysisController::show()` on the backend).
+  ///
+  /// Errors: 401, 403, 404 (application not owned/missing, or genuinely
+  /// never analyzed yet — `match_score` still `null` — never distinguished
+  /// by the backend).
+  Future<MatchAnalysisModel> getApplicationAnalysis(int applicationId) async {
+    try {
+      final response = await apiClient.dio.get(
+        '/organization/applications/$applicationId/analysis',
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return MatchAnalysisModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Calculates/recalculates the match analysis for [applicationId] with
+  /// `POST /api/organization/applications/{applicationId}/analyze`. No
+  /// request body — the backend accepts nothing beyond the Application's
+  /// identity. Persists the returned `overall_match_score` into
+  /// `applications.match_score` on the backend; this repository call
+  /// itself doesn't return an [ApplicationModel] (see
+  /// `Organization\ApplicationAnalysisController::analyze()`'s response
+  /// shape on the backend), so callers needing the updated
+  /// [ApplicationModel] must refresh it separately.
+  ///
+  /// Errors: 401, 403, 404 (application not owned/missing).
+  Future<MatchAnalysisModel> analyzeApplication(int applicationId) async {
+    try {
+      final response = await apiClient.dio.post(
+        '/organization/applications/$applicationId/analyze',
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return MatchAnalysisModel.fromJson(data);
     } on DioException catch (error) {
       throw apiClient.handleError(error);
     }

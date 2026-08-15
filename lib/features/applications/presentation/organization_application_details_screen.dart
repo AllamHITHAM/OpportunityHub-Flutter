@@ -2,14 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../models/application_model.dart';
 import '../../../models/assessment_model.dart';
+import '../../../models/match_analysis_model.dart';
 import '../../../models/offer_model.dart';
 import '../../../providers/organization_applications_provider.dart';
 import '../../../providers/organization_assessment_provider.dart';
+import '../../../providers/organization_match_analysis_provider.dart';
 import '../../../providers/organization_offer_provider.dart';
 import '../../../routes/app_routes.dart';
 import '../../assessments/presentation/assessment_display.dart';
@@ -134,6 +137,12 @@ class _OrganizationApplicationDetailsScreenState
       context.read<OrganizationOfferProvider>().loadForApplication(
         widget.applicationId,
       );
+      // Match analysis loading is likewise independent and section-level
+      // only — see _MatchAnalysisSection. The page itself must never block
+      // on this (Phase 8A-3).
+      context.read<OrganizationMatchAnalysisProvider>().loadForApplication(
+        widget.applicationId,
+      );
     });
   }
 
@@ -207,6 +216,7 @@ class _OrganizationApplicationDetailsScreenState
           _StatusActionsSection(application: application),
           _AssessmentSection(application: application),
           _OfferSection(application: application),
+          _MatchAnalysisSection(applicationId: application.id),
           const SizedBox(height: AppSpacing.lg),
           AppCard(
             child: Column(
@@ -887,6 +897,179 @@ class _OfferSummaryCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// Match analysis (Phase 8A-3) — a compact, deterministic breakdown card
+/// plus the Recalculate action. Always rendered (never omitted based on
+/// application status the way `_AssessmentSection`/`_OfferSection` are),
+/// since Recalculate must stay reachable "regardless of whether a score
+/// already exists" for any application this organization owns.
+///
+/// Loading is entirely independent of the rest of the page — mirrors
+/// `_AssessmentSection`/`_OfferSection`'s own section-level
+/// loading/error/empty states, never blocking the surrounding
+/// Application/Assessment/Offer content.
+class _MatchAnalysisSection extends StatelessWidget {
+  const _MatchAnalysisSection({required this.applicationId});
+
+  final int applicationId;
+
+  Future<void> _recalculate(BuildContext context) async {
+    final provider = context.read<OrganizationMatchAnalysisProvider>();
+    final success = await provider.recalculate(applicationId);
+    if (!context.mounted) return;
+
+    if (success) {
+      // The analysis provider never carries a full ApplicationModel (see
+      // its own doc comment) -- a targeted, force-refreshed details fetch
+      // is the safest way to pick up the newly-persisted match_score
+      // without fabricating one, the same bridging pattern
+      // _StatusActionsSection._openSendOfferSheet already uses for Offer.
+      context.read<OrganizationApplicationsProvider>().loadApplicationDetails(
+        applicationId,
+        forceRefresh: true,
+      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Match recalculated')));
+    } else if (provider.actionErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.actionErrorMessage!)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<OrganizationMatchAnalysisProvider>();
+    final isThisOne = provider.loadedApplicationId == applicationId;
+    final textTheme = Theme.of(context).textTheme;
+
+    Widget body;
+    if (provider.isLoading && !(isThisOne && provider.analysis != null)) {
+      body = const Padding(
+        padding: EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        child: AppLoading(compact: true),
+      );
+    } else if (isThisOne && provider.analysis != null) {
+      body = _MatchAnalysisBreakdown(analysis: provider.analysis!);
+    } else if (isThisOne && provider.errorMessage != null) {
+      body = AppErrorView(
+        compact: true,
+        message: provider.errorMessage!,
+        onRetry: () => context
+            .read<OrganizationMatchAnalysisProvider>()
+            .loadForApplication(applicationId, forceRefresh: true),
+      );
+    } else {
+      // Genuinely never calculated yet (backend 404) -- a lightweight,
+      // non-error empty state; Recalculate below is how the organization
+      // generates a real one.
+      body = Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+        child: Text(
+          'Match not calculated yet.',
+          style: textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.md),
+      child: AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SectionHeader(title: 'Match Analysis'),
+            body,
+            const SizedBox(height: AppSpacing.sm),
+            SecondaryButton(
+              label: 'Recalculate Match',
+              isLoading: provider.isRecalculating,
+              onPressed: provider.isRecalculating
+                  ? null
+                  : () => _recalculate(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The read-only breakdown of an existing [MatchAnalysisModel] — Overall
+/// Match plus the three v1.1 factors (Skills, Field/Major, Experience;
+/// deliberately no Education/Location/Work Mode row, matching the
+/// backend's actual formula). Strengths, weaknesses, and recommendation
+/// are shown only when the backend actually returned something meaningful
+/// for them. No charts — plain compact rows, per this phase's own scope.
+class _MatchAnalysisBreakdown extends StatelessWidget {
+  const _MatchAnalysisBreakdown({required this.analysis});
+
+  final MatchAnalysisModel analysis;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final recommendation = cleanDisplayText(analysis.recommendation);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Text(
+              'Overall Match',
+              style: textTheme.bodyMedium?.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              formatMatchScore(analysis.overallMatchScore),
+              style: textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        OpportunityDetailRow(
+          label: matchFactorLabels['skills']!,
+          value: formatMatchScore(analysis.skillsMatchScore),
+        ),
+        OpportunityDetailRow(
+          label: matchFactorLabels['field']!,
+          value: formatMatchScore(analysis.fieldMatchScore),
+        ),
+        OpportunityDetailRow(
+          label: matchFactorLabels['experience']!,
+          value: formatMatchScore(analysis.experienceMatchScore),
+        ),
+        if (analysis.strengths.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text('Strengths', style: textTheme.labelLarge),
+          const SizedBox(height: AppSpacing.xxs),
+          for (final strength in analysis.strengths)
+            Text('• $strength', style: textTheme.bodySmall),
+        ],
+        if (analysis.weaknesses.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text('Weaknesses', style: textTheme.labelLarge),
+          const SizedBox(height: AppSpacing.xxs),
+          for (final weakness in analysis.weaknesses)
+            Text('• $weakness', style: textTheme.bodySmall),
+        ],
+        if (recommendation != null) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            recommendation,
+            style: textTheme.bodyMedium?.copyWith(fontStyle: FontStyle.italic),
+          ),
+        ],
+      ],
     );
   }
 }

@@ -51,8 +51,25 @@ class _OrganizationApplicantsScreenState
     });
   }
 
-  void _openDetails(int applicationId) {
-    context.push(AppRoutes.organizationApplicationDetails(applicationId));
+  /// Opens Application Details and, on return, force-refreshes this list.
+  /// Backend ranking depends on the stored `match_score` (Phase 8A-1), and
+  /// a Recalculate on the details screen (Phase 8A-3) only updates that
+  /// screen's own `selectedApplication` — never this list's `applications`
+  /// array — so without this refresh, a changed score/ranking wouldn't be
+  /// reflected until some unrelated action reloaded the list. Mirrors
+  /// `_QuizAssessmentSummaryCard._openEditor`'s own "await the push, then
+  /// force-refresh on return" pattern. The backend remains the sole
+  /// ranking authority — this never introduces client-side sorting, just
+  /// re-fetches the backend's own order.
+  Future<void> _openDetails(int applicationId) async {
+    await context.push(AppRoutes.organizationApplicationDetails(applicationId));
+    if (!mounted) return;
+    context
+        .read<OrganizationApplicationsProvider>()
+        .loadApplicationsForOpportunity(
+          widget.opportunityId,
+          forceRefresh: true,
+        );
   }
 
   @override

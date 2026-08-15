@@ -24,6 +24,7 @@ import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/interview_model.dart';
+import 'package:opportunityhub_flutter/models/match_analysis_model.dart';
 import 'package:opportunityhub_flutter/models/offer_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/quiz_model.dart';
@@ -31,6 +32,7 @@ import 'package:opportunityhub_flutter/providers/organization_quiz_provider.dart
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_match_analysis_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_offer_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
@@ -263,11 +265,34 @@ class _FakeAssessmentRepository extends AssessmentRepository {
   QuizModel? quizGetResult;
 }
 
+MatchAnalysisModel _analysis({
+  double overallMatchScore = 87,
+  double? skillsMatchScore = 90,
+  double? fieldMatchScore = 100,
+  double? experienceMatchScore = 66.67,
+  List<String> strengths = const [],
+  List<String> weaknesses = const [],
+  String? recommendation,
+}) {
+  return MatchAnalysisModel(
+    overallMatchScore: overallMatchScore,
+    skillsMatchScore: skillsMatchScore,
+    fieldMatchScore: fieldMatchScore,
+    experienceMatchScore: experienceMatchScore,
+    strengths: strengths,
+    weaknesses: weaknesses,
+    recommendation: recommendation,
+  );
+}
+
 class _FakeApplicationRepository extends ApplicationRepository {
   _FakeApplicationRepository({
     this.detailsResult,
     this.detailsError,
     this.detailsDelay = Duration.zero,
+    this.analysisResult,
+    this.analysisError,
+    this.analysisDelay = Duration.zero,
   }) : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   ApplicationModel? detailsResult;
@@ -280,6 +305,16 @@ class _FakeApplicationRepository extends ApplicationRepository {
   Duration statusUpdateDelay = Duration.zero;
   int updateStatusCallCount = 0;
   String? lastStatus;
+
+  MatchAnalysisModel? analysisResult;
+  ApiException? analysisError;
+  Duration analysisDelay;
+  int getAnalysisCallCount = 0;
+
+  MatchAnalysisModel? recalculateResult;
+  ApiException? recalculateError;
+  Duration recalculateDelay = Duration.zero;
+  int recalculateCallCount = 0;
 
   @override
   Future<ApplicationModel> getOrganizationApplication(int applicationId) async {
@@ -304,6 +339,29 @@ class _FakeApplicationRepository extends ApplicationRepository {
     if (statusUpdateError != null) throw statusUpdateError!;
     return statusUpdateResult!;
   }
+
+  @override
+  Future<MatchAnalysisModel> getApplicationAnalysis(int applicationId) async {
+    getAnalysisCallCount++;
+    if (analysisDelay > Duration.zero) {
+      await Future<void>.delayed(analysisDelay);
+    }
+    if (analysisError != null) throw analysisError!;
+    if (analysisResult == null) {
+      throw ApiException('Application analysis not found', statusCode: 404);
+    }
+    return analysisResult!;
+  }
+
+  @override
+  Future<MatchAnalysisModel> analyzeApplication(int applicationId) async {
+    recalculateCallCount++;
+    if (recalculateDelay > Duration.zero) {
+      await Future<void>.delayed(recalculateDelay);
+    }
+    if (recalculateError != null) throw recalculateError!;
+    return recalculateResult ?? _analysis();
+  }
 }
 
 class _Providers {
@@ -312,12 +370,14 @@ class _Providers {
     required this.assessment,
     required this.quiz,
     required this.offer,
+    required this.matchAnalysis,
   });
 
   final OrganizationApplicationsProvider applications;
   final OrganizationAssessmentProvider assessment;
   final OrganizationQuizProvider quiz;
   final OrganizationOfferProvider offer;
+  final OrganizationMatchAnalysisProvider matchAnalysis;
 }
 
 GoRouter _detailsRouter(int applicationId) {
@@ -384,6 +444,10 @@ Future<_Providers> _pumpDetails(
     repository: offerRepository ?? _FakeOfferRepository(),
     authProvider: authProvider,
   );
+  final matchAnalysisProvider = OrganizationMatchAnalysisProvider(
+    repository: repository,
+    authProvider: authProvider,
+  );
 
   final router = _detailsRouter(applicationId);
 
@@ -402,6 +466,9 @@ Future<_Providers> _pumpDetails(
         ChangeNotifierProvider<OrganizationOfferProvider>.value(
           value: offerProvider,
         ),
+        ChangeNotifierProvider<OrganizationMatchAnalysisProvider>.value(
+          value: matchAnalysisProvider,
+        ),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -416,6 +483,7 @@ Future<_Providers> _pumpDetails(
     assessment: assessmentProvider,
     quiz: quizProvider,
     offer: offerProvider,
+    matchAnalysis: matchAnalysisProvider,
   );
 }
 
@@ -445,6 +513,10 @@ void main() {
       repository: _FakeOfferRepository(),
       authProvider: authProvider,
     );
+    final matchAnalysisProvider = OrganizationMatchAnalysisProvider(
+      repository: repository,
+      authProvider: authProvider,
+    );
     final router = _detailsRouter(1);
 
     await tester.pumpWidget(
@@ -458,6 +530,9 @@ void main() {
           ),
           ChangeNotifierProvider<OrganizationOfferProvider>.value(
             value: offerProvider,
+          ),
+          ChangeNotifierProvider<OrganizationMatchAnalysisProvider>.value(
+            value: matchAnalysisProvider,
           ),
         ],
         child: MaterialApp.router(
@@ -897,6 +972,10 @@ void main() {
       repository: _FakeOfferRepository(),
       authProvider: authProvider,
     );
+    final matchAnalysisProvider = OrganizationMatchAnalysisProvider(
+      repository: repository,
+      authProvider: authProvider,
+    );
     final router = _detailsRouter(1);
 
     await tester.pumpWidget(
@@ -910,6 +989,9 @@ void main() {
           ),
           ChangeNotifierProvider<OrganizationOfferProvider>.value(
             value: offerProvider,
+          ),
+          ChangeNotifierProvider<OrganizationMatchAnalysisProvider>.value(
+            value: matchAnalysisProvider,
           ),
         ],
         child: MaterialApp.router(
@@ -1451,6 +1533,10 @@ void main() {
         repository: offerRepository,
         authProvider: authProvider,
       );
+      final matchAnalysisProvider = OrganizationMatchAnalysisProvider(
+        repository: repository,
+        authProvider: authProvider,
+      );
       final router = _detailsRouter(1);
 
       await tester.pumpWidget(
@@ -1464,6 +1550,9 @@ void main() {
             ),
             ChangeNotifierProvider<OrganizationOfferProvider>.value(
               value: offerProvider,
+            ),
+            ChangeNotifierProvider<OrganizationMatchAnalysisProvider>.value(
+              value: matchAnalysisProvider,
             ),
           ],
           child: MaterialApp.router(
@@ -1534,7 +1623,11 @@ void main() {
         expect(find.text('Cancel'), findsNothing);
         expect(find.text('Resend'), findsNothing);
         expect(find.byType(ElevatedButton), findsNothing);
-        expect(find.byType(OutlinedButton), findsNothing);
+        // The only remaining button is Recalculate Match (Phase 8A-3),
+        // which stays reachable regardless of Offer/status -- no Offer
+        // organization action exists for an already-accepted Offer.
+        expect(find.byType(OutlinedButton), findsOneWidget);
+        expect(find.text('Recalculate Match'), findsOneWidget);
       },
     );
 
@@ -1558,7 +1651,9 @@ void main() {
 
         expect(find.text('Declined'), findsOneWidget);
         expect(find.byType(ElevatedButton), findsNothing);
-        expect(find.byType(OutlinedButton), findsNothing);
+        // The only remaining button is Recalculate Match (Phase 8A-3).
+        expect(find.byType(OutlinedButton), findsOneWidget);
+        expect(find.text('Recalculate Match'), findsOneWidget);
       },
     );
 
@@ -1587,8 +1682,11 @@ void main() {
 
         expect(find.text('Assessment'), findsOneWidget);
         expect(find.text('Offer'), findsOneWidget);
+        expect(find.text('Match Analysis'), findsOneWidget);
         expect(find.byType(ElevatedButton), findsNothing);
-        expect(find.byType(OutlinedButton), findsNothing);
+        // The only remaining button is Recalculate Match (Phase 8A-3).
+        expect(find.byType(OutlinedButton), findsOneWidget);
+        expect(find.text('Recalculate Match'), findsOneWidget);
       },
     );
 
@@ -1762,5 +1860,318 @@ void main() {
     );
 
     expect(tester.takeException(), isNull);
+  });
+
+  group('Match Analysis (Phase 8A-3)', () {
+    testWidgets('analysis loading does not block the rest of the page', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(),
+        analysisDelay: const Duration(milliseconds: 200),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      // Application content is fully rendered even while the analysis
+      // fetch is still in flight underneath (started in the same
+      // post-frame callback but independently, per _MatchAnalysisSection's
+      // own doc comment).
+      expect(find.text('Jane Student'), findsOneWidget);
+      expect(find.text('Backend Developer'), findsOneWidget);
+    });
+
+    testWidgets('the Match Analysis card renders the overall score', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(overallMatchScore: 87),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Match Analysis'), findsOneWidget);
+      expect(find.text('Overall Match'), findsOneWidget);
+      expect(find.text('87%'), findsOneWidget);
+    });
+
+    testWidgets('renders skills, field, and experience factor scores', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(
+          skillsMatchScore: 90,
+          fieldMatchScore: 100,
+          experienceMatchScore: 67,
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Skills Match'), findsOneWidget);
+      expect(find.text('90%'), findsOneWidget);
+      expect(find.text('Field / Major Match'), findsOneWidget);
+      expect(find.text('100%'), findsOneWidget);
+      expect(find.text('Experience Match'), findsOneWidget);
+      expect(find.text('67%'), findsOneWidget);
+    });
+
+    testWidgets(
+      'a null factor score renders "Not available", never a misleading 0%',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+          analysisResult: _analysis(
+            skillsMatchScore: null,
+            fieldMatchScore: null,
+            experienceMatchScore: 100,
+          ),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(find.text('Not available'), findsNWidgets(2));
+        expect(find.text('0%'), findsNothing);
+      },
+    );
+
+    testWidgets('strengths render only when the backend returns them', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(
+          strengths: ['Matches required skill: Laravel'],
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Strengths'), findsOneWidget);
+      expect(find.text('• Matches required skill: Laravel'), findsOneWidget);
+    });
+
+    testWidgets('no Strengths heading renders when the list is empty', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(strengths: []),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Strengths'), findsNothing);
+    });
+
+    testWidgets('weaknesses render only when the backend returns them', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(
+          weaknesses: ['Missing preferred skill: Docker'],
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Weaknesses'), findsOneWidget);
+      expect(find.text('• Missing preferred skill: Docker'), findsOneWidget);
+    });
+
+    testWidgets(
+      'the recommendation renders only when the backend returns one',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+          analysisResult: _analysis(
+            recommendation: 'Strong candidate, recommended for interview.',
+          ),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(
+          find.text('Strong candidate, recommended for interview.'),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets('no recommendation text renders when it is null', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(recommendation: null),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'there is no Education factor anywhere on the card (removed in the '
+      'v1.1 backend formula)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+          analysisResult: _analysis(),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(find.textContaining('Education'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'there is no Location or Work Mode factor anywhere on the card',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+          analysisResult: _analysis(),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(find.textContaining('Location Match'), findsNothing);
+        expect(find.textContaining('Work Mode Match'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'no analysis yet shows a lightweight message, not an error, and '
+      'Recalculate is still visible',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+          analysisResult: null,
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(find.text('Match not calculated yet.'), findsOneWidget);
+        expect(find.text('Recalculate Match'), findsOneWidget);
+      },
+    );
+
+    testWidgets('a backend analysis error shows a compact retry', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisError: ApiException('Could not load the match analysis'),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Could not load the match analysis'), findsOneWidget);
+
+      repository.analysisError = null;
+      repository.analysisResult = _analysis(overallMatchScore: 55);
+      await tester.tap(find.text('Try Again'));
+      await tester.pumpAndSettle();
+
+      expect(repository.getAnalysisCallCount, 2);
+      expect(find.text('55%'), findsOneWidget);
+      expect(find.text('Could not load the match analysis'), findsNothing);
+    });
+
+    testWidgets('Recalculate is visible even when an analysis already exists', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(overallMatchScore: 70),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('70%'), findsOneWidget);
+      expect(find.text('Recalculate Match'), findsOneWidget);
+    });
+
+    testWidgets(
+      'Recalculate success updates the card and refreshes the Application '
+      'score',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+          analysisResult: _analysis(overallMatchScore: 40),
+        )..recalculateResult = _analysis(overallMatchScore: 92);
+        await _pumpDetails(tester, repository: repository);
+        expect(find.text('40%'), findsOneWidget);
+        expect(repository.getOrganizationApplicationCallCount, 1);
+
+        await tester.tap(find.text('Recalculate Match'));
+        await tester.pumpAndSettle();
+
+        expect(repository.recalculateCallCount, 1);
+        expect(find.text('92%'), findsWidgets);
+        expect(find.text('Match recalculated'), findsOneWidget);
+        // The real Application (and its match_score) is force-refreshed
+        // separately, since the analyze response never carries a full
+        // ApplicationModel — see _MatchAnalysisSection._recalculate.
+        expect(repository.getOrganizationApplicationCallCount, 2);
+      },
+    );
+
+    testWidgets('Recalculate shows a loading state while in flight', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(overallMatchScore: 40),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      repository.recalculateDelay = const Duration(milliseconds: 200);
+      await tester.tap(find.text('Recalculate Match'));
+      await tester.pump();
+
+      final button = tester.widget<OutlinedButton>(
+        find.widgetWithText(OutlinedButton, 'Recalculate Match'),
+      );
+      // SecondaryButton swaps its own onPressed for a no-op (not null)
+      // while isLoading -- taps are blocked either way, but the widget
+      // contract itself is what's being verified here.
+      expect(button.onPressed, isNotNull);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('Recalculate failure preserves the previously-shown analysis', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(overallMatchScore: 40),
+      )..recalculateError = ApiException('Server error, please try again.');
+      await _pumpDetails(tester, repository: repository);
+
+      await tester.tap(find.text('Recalculate Match'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Server error, please try again.'), findsOneWidget);
+      // Still showing the old score -- never a blank card.
+      expect(find.text('40%'), findsOneWidget);
+    });
+
+    testWidgets(
+      'narrow viewport does not overflow with the Match Analysis card',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+          analysisResult: _analysis(
+            strengths: [
+              'Matches required skill: Laravel',
+              'Matches preferred skill: Docker',
+            ],
+            weaknesses: ['Missing required skill: Kubernetes'],
+            recommendation: 'Strong candidate, recommended for interview.',
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          size: const Size(320, 700),
+        );
+
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

@@ -64,8 +64,17 @@ class ApplicationModel {
   final ApplicantSummaryModel? applicant;
 
   /// Parsed from the backend's `decimal:2`-cast field, which serializes as
-  /// a JSON string (e.g. `"75.50"`), not a number. Only ever populated by
-  /// an organization's AI-analysis action — this phase never displays it.
+  /// a JSON string (e.g. `"75.50"`), not a number. `null` means not yet
+  /// calculated; `0`–`100` (including a genuine `0`) means calculated —
+  /// never conflate the two. Populated by the backend's deterministic,
+  /// rule-based `MatchingService` (Phase 8A-2), either automatically on
+  /// application submission or via an organization's manual recalculation.
+  /// Organization-facing only — stripped from every Student-facing
+  /// response by `HidesInternalApplicationFields` on the backend (Phase
+  /// 8A-1); this app must never surface it to a Student. Displayed to the
+  /// organization on the applicants list and application details screen
+  /// (Phase 8A-3), including the full factor breakdown via
+  /// `MatchAnalysisModel`.
   final double? matchScore;
 
   final String? coverLetter;

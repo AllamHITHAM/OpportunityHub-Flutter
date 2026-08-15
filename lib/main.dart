@@ -25,6 +25,7 @@ import 'providers/auth_provider.dart';
 import 'providers/notification_provider.dart';
 import 'providers/organization_applications_provider.dart';
 import 'providers/organization_assessment_provider.dart';
+import 'providers/organization_match_analysis_provider.dart';
 import 'providers/organization_offer_provider.dart';
 import 'providers/organization_opportunities_provider.dart';
 import 'providers/organization_profile_provider.dart';
@@ -166,6 +167,16 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, OrganizationOfferProvider>(
           create: (context) => OrganizationOfferProvider(
             repository: context.read<OfferRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ChangeNotifierProxyProvider<
+          AuthProvider,
+          OrganizationMatchAnalysisProvider
+        >(
+          create: (context) => OrganizationMatchAnalysisProvider(
+            repository: context.read<ApplicationRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,
