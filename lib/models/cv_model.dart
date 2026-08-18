@@ -1,7 +1,13 @@
 /// A student's CV, as returned by the Laravel `student/cvs` endpoints.
 ///
-/// `filePath` is a plain text string — the backend doesn't support real
-/// file upload yet, so this never points at an actual uploaded file.
+/// `filePath` (Phase 8A-4) is the backend's own server-managed relative
+/// storage path for a real uploaded PDF (e.g. `cvs/3/<uuid>.pdf`) — it is
+/// never a working client URL and must never be displayed to the user or
+/// used to build one; the file itself is only ever reachable through the
+/// authenticated download endpoints (`CvRepository.downloadCv` /
+/// `ApplicationRepository.downloadOrganizationApplicationCv`). A CV
+/// created before this phase may still carry a legacy, non-managed string
+/// here (e.g. a local path a student once typed into a plain text field).
 class CvModel {
   const CvModel({
     required this.id,

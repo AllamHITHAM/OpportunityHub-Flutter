@@ -48,6 +48,29 @@ ResponseBody _jsonResponse(Map<String, dynamic> body, int statusCode) {
   );
 }
 
+ResponseBody _pdfResponse(List<int> bytes, int statusCode) {
+  return ResponseBody.fromBytes(
+    bytes,
+    statusCode,
+    headers: {
+      Headers.contentTypeHeader: ['application/pdf'],
+    },
+  );
+}
+
+/// A JSON error body encoded the same way [ResponseBody.fromBytes] would
+/// deliver it when the request's `responseType` is `bytes` — used to test
+/// `ApiClient.handleBytesError`'s JSON-from-bytes decoding path.
+ResponseBody _jsonErrorAsBytes(Map<String, dynamic> body, int statusCode) {
+  return ResponseBody.fromBytes(
+    utf8.encode(jsonEncode(body)),
+    statusCode,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
+}
+
 ApplicationRepository _repositoryWithAdapter(_FakeHttpClientAdapter adapter) {
   final apiClient = ApiClient(tokenStorageService: TokenStorageService())
     ..dio.httpClientAdapter = adapter;
@@ -1025,6 +1048,98 @@ void main() {
       await expectLater(
         repository.analyzeApplication(1),
         throwsA(isA<TypeError>()),
+      );
+    });
+  });
+
+  group('downloadOrganizationApplicationCv', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _pdfResponse([0x25, 0x50, 0x44, 0x46], 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.downloadOrganizationApplicationCv(7);
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(adapter.lastRequest?.path, '/organization/applications/7/cv');
+    });
+
+    test('returns the exact raw bytes', () async {
+      final bytes = [0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34];
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _pdfResponse(bytes, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.downloadOrganizationApplicationCv(7);
+
+      expect(result, bytes);
+    });
+
+    test(
+      'throws ApiException with the decoded backend message on a 404',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonErrorAsBytes({
+            'success': false,
+            'message': 'Application not found',
+            'data': null,
+          }, 404);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.downloadOrganizationApplicationCv(999),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.statusCode, 'statusCode', 404)
+                .having((e) => e.message, 'message', 'Application not found'),
+          ),
+        );
+      },
+    );
+
+    test(
+      'throws ApiException with the decoded backend message when the CV file is missing',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonErrorAsBytes({
+            'success': false,
+            'message': 'CV file not found',
+            'data': null,
+          }, 404);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.downloadOrganizationApplicationCv(7),
+          throwsA(
+            isA<ApiException>().having(
+              (e) => e.message,
+              'message',
+              'CV file not found',
+            ),
+          ),
+        );
+      },
+    );
+
+    test('throws ApiException on a 403', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonErrorAsBytes({
+          'success': false,
+          'message': 'This action is unauthorized for your account type',
+          'data': null,
+        }, 403);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.downloadOrganizationApplicationCv(7),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 403),
+        ),
       );
     });
   });

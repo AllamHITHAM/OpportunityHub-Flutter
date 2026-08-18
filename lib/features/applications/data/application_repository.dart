@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import '../../../core/api/api_client.dart';
@@ -165,6 +167,26 @@ class ApplicationRepository {
       return MatchAnalysisModel.fromJson(data);
     } on DioException catch (error) {
       throw apiClient.handleError(error);
+    }
+  }
+
+  /// Downloads the raw PDF bytes of the CV attached to [applicationId]'s
+  /// submission with `GET /api/organization/applications/{applicationId}/cv`
+  /// (Phase 8A-4) — the only path an organization can ever reach a
+  /// candidate's CV through; there is no way to fetch a CV by its own ID
+  /// directly.
+  ///
+  /// Errors: 401, 403, 404 (application not owned/missing, or the CV file
+  /// no longer exists on disk).
+  Future<Uint8List> downloadOrganizationApplicationCv(int applicationId) async {
+    try {
+      final response = await apiClient.dio.get<List<int>>(
+        '/organization/applications/$applicationId/cv',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return Uint8List.fromList(response.data ?? const []);
+    } on DioException catch (error) {
+      throw apiClient.handleBytesError(error);
     }
   }
 }

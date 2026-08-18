@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,12 +7,38 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../models/cv_model.dart';
 import '../../../providers/student_cv_provider.dart';
+import '../data/picked_cv_file.dart';
 
-/// Lists the authenticated student's CVs, with add/set-default/delete
-/// actions. No apply/CV-selection/download/preview/editing UI belongs here
-/// yet — this phase covers CV management only.
+/// Opens the platform file picker restricted to a single PDF and returns
+/// the picked bytes, or `null` if the user cancelled or the platform
+/// couldn't provide bytes. The real, default implementation of
+/// [StudentCvScreen.pickCvFile] — overridable in tests so the Add CV flow
+/// can be exercised without a real platform file-picker channel.
+Future<PickedCvFile?> pickCvFileFromDevice() async {
+  final result = await FilePicker.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: ['pdf'],
+    withData: true,
+  );
+  if (result == null || result.files.isEmpty) return null;
+
+  final picked = result.files.single;
+  final bytes = picked.bytes;
+  if (bytes == null) return null;
+
+  return PickedCvFile(filename: picked.name, bytes: bytes);
+}
+
+/// Lists the authenticated student's CVs, with add/set-default/delete/view
+/// actions. No apply/CV-selection UI belongs here yet — this phase covers
+/// CV management (now with a real PDF upload, Phase 8A-4) only.
 class StudentCvScreen extends StatefulWidget {
-  const StudentCvScreen({super.key});
+  const StudentCvScreen({super.key, this.pickCvFile = pickCvFileFromDevice});
+
+  /// Defaults to the real platform file picker ([pickCvFileFromDevice]) —
+  /// overridable so widget tests can simulate a file selection without a
+  /// real platform channel.
+  final Future<PickedCvFile?> Function() pickCvFile;
 
   @override
   State<StudentCvScreen> createState() => _StudentCvScreenState();
@@ -39,7 +66,7 @@ class _StudentCvScreenState extends State<StudentCvScreen> {
       isScrollControlled: true,
       builder: (_) => ChangeNotifierProvider.value(
         value: provider,
-        child: const _AddCvSheet(),
+        child: _AddCvSheet(pickFile: widget.pickCvFile),
       ),
     );
     if (created == true && mounted) {
@@ -83,6 +110,28 @@ class _StudentCvScreenState extends State<StudentCvScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(provider.actionErrorMessage!)));
+    }
+  }
+
+  /// Downloads the CV via the secure backend endpoint and confirms success
+  /// — v1 stops at fetching the (already ownership-checked, private) bytes
+  /// rather than attempting OS-level PDF viewing/saving, which would need
+  /// platform file-opening dependencies beyond this phase's scope.
+  Future<void> _viewCv(CvModel cv) async {
+    final provider = context.read<StudentCvProvider>();
+
+    final bytes = await provider.downloadCv(cv.id);
+    if (!mounted) return;
+
+    if (bytes != null) {
+      final kb = (bytes.length / 1024).toStringAsFixed(0);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('CV downloaded ($kb KB)')));
+    } else if (provider.downloadErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.downloadErrorMessage!)));
     }
   }
 
@@ -138,8 +187,10 @@ class _StudentCvScreenState extends State<StudentCvScreen> {
           return _CvCard(
             cv: cv,
             isBusy: provider.isBusy(cv.id),
+            isDownloading: provider.isDownloading(cv.id),
             onSetDefault: () => _setDefault(cv),
             onDelete: () => _confirmDelete(cv),
+            onView: () => _viewCv(cv),
           );
         },
       ),
@@ -151,14 +202,18 @@ class _CvCard extends StatelessWidget {
   const _CvCard({
     required this.cv,
     required this.isBusy,
+    required this.isDownloading,
     required this.onSetDefault,
     required this.onDelete,
+    required this.onView,
   });
 
   final CvModel cv;
   final bool isBusy;
+  final bool isDownloading;
   final VoidCallback onSetDefault;
   final VoidCallback onDelete;
+  final VoidCallback onView;
 
   @override
   Widget build(BuildContext context) {
@@ -183,18 +238,11 @@ class _CvCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.xxs),
-          Text(
-            cv.filePath,
-            overflow: TextOverflow.ellipsis,
-            style: textTheme.bodySmall?.copyWith(
-              color: AppColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xxs),
           Wrap(
             spacing: AppSpacing.xs,
             runSpacing: AppSpacing.xxs,
             children: [
+              const StatusChip(label: 'PDF', compact: true),
               StatusChip(label: 'Version ${cv.version}', compact: true),
               if (cv.createdByAi)
                 const StatusChip(
@@ -207,6 +255,14 @@ class _CvCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
+              Expanded(
+                child: SecondaryButton(
+                  label: 'View CV',
+                  isLoading: isDownloading,
+                  onPressed: isDownloading ? null : onView,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
               if (!cv.isDefault) ...[
                 Expanded(
                   child: SecondaryButton(
@@ -230,10 +286,12 @@ class _CvCard extends StatelessWidget {
   }
 }
 
-/// A modal bottom sheet to add a CV — just two text fields, so a sheet
-/// keeps this lightweight rather than a full route/screen.
+/// A modal bottom sheet to add a CV: a title field plus a real PDF file
+/// picker (Phase 8A-4) — replaces the old manual `file_path` text field.
 class _AddCvSheet extends StatefulWidget {
-  const _AddCvSheet();
+  const _AddCvSheet({required this.pickFile});
+
+  final Future<PickedCvFile?> Function() pickFile;
 
   @override
   State<_AddCvSheet> createState() => _AddCvSheetState();
@@ -242,41 +300,65 @@ class _AddCvSheet extends StatefulWidget {
 class _AddCvSheetState extends State<_AddCvSheet> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
-  final _filePathController = TextEditingController();
+
+  PickedCvFile? _selectedFile;
+  String? _fileErrorMessage;
 
   @override
   void dispose() {
     _titleController.dispose();
-    _filePathController.dispose();
     super.dispose();
   }
 
   // Matches the backend's own limits (StoreCVRequest: title max:255,
-  // file_path max:2048) so an over-length value is rejected locally
-  // instead of round-tripping to a 422.
+  // file max:5120 KB) so an over-length/oversized value is rejected
+  // locally instead of round-tripping to a 422.
   static const _titleMaxLength = 255;
-  static const _filePathMaxLength = 2048;
+  static const _maxFileSizeBytes = 5 * 1024 * 1024;
 
-  String? _validateField(String? value, String fieldLabel, int maxLength) {
+  String? _validateTitle(String? value) {
     final trimmed = value?.trim() ?? '';
     if (trimmed.isEmpty) {
-      return '$fieldLabel is required';
+      return 'Title is required';
     }
-    if (trimmed.length > maxLength) {
-      return '$fieldLabel must be $maxLength characters or fewer';
+    if (trimmed.length > _titleMaxLength) {
+      return 'Title must be $_titleMaxLength characters or fewer';
     }
     return null;
+  }
+
+  Future<void> _pickFile() async {
+    final picked = await widget.pickFile();
+    if (picked == null) return;
+
+    setState(() {
+      if (!picked.filename.toLowerCase().endsWith('.pdf')) {
+        _selectedFile = null;
+        _fileErrorMessage = 'Only PDF files are supported.';
+      } else if (picked.sizeInBytes > _maxFileSizeBytes) {
+        _selectedFile = null;
+        _fileErrorMessage = 'File must be 5 MB or smaller.';
+      } else {
+        _selectedFile = picked;
+        _fileErrorMessage = null;
+      }
+    });
   }
 
   Future<void> _submit(StudentCvProvider provider) async {
     FocusScope.of(context).unfocus();
 
     final isValid = _formKey.currentState?.validate() ?? false;
-    if (!isValid) return;
+    final file = _selectedFile;
+
+    if (file == null) {
+      setState(() => _fileErrorMessage ??= 'Please select a PDF file.');
+    }
+    if (!isValid || file == null) return;
 
     final created = await provider.createCv(
       title: _titleController.text.trim(),
-      filePath: _filePathController.text.trim(),
+      file: file,
     );
     if (!mounted) return;
     if (created == null) return;
@@ -288,6 +370,7 @@ class _AddCvSheetState extends State<_AddCvSheet> {
   Widget build(BuildContext context) {
     final provider = context.watch<StudentCvProvider>();
     final isLoading = provider.isSubmitting;
+    final textTheme = Theme.of(context).textTheme;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -310,19 +393,44 @@ class _AddCvSheetState extends State<_AddCvSheet> {
                 label: 'Title',
                 hint: 'e.g. Software Engineer CV',
                 enabled: !isLoading,
-                textInputAction: TextInputAction.next,
-                validator: (v) => _validateField(v, 'Title', _titleMaxLength),
+                textInputAction: TextInputAction.done,
+                validator: _validateTitle,
               ),
               const SizedBox(height: AppSpacing.inputSpacing),
-              AppTextField(
-                controller: _filePathController,
-                label: 'File Path',
-                hint: 'e.g. cvs/my-cv.pdf',
-                enabled: !isLoading,
-                textInputAction: TextInputAction.done,
-                validator: (v) =>
-                    _validateField(v, 'File path', _filePathMaxLength),
+              SecondaryButton(
+                label: _selectedFile == null ? 'Select PDF' : 'Change PDF',
+                icon: Icons.attach_file,
+                onPressed: isLoading ? null : _pickFile,
               ),
+              if (_selectedFile != null) ...[
+                const SizedBox(height: AppSpacing.xxs),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.picture_as_pdf_outlined,
+                      size: 18,
+                      color: AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: AppSpacing.xxs),
+                    Expanded(
+                      child: Text(
+                        _selectedFile!.filename,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_fileErrorMessage != null) ...[
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  _fileErrorMessage!,
+                  style: textTheme.bodySmall?.copyWith(color: AppColors.error),
+                ),
+              ],
               if (provider.formErrorMessage != null) ...[
                 const SizedBox(height: AppSpacing.xs),
                 AppErrorView(

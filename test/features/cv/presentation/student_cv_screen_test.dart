@@ -1,5 +1,7 @@
 // Widget tests for StudentCvScreen, in isolation with a small GoRouter.
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +12,7 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
+import 'package:opportunityhub_flutter/features/cv/data/picked_cv_file.dart';
 import 'package:opportunityhub_flutter/features/cv/presentation/student_cv_screen.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
@@ -30,7 +33,7 @@ class _FakeAuthRepository extends AuthRepository {
 CvModel _cv({
   int id = 1,
   String title = 'My CV',
-  String filePath = 'cvs/my-cv.pdf',
+  String filePath = 'cvs/1/uuid.pdf',
   int version = 1,
   bool isDefault = false,
   bool createdByAi = false,
@@ -46,6 +49,15 @@ CvModel _cv({
   );
 }
 
+/// A valid, well-under-the-limit picked PDF for tests that don't care
+/// about the exact bytes.
+PickedCvFile _pickedFile({
+  String filename = 'resume.pdf',
+  int sizeInBytes = 100,
+}) {
+  return PickedCvFile(filename: filename, bytes: Uint8List(sizeInBytes));
+}
+
 class _FakeCvRepository extends CvRepository {
   _FakeCvRepository({
     this.listResult = const [],
@@ -55,6 +67,8 @@ class _FakeCvRepository extends CvRepository {
     this.createError,
     this.deleteError,
     this.setDefaultResult,
+    this.downloadResult,
+    this.downloadError,
   }) : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   List<CvModel> listResult;
@@ -64,13 +78,18 @@ class _FakeCvRepository extends CvRepository {
 
   CvModel? createResult;
   ApiException? createError;
-  Map<String, String>? lastCreatePayload;
+  PickedCvFile? lastCreateFile;
+  String? lastCreateTitle;
 
   ApiException? deleteError;
   int deleteCallCount = 0;
 
   CvModel? setDefaultResult;
   int setDefaultCallCount = 0;
+
+  Uint8List? downloadResult;
+  ApiException? downloadError;
+  int downloadCallCount = 0;
 
   @override
   Future<List<CvModel>> getStudentCvs() async {
@@ -85,9 +104,10 @@ class _FakeCvRepository extends CvRepository {
   @override
   Future<CvModel> createCv({
     required String title,
-    required String filePath,
+    required PickedCvFile file,
   }) async {
-    lastCreatePayload = {'title': title, 'file_path': filePath};
+    lastCreateTitle = title;
+    lastCreateFile = file;
     if (createError != null) throw createError!;
     return createResult!;
   }
@@ -103,11 +123,19 @@ class _FakeCvRepository extends CvRepository {
     setDefaultCallCount++;
     return setDefaultResult!;
   }
+
+  @override
+  Future<Uint8List> downloadCv(int cvId) async {
+    downloadCallCount++;
+    if (downloadError != null) throw downloadError!;
+    return downloadResult ?? Uint8List.fromList([0x25, 0x50, 0x44, 0x46]);
+  }
 }
 
 Future<StudentCvProvider> _pumpScreen(
   WidgetTester tester, {
   required _FakeCvRepository repository,
+  Future<PickedCvFile?> Function() pickCvFile = _defaultTestPicker,
   Size size = const Size(420, 800),
 }) async {
   tester.view.physicalSize = size;
@@ -126,7 +154,7 @@ Future<StudentCvProvider> _pumpScreen(
     routes: [
       GoRoute(
         path: AppRoutes.studentCvs,
-        builder: (_, _) => const StudentCvScreen(),
+        builder: (_, _) => StudentCvScreen(pickCvFile: pickCvFile),
       ),
     ],
   );
@@ -144,6 +172,8 @@ Future<StudentCvProvider> _pumpScreen(
 
   return provider;
 }
+
+Future<PickedCvFile?> _defaultTestPicker() async => _pickedFile();
 
 void main() {
   testWidgets('Loading state renders while the list is in flight', (
@@ -216,14 +246,14 @@ void main() {
   });
 
   testWidgets(
-    'Populated list renders title, file path, version, and default badge',
+    'Populated list renders title, version, and default badge, but never a raw file path',
     (tester) async {
       final repository = _FakeCvRepository(
         listResult: [
           _cv(
             id: 1,
             title: 'Software Engineer CV',
-            filePath: 'cvs/software-engineer.pdf',
+            filePath: 'cvs/1/9c6b1e3a-....pdf',
             version: 2,
             isDefault: true,
           ),
@@ -232,9 +262,11 @@ void main() {
       await _pumpScreen(tester, repository: repository);
 
       expect(find.text('Software Engineer CV'), findsOneWidget);
-      expect(find.text('cvs/software-engineer.pdf'), findsOneWidget);
       expect(find.text('Version 2'), findsOneWidget);
       expect(find.text('Default'), findsOneWidget);
+      // The raw server-managed path is never shown to the user.
+      expect(find.text('cvs/1/9c6b1e3a-....pdf'), findsNothing);
+      expect(find.textContaining('cvs/'), findsNothing);
       // A CV already default shows no "Set as Default" action.
       expect(find.text('Set as Default'), findsNothing);
     },
@@ -267,39 +299,130 @@ void main() {
     expect(find.text('AI Generated'), findsOneWidget);
   });
 
-  testWidgets(
-    'A title over 255 characters is blocked locally, before any repository call',
-    (tester) async {
+  group('Add CV (Phase 8A-4)', () {
+    testWidgets('There is no manual File Path text field', (tester) async {
       final repository = _FakeCvRepository();
       await _pumpScreen(tester, repository: repository);
 
       await tester.tap(find.byIcon(Icons.add));
       await tester.pumpAndSettle();
 
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'Title'),
-        'A' * 256,
+      expect(find.widgetWithText(TextFormField, 'File Path'), findsNothing);
+      expect(find.text('Select PDF'), findsOneWidget);
+    });
+
+    testWidgets(
+      'Selecting a PDF shows its filename and changes the button label',
+      (tester) async {
+        final repository = _FakeCvRepository();
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          pickCvFile: () async => _pickedFile(filename: 'my-resume.pdf'),
+        );
+
+        await tester.tap(find.byIcon(Icons.add));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Select PDF'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('my-resume.pdf'), findsOneWidget);
+        expect(find.text('Change PDF'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Submitting without selecting a file is blocked locally, before any repository call',
+      (tester) async {
+        final repository = _FakeCvRepository();
+        await _pumpScreen(tester, repository: repository);
+
+        await tester.tap(find.byIcon(Icons.add));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Title'),
+          'New CV',
+        );
+        await tester.tap(find.text('Add CV').last);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Please select a PDF file.'), findsOneWidget);
+        expect(repository.lastCreateFile, isNull);
+      },
+    );
+
+    testWidgets(
+      'A title over 255 characters is blocked locally, before any repository call',
+      (tester) async {
+        final repository = _FakeCvRepository();
+        await _pumpScreen(tester, repository: repository);
+
+        await tester.tap(find.byIcon(Icons.add));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Title'),
+          'A' * 256,
+        );
+        await tester.tap(find.text('Select PDF'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add CV').last);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Title must be 255 characters or fewer'),
+          findsOneWidget,
+        );
+        expect(repository.lastCreateFile, isNull);
+      },
+    );
+
+    testWidgets('A non-PDF filename is rejected locally', (tester) async {
+      final repository = _FakeCvRepository();
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        pickCvFile: () async => _pickedFile(filename: 'resume.docx'),
       );
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'File Path'),
-        'cvs/new-cv.pdf',
-      );
-      await tester.tap(find.text('Add CV').last);
+
+      await tester.tap(find.byIcon(Icons.add));
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('Title must be 255 characters or fewer'),
-        findsOneWidget,
-      );
-      expect(repository.lastCreatePayload, isNull);
-    },
-  );
+      await tester.tap(find.text('Select PDF'));
+      await tester.pumpAndSettle();
 
-  testWidgets(
-    'A file path over 2048 characters is blocked locally, before any repository call',
-    (tester) async {
+      expect(find.text('Only PDF files are supported.'), findsOneWidget);
+      expect(find.text('resume.docx'), findsNothing);
+    });
+
+    testWidgets('A file over 5 MB is rejected locally', (tester) async {
       final repository = _FakeCvRepository();
-      await _pumpScreen(tester, repository: repository);
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        pickCvFile: () async => _pickedFile(sizeInBytes: 5 * 1024 * 1024 + 1),
+      );
+
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Select PDF'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('File must be 5 MB or smaller.'), findsOneWidget);
+    });
+
+    testWidgets('A file exactly at 5 MB is accepted locally', (tester) async {
+      final repository = _FakeCvRepository(
+        createResult: _cv(id: 5, title: 'New CV'),
+      );
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        pickCvFile: () async => _pickedFile(sizeInBytes: 5 * 1024 * 1024),
+      );
 
       await tester.tap(find.byIcon(Icons.add));
       await tester.pumpAndSettle();
@@ -308,65 +431,82 @@ void main() {
         find.widgetWithText(TextFormField, 'Title'),
         'New CV',
       );
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'File Path'),
-        'a' * 2049,
-      );
+      await tester.tap(find.text('Select PDF'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Add CV').last);
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('File path must be 2048 characters or fewer'),
-        findsOneWidget,
-      );
-      expect(repository.lastCreatePayload, isNull);
-    },
-  );
+      expect(repository.lastCreateFile, isNotNull);
+    });
 
-  testWidgets(
-    'A title/file path exactly at the limit is accepted (boundary check)',
-    (tester) async {
-      final repository = _FakeCvRepository(
-        createResult: _cv(id: 5, title: 'A' * 255),
-      );
-      await _pumpScreen(tester, repository: repository);
+    testWidgets(
+      'Add CV success sends the picked file, closes the sheet, refreshes the list, and shows a success message',
+      (tester) async {
+        final repository = _FakeCvRepository(
+          createResult: _cv(id: 5, title: 'New CV'),
+        );
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          pickCvFile: () async => _pickedFile(filename: 'new-cv.pdf'),
+        );
 
-      await tester.tap(find.byIcon(Icons.add));
-      await tester.pumpAndSettle();
+        await tester.tap(find.byIcon(Icons.add));
+        await tester.pumpAndSettle();
 
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'Title'),
-        'A' * 255,
-      );
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'File Path'),
-        'a' * 2048,
-      );
-      await tester.tap(find.text('Add CV').last);
-      await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Title'),
+          'New CV',
+        );
+        await tester.tap(find.text('Select PDF'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add CV').last);
+        await tester.pumpAndSettle();
 
-      expect(repository.lastCreatePayload, isNotNull);
-    },
-  );
+        expect(repository.lastCreateTitle, 'New CV');
+        expect(repository.lastCreateFile?.filename, 'new-cv.pdf');
+        expect(find.text('New CV'), findsOneWidget);
+        expect(find.text('CV added successfully'), findsOneWidget);
+      },
+    );
 
-  testWidgets('Add CV validation blocks submission when fields are blank', (
-    tester,
-  ) async {
-    await _pumpScreen(tester, repository: _FakeCvRepository());
+    testWidgets(
+      '422 create failure keeps the sheet open and shows the field-specific backend message',
+      (tester) async {
+        final repository = _FakeCvRepository(
+          createError: ApiException(
+            'The given data was invalid.',
+            statusCode: 422,
+            errors: {
+              'title': ['The title field is required.'],
+            },
+          ),
+        );
+        await _pumpScreen(tester, repository: repository);
 
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pumpAndSettle();
+        await tester.tap(find.byIcon(Icons.add));
+        await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Add CV').last);
-    await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Title'),
+          'New CV',
+        );
+        await tester.tap(find.text('Select PDF'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add CV').last);
+        await tester.pumpAndSettle();
 
-    expect(find.text('Title is required'), findsOneWidget);
-    expect(find.text('File path is required'), findsOneWidget);
-  });
+        // The field-specific message is shown in preference to the generic
+        // top-level one.
+        expect(find.text('The title field is required.'), findsOneWidget);
+        expect(find.text('The given data was invalid.'), findsNothing);
+        expect(find.text('Add CV'), findsWidgets);
+      },
+    );
 
-  testWidgets(
-    'Add CV success closes the sheet, refreshes the list, and shows a success message',
-    (tester) async {
+    testWidgets('Add CV shows a loading state while submitting', (
+      tester,
+    ) async {
       final repository = _FakeCvRepository(
         createResult: _cv(id: 5, title: 'New CV'),
       );
@@ -379,57 +519,49 @@ void main() {
         find.widgetWithText(TextFormField, 'Title'),
         'New CV',
       );
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'File Path'),
-        'cvs/new-cv.pdf',
-      );
+      await tester.tap(find.text('Select PDF'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Add CV').last);
+      await tester.pump();
       await tester.pumpAndSettle();
 
-      expect(repository.lastCreatePayload, {
-        'title': 'New CV',
-        'file_path': 'cvs/new-cv.pdf',
-      });
-      expect(find.text('New CV'), findsOneWidget);
-      expect(find.text('CV added successfully'), findsOneWidget);
-    },
-  );
+      expect(tester.takeException(), isNull);
+    });
+  });
 
-  testWidgets(
-    '422 create failure keeps the sheet open and shows the field-specific backend message',
-    (tester) async {
+  group('View CV (Phase 8A-4)', () {
+    testWidgets('View CV downloads the file and confirms success', (
+      tester,
+    ) async {
       final repository = _FakeCvRepository(
-        createError: ApiException(
-          'The given data was invalid.',
-          statusCode: 422,
-          errors: {
-            'title': ['The title field is required.'],
-          },
-        ),
+        listResult: [_cv(id: 1, title: 'My CV')],
+        downloadResult: Uint8List(2048),
       );
       await _pumpScreen(tester, repository: repository);
 
-      await tester.tap(find.byIcon(Icons.add));
+      await tester.tap(find.text('View CV'));
       await tester.pumpAndSettle();
 
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'Title'),
-        'New CV',
+      expect(repository.downloadCallCount, 1);
+      expect(find.textContaining('CV downloaded'), findsOneWidget);
+    });
+
+    testWidgets('View CV failure shows the backend message safely', (
+      tester,
+    ) async {
+      final repository = _FakeCvRepository(
+        listResult: [_cv(id: 1, title: 'My CV')],
+        downloadError: ApiException('CV file not found'),
       );
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'File Path'),
-        'cvs/new-cv.pdf',
-      );
-      await tester.tap(find.text('Add CV').last);
+      await _pumpScreen(tester, repository: repository);
+
+      await tester.tap(find.text('View CV'));
       await tester.pumpAndSettle();
 
-      // The field-specific message is shown in preference to the generic
-      // top-level one.
-      expect(find.text('The title field is required.'), findsOneWidget);
-      expect(find.text('The given data was invalid.'), findsNothing);
-      expect(find.text('Add CV'), findsWidgets);
-    },
-  );
+      expect(find.text('CV file not found'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
 
   testWidgets('Delete requires confirmation before anything happens', (
     tester,
@@ -504,6 +636,25 @@ void main() {
       repository: repository,
       size: const Size(320, 720),
     );
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Add CV sheet does not overflow at a narrow 320x720 viewport', (
+    tester,
+  ) async {
+    final repository = _FakeCvRepository();
+    await _pumpScreen(
+      tester,
+      repository: repository,
+      size: const Size(320, 720),
+    );
+
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Select PDF'));
+    await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
   });

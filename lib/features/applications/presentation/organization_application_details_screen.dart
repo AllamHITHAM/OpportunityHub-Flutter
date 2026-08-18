@@ -146,6 +146,30 @@ class _OrganizationApplicationDetailsScreenState
     });
   }
 
+  /// Downloads the CV via the secure, ownership-checked backend endpoint
+  /// and confirms success — v1 stops at fetching the bytes rather than
+  /// attempting OS-level PDF viewing, which would need platform
+  /// file-opening dependencies beyond this phase's scope (mirrors
+  /// StudentCvScreen's own "View CV" action).
+  Future<void> _viewCv(
+    OrganizationApplicationsProvider provider,
+    int applicationId,
+  ) async {
+    final bytes = await provider.downloadCv(applicationId);
+    if (!mounted) return;
+
+    if (bytes != null) {
+      final kb = (bytes.length / 1024).toStringAsFixed(0);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('CV downloaded ($kb KB)')));
+    } else if (provider.cvDownloadErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.cvDownloadErrorMessage!)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<OrganizationApplicationsProvider>();
@@ -297,12 +321,12 @@ class _OrganizationApplicationDetailsScreenState
               children: [
                 const SectionHeader(title: 'CV'),
                 OpportunityDetailRow(label: 'Title', value: cv.title),
-                OpportunityDetailRow(label: 'File Path', value: cv.filePath),
                 const SizedBox(height: AppSpacing.xs),
                 Wrap(
                   spacing: AppSpacing.xs,
                   runSpacing: AppSpacing.xxs,
                   children: [
+                    const StatusChip(label: 'PDF', compact: true),
                     StatusChip(label: 'Version ${cv.version}', compact: true),
                     if (cv.isDefault)
                       const StatusChip(
@@ -317,6 +341,14 @@ class _OrganizationApplicationDetailsScreenState
                         compact: true,
                       ),
                   ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                SecondaryButton(
+                  label: 'View CV',
+                  isLoading: provider.isDownloadingCv(application.id),
+                  onPressed: provider.isDownloadingCv(application.id)
+                      ? null
+                      : () => _viewCv(provider, application.id),
                 ),
               ],
             ),

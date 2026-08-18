@@ -1,6 +1,8 @@
 // Widget tests for OrganizationApplicationDetailsScreen, in isolation with
 // a small GoRouter.
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -293,6 +295,8 @@ class _FakeApplicationRepository extends ApplicationRepository {
     this.analysisResult,
     this.analysisError,
     this.analysisDelay = Duration.zero,
+    this.downloadCvResult,
+    this.downloadCvError,
   }) : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   ApplicationModel? detailsResult;
@@ -315,6 +319,17 @@ class _FakeApplicationRepository extends ApplicationRepository {
   ApiException? recalculateError;
   Duration recalculateDelay = Duration.zero;
   int recalculateCallCount = 0;
+
+  Uint8List? downloadCvResult;
+  ApiException? downloadCvError;
+  int downloadCvCallCount = 0;
+
+  @override
+  Future<Uint8List> downloadOrganizationApplicationCv(int applicationId) async {
+    downloadCvCallCount++;
+    if (downloadCvError != null) throw downloadCvError!;
+    return downloadCvResult ?? Uint8List.fromList([0x25, 0x50, 0x44, 0x46]);
+  }
 
   @override
   Future<ApplicationModel> getOrganizationApplication(int applicationId) async {
@@ -662,17 +677,53 @@ void main() {
     expect(find.text('Cover Letter'), findsNothing);
   });
 
-  testWidgets('CV details render', (tester) async {
-    final repository = _FakeApplicationRepository(
-      detailsResult: _application(),
-    );
-    await _pumpDetails(tester, repository: repository);
+  testWidgets(
+    'CV details render, with a View CV action and never a raw file path',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+      );
+      await _pumpDetails(tester, repository: repository);
 
-    expect(find.text('Main CV'), findsOneWidget);
-    expect(find.text('uploads/cv.pdf'), findsOneWidget);
-    expect(find.text('Version 1'), findsOneWidget);
-    expect(find.text('Default'), findsOneWidget);
-    expect(find.text('AI Generated'), findsOneWidget);
+      expect(find.text('Main CV'), findsOneWidget);
+      expect(find.text('Version 1'), findsOneWidget);
+      expect(find.text('Default'), findsOneWidget);
+      expect(find.text('AI Generated'), findsOneWidget);
+      expect(find.text('View CV'), findsOneWidget);
+      // The server-managed path is never shown to the organization either.
+      expect(find.text('uploads/cv.pdf'), findsNothing);
+      expect(find.text('File Path'), findsNothing);
+    },
+  );
+
+  group('View CV (Phase 8A-4)', () {
+    testWidgets('downloads the file and confirms success', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        downloadCvResult: Uint8List(2048),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      await tester.tap(find.text('View CV'));
+      await tester.pumpAndSettle();
+
+      expect(repository.downloadCvCallCount, 1);
+      expect(find.textContaining('CV downloaded'), findsOneWidget);
+    });
+
+    testWidgets('failure shows the backend message safely', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        downloadCvError: ApiException('CV file not found'),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      await tester.tap(find.text('View CV'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('CV file not found'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 
   testWidgets('Opportunity details render', (tester) async {
@@ -1623,10 +1674,12 @@ void main() {
         expect(find.text('Cancel'), findsNothing);
         expect(find.text('Resend'), findsNothing);
         expect(find.byType(ElevatedButton), findsNothing);
-        // The only remaining button is Recalculate Match (Phase 8A-3),
-        // which stays reachable regardless of Offer/status -- no Offer
-        // organization action exists for an already-accepted Offer.
-        expect(find.byType(OutlinedButton), findsOneWidget);
+        // The only remaining buttons are View CV (Phase 8A-4) and
+        // Recalculate Match (Phase 8A-3), both of which stay reachable
+        // regardless of Offer/status -- no Offer organization action
+        // exists for an already-accepted Offer.
+        expect(find.byType(OutlinedButton), findsNWidgets(2));
+        expect(find.text('View CV'), findsOneWidget);
         expect(find.text('Recalculate Match'), findsOneWidget);
       },
     );
@@ -1651,8 +1704,10 @@ void main() {
 
         expect(find.text('Declined'), findsOneWidget);
         expect(find.byType(ElevatedButton), findsNothing);
-        // The only remaining button is Recalculate Match (Phase 8A-3).
-        expect(find.byType(OutlinedButton), findsOneWidget);
+        // The only remaining buttons are View CV (Phase 8A-4) and
+        // Recalculate Match (Phase 8A-3).
+        expect(find.byType(OutlinedButton), findsNWidgets(2));
+        expect(find.text('View CV'), findsOneWidget);
         expect(find.text('Recalculate Match'), findsOneWidget);
       },
     );
@@ -1684,8 +1739,10 @@ void main() {
         expect(find.text('Offer'), findsOneWidget);
         expect(find.text('Match Analysis'), findsOneWidget);
         expect(find.byType(ElevatedButton), findsNothing);
-        // The only remaining button is Recalculate Match (Phase 8A-3).
-        expect(find.byType(OutlinedButton), findsOneWidget);
+        // The only remaining buttons are View CV (Phase 8A-4) and
+        // Recalculate Match (Phase 8A-3).
+        expect(find.byType(OutlinedButton), findsNWidgets(2));
+        expect(find.text('View CV'), findsOneWidget);
         expect(find.text('Recalculate Match'), findsOneWidget);
       },
     );

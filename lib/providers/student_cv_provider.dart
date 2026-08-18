@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/api/api_client.dart';
 import '../features/cv/data/cv_repository.dart';
+import '../features/cv/data/picked_cv_file.dart';
 import '../models/cv_model.dart';
 import 'auth_provider.dart';
 
@@ -89,7 +90,7 @@ class StudentCvProvider extends ChangeNotifier {
 
   Future<CvModel?> createCv({
     required String title,
-    required String filePath,
+    required PickedCvFile file,
   }) async {
     isSubmitting = true;
     formErrorMessage = null;
@@ -97,7 +98,7 @@ class StudentCvProvider extends ChangeNotifier {
 
     CvModel? created;
     try {
-      created = await repository.createCv(title: title, filePath: filePath);
+      created = await repository.createCv(title: title, file: file);
       cvs = [...cvs, created];
     } on ApiException catch (error) {
       formErrorMessage = _bestErrorMessage(error);
@@ -122,6 +123,39 @@ class StudentCvProvider extends ChangeNotifier {
       }
     }
     return error.message;
+  }
+
+  /// Application IDs currently in flight -- CV IDs, actually -- guards
+  /// against a duplicate "View CV" tap for the same CV, exactly like
+  /// [_busyIds] does for delete/set-default.
+  final Set<int> _downloadingIds = {};
+  String? downloadErrorMessage;
+
+  bool isDownloading(int cvId) => _downloadingIds.contains(cvId);
+
+  /// Downloads the raw PDF bytes for [cvId] via the secure backend
+  /// endpoint. Returns `null` on failure (see [downloadErrorMessage]) — a
+  /// duplicate call for the same CV while one is already in flight is
+  /// ignored, returning `null` immediately without a second request.
+  Future<Uint8List?> downloadCv(int cvId) async {
+    if (_downloadingIds.contains(cvId)) return null;
+
+    _downloadingIds.add(cvId);
+    downloadErrorMessage = null;
+    notifyListeners();
+
+    Uint8List? bytes;
+    try {
+      bytes = await repository.downloadCv(cvId);
+    } on ApiException catch (error) {
+      downloadErrorMessage = error.message;
+    } catch (_) {
+      downloadErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      _downloadingIds.remove(cvId);
+      notifyListeners();
+    }
+    return bytes;
   }
 
   Future<bool> deleteCv(int id) async {
@@ -185,6 +219,8 @@ class StudentCvProvider extends ChangeNotifier {
     _busyIds.clear();
     actionErrorMessage = null;
     _pendingListFetch = null;
+    _downloadingIds.clear();
+    downloadErrorMessage = null;
     notifyListeners();
   }
 

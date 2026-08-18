@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
+import 'package:opportunityhub_flutter/features/cv/data/picked_cv_file.dart';
 
 const _secureStorageChannel = MethodChannel(
   'plugins.it_nomads.com/flutter_secure_storage',
@@ -41,6 +42,29 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
 ResponseBody _jsonResponse(Map<String, dynamic> body, int statusCode) {
   return ResponseBody.fromString(
     jsonEncode(body),
+    statusCode,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
+}
+
+ResponseBody _pdfResponse(List<int> bytes, int statusCode) {
+  return ResponseBody.fromBytes(
+    bytes,
+    statusCode,
+    headers: {
+      Headers.contentTypeHeader: ['application/pdf'],
+    },
+  );
+}
+
+/// A JSON error body encoded the same way [ResponseBody.fromBytes] would
+/// deliver it when the request's `responseType` is `bytes` — used to test
+/// `ApiClient.handleBytesError`'s JSON-from-bytes decoding path.
+ResponseBody _jsonErrorAsBytes(Map<String, dynamic> body, int statusCode) {
+  return ResponseBody.fromBytes(
+    utf8.encode(jsonEncode(body)),
     statusCode,
     headers: {
       Headers.contentTypeHeader: [Headers.jsonContentType],
@@ -250,7 +274,26 @@ void main() {
   });
 
   group('createCv', () {
-    test('sends the correct POST body', () async {
+    PickedCvFile file({String filename = 'resume.pdf'}) {
+      return PickedCvFile(
+        filename: filename,
+        bytes: Uint8List.fromList([0x25, 0x50, 0x44, 0x46]), // "%PDF"
+      );
+    }
+
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _cvJson()}, 201);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.createCv(title: 'Software Engineer CV', file: file());
+
+      expect(adapter.lastRequest?.method, 'POST');
+      expect(adapter.lastRequest?.path, '/student/cvs');
+    });
+
+    test('sends a real multipart/form-data body with title and file', () async {
       final adapter = _FakeHttpClientAdapter((options) {
         return _jsonResponse({'data': _cvJson()}, 201);
       });
@@ -258,16 +301,18 @@ void main() {
 
       await repository.createCv(
         title: 'Software Engineer CV',
-        filePath: 'cvs/software-engineer.pdf',
+        file: file(filename: 'resume.pdf'),
       );
 
-      expect(adapter.lastRequest?.method, 'POST');
-      expect(adapter.lastRequest?.path, '/student/cvs');
-      final body = adapter.lastRequest?.data as Map<String, dynamic>;
-      expect(body, {
-        'title': 'Software Engineer CV',
-        'file_path': 'cvs/software-engineer.pdf',
-      });
+      final body = adapter.lastRequest?.data;
+      expect(body, isA<FormData>());
+      final formData = body as FormData;
+      expect(formData.fields, hasLength(1));
+      expect(formData.fields.single.key, 'title');
+      expect(formData.fields.single.value, 'Software Engineer CV');
+      expect(formData.files, hasLength(1));
+      expect(formData.files.single.key, 'file');
+      expect(formData.files.single.value.filename, 'resume.pdf');
     });
 
     test('returns the parsed created CV', () async {
@@ -276,37 +321,88 @@ void main() {
       });
       final repository = _repositoryWithAdapter(adapter);
 
-      final result = await repository.createCv(
-        title: 'New CV',
-        filePath: 'cvs/new.pdf',
-      );
+      final result = await repository.createCv(title: 'New CV', file: file());
 
       expect(result.id, 9);
       expect(result.title, 'New CV');
     });
 
-    test('throws with the backend message on 422 validation', () async {
-      final adapter = _FakeHttpClientAdapter((options) {
-        return _jsonResponse({
-          'message': 'The given data was invalid.',
-          'errors': {
-            'title': ['The title field is required.'],
-          },
-        }, 422);
-      });
-      final repository = _repositoryWithAdapter(adapter);
+    test(
+      'throws with the backend message on 422 validation (missing title)',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'message': 'The given data was invalid.',
+            'errors': {
+              'title': ['The title field is required.'],
+            },
+          }, 422);
+        });
+        final repository = _repositoryWithAdapter(adapter);
 
-      await expectLater(
-        repository.createCv(title: '', filePath: 'cvs/new.pdf'),
-        throwsA(
-          isA<ApiException>().having(
-            (e) => e.errors?['title'],
-            'errors[title]',
-            contains('The title field is required.'),
+        await expectLater(
+          repository.createCv(title: '', file: file()),
+          throwsA(
+            isA<ApiException>().having(
+              (e) => e.errors?['title'],
+              'errors[title]',
+              contains('The title field is required.'),
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
+
+    test(
+      'throws with the backend message on 422 validation (non-PDF file)',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'message': 'The given data was invalid.',
+            'errors': {
+              'file': ['The file field must be a file of type: pdf.'],
+            },
+          }, 422);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.createCv(
+            title: 'My CV',
+            file: file(filename: 'resume.docx'),
+          ),
+          throwsA(
+            isA<ApiException>().having(
+              (e) => e.errors?['file'],
+              'errors[file]',
+              isNotNull,
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'throws with the backend message on 422 validation (file too large)',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'message': 'The given data was invalid.',
+            'errors': {
+              'file': [
+                'The file field must not be greater than 5120 kilobytes.',
+              ],
+            },
+          }, 422);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.createCv(title: 'My CV', file: file()),
+          throwsA(isA<ApiException>()),
+        );
+      },
+    );
   });
 
   group('deleteCv', () {
@@ -395,6 +491,98 @@ void main() {
       await expectLater(
         repository.setDefaultCv(999),
         throwsA(isA<ApiException>()),
+      );
+    });
+  });
+
+  group('downloadCv', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _pdfResponse([0x25, 0x50, 0x44, 0x46], 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.downloadCv(5);
+
+      expect(adapter.lastRequest?.method, 'GET');
+      expect(adapter.lastRequest?.path, '/student/cvs/5/download');
+    });
+
+    test('returns the exact raw bytes', () async {
+      final bytes = [0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34];
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _pdfResponse(bytes, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.downloadCv(5);
+
+      expect(result, bytes);
+    });
+
+    test(
+      'throws ApiException with the decoded backend message on a 404',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonErrorAsBytes({
+            'success': false,
+            'message': 'CV not found',
+            'data': null,
+          }, 404);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.downloadCv(999),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.statusCode, 'statusCode', 404)
+                .having((e) => e.message, 'message', 'CV not found'),
+          ),
+        );
+      },
+    );
+
+    test(
+      'throws ApiException with the decoded backend message when the file is missing',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonErrorAsBytes({
+            'success': false,
+            'message': 'CV file not found',
+            'data': null,
+          }, 404);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await expectLater(
+          repository.downloadCv(5),
+          throwsA(
+            isA<ApiException>().having(
+              (e) => e.message,
+              'message',
+              'CV file not found',
+            ),
+          ),
+        );
+      },
+    );
+
+    test('throws ApiException on a 401', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonErrorAsBytes({
+          'success': false,
+          'message': 'Unauthenticated',
+          'data': null,
+        }, 401);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.downloadCv(5),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
+        ),
       );
     });
   });

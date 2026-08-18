@@ -2,12 +2,15 @@
 // network) and a real AuthProvider (with a fake AuthRepository) so the
 // reset-on-logout listener can be exercised genuinely.
 
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
+import 'package:opportunityhub_flutter/features/cv/data/picked_cv_file.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
@@ -65,6 +68,7 @@ class _FakeCvRepository extends CvRepository {
   CvModel? createResult;
   ApiException? createError;
   int createCallCount = 0;
+  PickedCvFile? lastCreateFile;
 
   ApiException? deleteError;
   Duration deleteDelay = Duration.zero;
@@ -74,6 +78,12 @@ class _FakeCvRepository extends CvRepository {
   ApiException? setDefaultError;
   Duration setDefaultDelay = Duration.zero;
   int setDefaultCallCount = 0;
+
+  Uint8List? downloadResult;
+  ApiException? downloadError;
+  Object? downloadRuntimeError;
+  Duration downloadDelay = Duration.zero;
+  int downloadCallCount = 0;
 
   @override
   Future<List<CvModel>> getStudentCvs() async {
@@ -86,9 +96,10 @@ class _FakeCvRepository extends CvRepository {
   @override
   Future<CvModel> createCv({
     required String title,
-    required String filePath,
+    required PickedCvFile file,
   }) async {
     createCallCount++;
+    lastCreateFile = file;
     if (createError != null) throw createError!;
     return createResult!;
   }
@@ -111,6 +122,24 @@ class _FakeCvRepository extends CvRepository {
     if (setDefaultError != null) throw setDefaultError!;
     return setDefaultResult!;
   }
+
+  @override
+  Future<Uint8List> downloadCv(int cvId) async {
+    downloadCallCount++;
+    if (downloadDelay > Duration.zero) {
+      await Future<void>.delayed(downloadDelay);
+    }
+    if (downloadRuntimeError != null) throw downloadRuntimeError!;
+    if (downloadError != null) throw downloadError!;
+    return downloadResult ?? Uint8List.fromList([0x25, 0x50, 0x44, 0x46]);
+  }
+}
+
+PickedCvFile _file({String filename = 'resume.pdf'}) {
+  return PickedCvFile(
+    filename: filename,
+    bytes: Uint8List.fromList([0x25, 0x50, 0x44, 0x46]),
+  );
 }
 
 void main() {
@@ -192,10 +221,7 @@ void main() {
     await provider.loadCvs();
 
     repository.createResult = _cv(id: 2, title: 'New CV');
-    final created = await provider.createCv(
-      title: 'New CV',
-      filePath: 'cvs/new.pdf',
-    );
+    final created = await provider.createCv(title: 'New CV', file: _file());
 
     expect(created?.id, 2);
     expect(provider.cvs, hasLength(2));
@@ -209,10 +235,7 @@ void main() {
       await provider.loadCvs();
 
       repository.createError = ApiException('The given data was invalid.');
-      final created = await provider.createCv(
-        title: '',
-        filePath: 'cvs/new.pdf',
-      );
+      final created = await provider.createCv(title: '', file: _file());
 
       expect(created, isNull);
       expect(provider.formErrorMessage, 'The given data was invalid.');
@@ -231,10 +254,7 @@ void main() {
         },
       );
 
-      final created = await provider.createCv(
-        title: 'x' * 300,
-        filePath: 'cvs/new.pdf',
-      );
+      final created = await provider.createCv(title: 'x' * 300, file: _file());
 
       expect(created, isNull);
       expect(
@@ -251,7 +271,7 @@ void main() {
         'Server error, please try again later.',
       );
 
-      await provider.createCv(title: 'New CV', filePath: 'cvs/new.pdf');
+      await provider.createCv(title: 'New CV', file: _file());
 
       expect(
         provider.formErrorMessage,
@@ -444,5 +464,88 @@ void main() {
 
     expect(provider.cvs, hasLength(1));
     expect(provider.cvs.single.title, 'Student B CV');
+  });
+
+  test('create sends the picked file through to the repository', () async {
+    repository.createResult = _cv(id: 2, title: 'New CV');
+    final file = _file(filename: 'my-resume.pdf');
+
+    await provider.createCv(title: 'New CV', file: file);
+
+    expect(repository.lastCreateFile, same(file));
+  });
+
+  test('downloadCv success returns the raw bytes', () async {
+    final bytes = Uint8List.fromList([1, 2, 3, 4]);
+    repository.downloadResult = bytes;
+
+    final result = await provider.downloadCv(1);
+
+    expect(result, bytes);
+    expect(provider.isDownloading(1), isFalse);
+    expect(provider.downloadErrorMessage, isNull);
+  });
+
+  test(
+    'downloadCv failure exposes the backend message and returns null',
+    () async {
+      repository.downloadError = ApiException(
+        'CV file not found',
+        statusCode: 404,
+      );
+
+      final result = await provider.downloadCv(1);
+
+      expect(result, isNull);
+      expect(provider.downloadErrorMessage, 'CV file not found');
+    },
+  );
+
+  test('downloadCv unexpected failure exposes a safe message', () async {
+    repository.downloadRuntimeError = TypeError();
+
+    final result = await provider.downloadCv(1);
+
+    expect(result, isNull);
+    expect(provider.downloadErrorMessage, isNotNull);
+    expect(provider.downloadErrorMessage, isNot(contains('TypeError')));
+  });
+
+  test('isDownloading is true only during an in-flight download', () async {
+    repository.downloadDelay = const Duration(milliseconds: 50);
+
+    expect(provider.isDownloading(1), isFalse);
+    final future = provider.downloadCv(1);
+    expect(provider.isDownloading(1), isTrue);
+
+    await future;
+    expect(provider.isDownloading(1), isFalse);
+  });
+
+  test(
+    'a duplicate downloadCv for the same CV while in flight is blocked',
+    () async {
+      repository.downloadDelay = const Duration(milliseconds: 50);
+
+      final first = provider.downloadCv(1);
+      final second = provider.downloadCv(1);
+
+      final results = await Future.wait([first, second]);
+
+      expect(repository.downloadCallCount, 1);
+      expect(results.where((r) => r != null).length, 1);
+      expect(results.where((r) => r == null).length, 1);
+    },
+  );
+
+  test('reset also clears download state', () async {
+    repository.downloadError = ApiException('CV file not found');
+    await provider.downloadCv(1);
+    expect(provider.downloadErrorMessage, isNotNull);
+
+    await authProvider.logout();
+
+    expect(provider.downloadErrorMessage, isNull);
+    expect(provider.isDownloading(1), isFalse);
   });
 }

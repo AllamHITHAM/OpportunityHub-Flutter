@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import '../constants/api_constants.dart';
@@ -108,5 +110,33 @@ class ApiClient {
       default:
         return ApiException('Something went wrong. Please try again.');
     }
+  }
+
+  /// The same conversion as [handleError], for a request made with
+  /// `responseType: ResponseType.bytes` (e.g. downloading a PDF) — used by
+  /// [CvRepository.downloadCv] and the organization CV download call.
+  /// Dio applies the request's `responseType` to error responses too, so a
+  /// JSON error body (e.g. `{"message": "CV not found"}`) arrives as raw
+  /// bytes rather than a decoded `Map`, which [handleError] alone can't
+  /// read. This decodes those bytes back to JSON first when possible,
+  /// falling back to [handleError]'s own generic handling otherwise —
+  /// never a raw/undecoded error surfaces to the UI either way.
+  ApiException handleBytesError(DioException error) {
+    final rawBody = error.response?.data;
+    if (rawBody is List<int>) {
+      try {
+        final decoded = jsonDecode(utf8.decode(rawBody));
+        if (decoded is Map && decoded['message'] is String) {
+          return ApiException(
+            decoded['message'] as String,
+            statusCode: error.response?.statusCode,
+          );
+        }
+      } catch (_) {
+        // Not decodable JSON (e.g. a non-JSON server error page) — fall
+        // through to the generic handling below.
+      }
+    }
+    return handleError(error);
   }
 }

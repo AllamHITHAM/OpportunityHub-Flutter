@@ -298,6 +298,43 @@ class OrganizationApplicationsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Application IDs with a CV download currently in flight — guards
+  /// against a duplicate "View CV" tap for the same application, exactly
+  /// like [busyApplicationIds] does for status updates.
+  final Set<int> _downloadingCvIds = {};
+  String? cvDownloadErrorMessage;
+
+  bool isDownloadingCv(int applicationId) =>
+      _downloadingCvIds.contains(applicationId);
+
+  /// Downloads the raw PDF bytes of the CV attached to [applicationId]'s
+  /// submission via the secure backend endpoint (Phase 8A-4) — only
+  /// reachable through an application this organization actually owns
+  /// (enforced server-side). Returns `null` on failure (see
+  /// [cvDownloadErrorMessage]) — a duplicate call for the same application
+  /// while one is already in flight is ignored, returning `null`
+  /// immediately without a second request.
+  Future<Uint8List?> downloadCv(int applicationId) async {
+    if (_downloadingCvIds.contains(applicationId)) return null;
+
+    _downloadingCvIds.add(applicationId);
+    cvDownloadErrorMessage = null;
+    notifyListeners();
+
+    Uint8List? bytes;
+    try {
+      bytes = await repository.downloadOrganizationApplicationCv(applicationId);
+    } on ApiException catch (error) {
+      cvDownloadErrorMessage = error.message;
+    } catch (_) {
+      cvDownloadErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      _downloadingCvIds.remove(applicationId);
+      notifyListeners();
+    }
+    return bytes;
+  }
+
   /// Clears all organization-application state — called when the signed-in
   /// user changes.
   void reset() {
@@ -312,6 +349,8 @@ class OrganizationApplicationsProvider extends ChangeNotifier {
     _pendingListFetch = null;
     _pendingListOpportunityId = null;
     _pendingDetailsFetch = null;
+    _downloadingCvIds.clear();
+    cvDownloadErrorMessage = null;
     notifyListeners();
   }
 

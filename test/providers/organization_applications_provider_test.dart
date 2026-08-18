@@ -3,6 +3,8 @@
 // AuthRepository) so the reset-on-logout listener can be exercised
 // genuinely.
 
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
@@ -106,6 +108,23 @@ class _FakeApplicationRepository extends ApplicationRepository {
   Duration statusUpdateDelay = Duration.zero;
   int updateStatusCallCount = 0;
   String? lastStatus;
+
+  Uint8List? downloadCvResult;
+  ApiException? downloadCvError;
+  Object? downloadCvRuntimeError;
+  Duration downloadCvDelay = Duration.zero;
+  int downloadCvCallCount = 0;
+
+  @override
+  Future<Uint8List> downloadOrganizationApplicationCv(int applicationId) async {
+    downloadCvCallCount++;
+    if (downloadCvDelay > Duration.zero) {
+      await Future<void>.delayed(downloadCvDelay);
+    }
+    if (downloadCvRuntimeError != null) throw downloadCvRuntimeError!;
+    if (downloadCvError != null) throw downloadCvError!;
+    return downloadCvResult ?? Uint8List.fromList([0x25, 0x50, 0x44, 0x46]);
+  }
 
   @override
   Future<List<ApplicationModel>> getApplicationsForOpportunity(
@@ -580,6 +599,69 @@ void main() {
     expect(provider.detailsErrorMessage, isNull);
     expect(provider.busyApplicationIds, isEmpty);
     expect(provider.actionErrorMessage, isNull);
+    expect(provider.cvDownloadErrorMessage, isNull);
+  });
+
+  group('downloadCv (Phase 8A-4)', () {
+    test('success returns the raw bytes', () async {
+      final bytes = Uint8List.fromList([1, 2, 3, 4]);
+      repository.downloadCvResult = bytes;
+
+      final result = await provider.downloadCv(1);
+
+      expect(result, bytes);
+      expect(provider.isDownloadingCv(1), isFalse);
+      expect(provider.cvDownloadErrorMessage, isNull);
+    });
+
+    test('failure exposes the backend message and returns null', () async {
+      repository.downloadCvError = ApiException(
+        'CV file not found',
+        statusCode: 404,
+      );
+
+      final result = await provider.downloadCv(1);
+
+      expect(result, isNull);
+      expect(provider.cvDownloadErrorMessage, 'CV file not found');
+    });
+
+    test('unexpected failure exposes a safe message', () async {
+      repository.downloadCvRuntimeError = TypeError();
+
+      final result = await provider.downloadCv(1);
+
+      expect(result, isNull);
+      expect(provider.cvDownloadErrorMessage, isNotNull);
+      expect(provider.cvDownloadErrorMessage, isNot(contains('TypeError')));
+    });
+
+    test('isDownloadingCv is true only during an in-flight download', () async {
+      repository.downloadCvDelay = const Duration(milliseconds: 50);
+
+      expect(provider.isDownloadingCv(1), isFalse);
+      final future = provider.downloadCv(1);
+      expect(provider.isDownloadingCv(1), isTrue);
+
+      await future;
+      expect(provider.isDownloadingCv(1), isFalse);
+    });
+
+    test(
+      'a duplicate call for the same application while in flight is blocked',
+      () async {
+        repository.downloadCvDelay = const Duration(milliseconds: 50);
+
+        final first = provider.downloadCv(1);
+        final second = provider.downloadCv(1);
+
+        final results = await Future.wait([first, second]);
+
+        expect(repository.downloadCvCallCount, 1);
+        expect(results.where((r) => r != null).length, 1);
+        expect(results.where((r) => r == null).length, 1);
+      },
+    );
   });
 
   test(
