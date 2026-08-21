@@ -15,6 +15,7 @@ Map<String, dynamic> _interviewJson({
   dynamic durationMinutes = 60,
   String? meetingLink = 'https://meet.example.com/room',
   String? location,
+  String? contactPhone,
   String? interviewerName = 'Jane Recruiter',
   String? interviewerEmail = 'jane@example.com',
   String? notes = 'Bring a laptop.',
@@ -32,6 +33,7 @@ Map<String, dynamic> _interviewJson({
     'duration_minutes': durationMinutes,
     'meeting_link': meetingLink,
     'location': location,
+    'contact_phone': contactPhone,
     'interviewer_name': interviewerName,
     'interviewer_email': interviewerEmail,
     'notes': notes,
@@ -80,13 +82,31 @@ void main() {
 
   test('parses a phone interview response', () {
     final interview = InterviewModel.fromJson(
-      _interviewJson(interviewType: 'phone', meetingLink: null, location: null),
+      _interviewJson(
+        interviewType: 'phone',
+        meetingLink: null,
+        location: null,
+        contactPhone: '+1 555-0100',
+      ),
     );
 
     expect(interview.interviewType, 'phone');
     expect(interview.meetingLink, isNull);
     expect(interview.location, isNull);
+    expect(interview.contactPhone, '+1 555-0100');
   });
+
+  test(
+    'a missing contact_phone key (legacy response, Phase Final-QA-1) parses to null, not a crash',
+    () {
+      final json = _interviewJson(interviewType: 'phone')
+        ..remove('contact_phone');
+
+      final interview = InterviewModel.fromJson(json);
+
+      expect(interview.contactPhone, isNull);
+    },
+  );
 
   test('all optional fields null parse safely', () {
     final interview = InterviewModel.fromJson(
@@ -95,6 +115,7 @@ void main() {
         durationMinutes: null,
         meetingLink: null,
         location: null,
+        contactPhone: null,
         interviewerName: null,
         interviewerEmail: null,
         notes: null,
@@ -108,6 +129,7 @@ void main() {
     expect(interview.durationMinutes, isNull);
     expect(interview.meetingLink, isNull);
     expect(interview.location, isNull);
+    expect(interview.contactPhone, isNull);
     expect(interview.interviewerName, isNull);
     expect(interview.interviewerEmail, isNull);
     expect(interview.notes, isNull);

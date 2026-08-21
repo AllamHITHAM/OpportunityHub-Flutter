@@ -140,9 +140,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                   Align(
                                     alignment: Alignment.centerRight,
                                     child: TextButton(
-                                      // UI only — forgot-password flow isn't
-                                      // implemented yet.
-                                      onPressed: () {},
+                                      onPressed: () => context.push(
+                                        AppRoutes.forgotPassword,
+                                      ),
                                       child: const Text('Forgot Password?'),
                                     ),
                                   ),

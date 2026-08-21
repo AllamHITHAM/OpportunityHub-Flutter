@@ -159,4 +159,117 @@ class AuthProvider extends ChangeNotifier {
     errorMessage = null;
     notifyListeners();
   }
+
+  // -----------------------------------------------------------------
+  // Password recovery (Phase 8B-2)
+  // -----------------------------------------------------------------
+
+  bool isSendingResetLink = false;
+  String? forgotPasswordErrorMessage;
+
+  /// `true` once the current forgot-password request has succeeded — the
+  /// screen shows the same safe message regardless of whether the email
+  /// actually belonged to an account, so this flag is all it needs.
+  /// Reset to `false` at the start of every new attempt.
+  bool forgotPasswordSucceeded = false;
+
+  /// Requests a password-reset email for [email]. A duplicate submission
+  /// while one is already in flight is ignored (returns immediately, no
+  /// second request). Never reveals whether [email] belongs to a real
+  /// account — success is success either way.
+  Future<void> forgotPassword(String email) async {
+    if (isSendingResetLink) return;
+
+    isSendingResetLink = true;
+    forgotPasswordErrorMessage = null;
+    forgotPasswordSucceeded = false;
+    notifyListeners();
+
+    try {
+      await authRepository.forgotPassword(email);
+      forgotPasswordSucceeded = true;
+    } on ApiException catch (error) {
+      forgotPasswordErrorMessage = error.message;
+    }
+
+    isSendingResetLink = false;
+    notifyListeners();
+  }
+
+  bool isResettingPassword = false;
+  String? resetPasswordErrorMessage;
+  bool resetPasswordSucceeded = false;
+
+  /// Completes a password reset using the `token`/`email` pair from the
+  /// reset link. Deliberately does **not** sign the user in on success —
+  /// [user] is left untouched either way; the caller navigates to Login.
+  /// A duplicate submission while one is already in flight is ignored.
+  Future<void> resetPassword({
+    required String email,
+    required String token,
+    required String password,
+  }) async {
+    if (isResettingPassword) return;
+
+    isResettingPassword = true;
+    resetPasswordErrorMessage = null;
+    resetPasswordSucceeded = false;
+    notifyListeners();
+
+    try {
+      await authRepository.resetPassword(
+        email: email,
+        token: token,
+        password: password,
+      );
+      resetPasswordSucceeded = true;
+    } on ApiException catch (error) {
+      resetPasswordErrorMessage = error.message;
+    }
+
+    isResettingPassword = false;
+    notifyListeners();
+  }
+
+  // -----------------------------------------------------------------
+  // Email verification (Phase 8B-2)
+  // -----------------------------------------------------------------
+
+  bool isResendingVerification = false;
+  String? resendVerificationErrorMessage;
+  bool resendVerificationSucceeded = false;
+
+  /// Resends the verification email to the current user. A duplicate tap
+  /// while one is already in flight is ignored.
+  Future<void> resendVerificationEmail() async {
+    if (isResendingVerification) return;
+
+    isResendingVerification = true;
+    resendVerificationErrorMessage = null;
+    resendVerificationSucceeded = false;
+    notifyListeners();
+
+    try {
+      await authRepository.resendVerificationEmail();
+      resendVerificationSucceeded = true;
+    } on ApiException catch (error) {
+      resendVerificationErrorMessage = error.message;
+    }
+
+    isResendingVerification = false;
+    notifyListeners();
+  }
+
+  /// Refreshes [user] from `/me` — used after the user returns from
+  /// verifying their email in another tab/browser, so the in-app
+  /// "unverified" banner can clear without requiring a full re-login.
+  Future<void> refreshUser() async {
+    try {
+      user = await authRepository.getCurrentUser();
+      notifyListeners();
+    } on ApiException {
+      // Leave the current `user` untouched on failure -- a transient
+      // refresh failure must never sign the user out or blank their state.
+    }
+  }
 }

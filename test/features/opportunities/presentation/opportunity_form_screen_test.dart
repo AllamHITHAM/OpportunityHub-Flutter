@@ -32,6 +32,7 @@ OpportunityModel _opportunity({
   int id = 1,
   String title = 'Software Engineer',
   String status = 'open',
+  List<String> eligibleMajors = const [],
 }) {
   return OpportunityModel(
     id: id,
@@ -43,6 +44,7 @@ OpportunityModel _opportunity({
     experienceLevel: 'junior',
     positionsAvailable: 1,
     status: status,
+    eligibleMajors: eligibleMajors,
   );
 }
 
@@ -84,12 +86,14 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
+    List<String>? eligibleMajors,
   }) async {
     createCallCount++;
     lastPayload = {
       'title': title,
       'field_of_study': fieldOfStudy,
       'location': location,
+      'eligible_majors': eligibleMajors,
     };
     if (createDelay > Duration.zero) {
       await Future<void>.delayed(createDelay);
@@ -115,8 +119,15 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
+    List<String>? eligibleMajors,
   }) async {
     updateCallCount++;
+    lastPayload = {
+      'title': title,
+      'field_of_study': fieldOfStudy,
+      'location': location,
+      'eligible_majors': eligibleMajors,
+    };
     return _opportunity(id: id, title: title);
   }
 }
@@ -346,6 +357,84 @@ void main() {
     expect(visitedPaths, contains('details/99'));
   });
 
+  group('eligible majors (Phase 8B-3.2)', () {
+    testWidgets('Adding multiple majors shows them as chips', (tester) async {
+      await _pumpForm(tester, repository: _FakeOpportunityRepository());
+
+      await _enterText(tester, 'Add a major', 'Computer Science');
+      await _tapVisible(tester, find.byTooltip('Add major'));
+      await tester.pumpAndSettle();
+      await _enterText(tester, 'Add a major', 'Software Engineering');
+      await _tapVisible(tester, find.byTooltip('Add major'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(Chip, 'Computer Science'), findsOneWidget);
+      expect(find.widgetWithText(Chip, 'Software Engineering'), findsOneWidget);
+    });
+
+    testWidgets('Removing a major removes its chip', (tester) async {
+      await _pumpForm(tester, repository: _FakeOpportunityRepository());
+
+      await _enterText(tester, 'Add a major', 'Computer Science');
+      await _tapVisible(tester, find.byTooltip('Add major'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(Chip, 'Computer Science'), findsOneWidget);
+
+      await _tapVisible(
+        tester,
+        find.descendant(
+          of: find.widgetWithText(Chip, 'Computer Science'),
+          matching: find.byIcon(Icons.cancel),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(Chip, 'Computer Science'), findsNothing);
+    });
+
+    testWidgets('A duplicate major (case/whitespace-insensitive) is not added twice', (
+      tester,
+    ) async {
+      await _pumpForm(tester, repository: _FakeOpportunityRepository());
+
+      await _enterText(tester, 'Add a major', 'Computer Science');
+      await _tapVisible(tester, find.byTooltip('Add major'));
+      await tester.pumpAndSettle();
+      await _enterText(tester, 'Add a major', '  computer   science ');
+      await _tapVisible(tester, find.byTooltip('Add major'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(Chip, 'Computer Science'), findsOneWidget);
+    });
+
+    testWidgets('Submit payload includes the eligible majors', (tester) async {
+      final repository = _FakeOpportunityRepository();
+      await _pumpForm(tester, repository: repository);
+
+      await _fillRequiredFields(tester);
+      await _enterText(tester, 'Add a major', 'Computer Science');
+      await _tapVisible(tester, find.byTooltip('Add major'));
+      await tester.pumpAndSettle();
+      await _tapVisible(tester, find.text('Create'));
+      await tester.pumpAndSettle();
+
+      expect(repository.lastPayload?['eligible_majors'], ['Computer Science']);
+    });
+
+    testWidgets('An empty majors list still submits an explicit empty array', (
+      tester,
+    ) async {
+      final repository = _FakeOpportunityRepository();
+      await _pumpForm(tester, repository: repository);
+
+      await _fillRequiredFields(tester);
+      await _tapVisible(tester, find.text('Create'));
+      await tester.pumpAndSettle();
+
+      expect(repository.lastPayload?['eligible_majors'], <String>[]);
+    });
+  });
+
   testWidgets('Does not overflow at a narrow 320x720 viewport', (tester) async {
     await _pumpForm(
       tester,
@@ -370,6 +459,22 @@ void main() {
           tester.widget(find.widgetWithText(TextFormField, 'Title'))
               as TextFormField;
       expect(titleField.controller?.text, 'Existing Title');
+    });
+
+    testWidgets('Edit action pre-fills existing eligible majors as chips', (
+      tester,
+    ) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(
+          id: 5,
+          title: 'Existing Title',
+          eligibleMajors: ['Civil Engineering', 'Architecture'],
+        ),
+      );
+      await _pumpForm(tester, repository: repository, opportunityId: 5);
+
+      expect(find.widgetWithText(Chip, 'Civil Engineering'), findsOneWidget);
+      expect(find.widgetWithText(Chip, 'Architecture'), findsOneWidget);
     });
 
     testWidgets('Submits via update (PUT), not create', (tester) async {

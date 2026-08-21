@@ -17,6 +17,7 @@ import '../../../providers/organization_offer_provider.dart';
 import '../../../routes/app_routes.dart';
 import '../../assessments/presentation/assessment_display.dart';
 import '../../assessments/presentation/choose_assessment_type_sheet.dart';
+import '../../assessments/presentation/complete_interview_sheet.dart';
 import '../../offers/presentation/offer_display.dart';
 import '../../offers/presentation/send_offer_sheet.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
@@ -28,6 +29,17 @@ import 'application_display.dart';
 /// `interview_scheduled`/`accepted` remain read-only for status actions
 /// (a read-only Assessment section covers `interview_scheduled` instead),
 /// and `rejected`/`withdrawn` expose no forward actions.
+///
+/// `completeInterview` (Phase Final-QA-2.1) only ever appears for
+/// `in_assessment` applications whose Assessment is `type == 'interview'`,
+/// still not `completed`, and actually has an `Interview` record —
+/// otherwise there is nothing to complete (never shown for `type ==
+/// 'quiz'`, which reaches `completed` on its own via the student's quiz
+/// submission, never an organization action). This is the step that moves
+/// `Assessment.status` to `completed`, which is what makes `sendOffer`
+/// below actually reachable — previously nothing in this app could ever
+/// call `PUT /organization/interviews/{interview}/complete`, so `sendOffer`
+/// was correct but unreachable in practice.
 ///
 /// `sendOffer` (Phase 6C-2) only ever appears for `in_assessment`
 /// applications whose Assessment is `completed` and which don't already
@@ -50,12 +62,14 @@ enum _StatusAction {
   shortlist,
   reject,
   chooseAssessment,
+  completeInterview,
   sendOffer,
 }
 
 List<_StatusAction> _actionsFor(
   String status, {
   required bool hasAssessment,
+  required bool canCompleteInterview,
   required bool assessmentCompleted,
   required bool hasOffer,
 }) {
@@ -75,6 +89,7 @@ List<_StatusAction> _actionsFor(
       ];
     case 'in_assessment':
       return [
+        if (canCompleteInterview) _StatusAction.completeInterview,
         if (hasAssessment && assessmentCompleted && !hasOffer)
           _StatusAction.sendOffer,
         // Phase 6C-4: the backend now hard-blocks the generic status
@@ -270,6 +285,12 @@ class _OrganizationApplicationDetailsScreenState
                   value:
                       applicant?.graduationYear?.toString() ?? 'Not specified',
                 ),
+                OpportunityDetailRow(
+                  label: 'Education Verification',
+                  value: educationVerificationStatusLabel(
+                    applicant?.educationVerificationStatus,
+                  ),
+                ),
                 if (applicantBio != null) ...[
                   const SizedBox(height: AppSpacing.xs),
                   Text(applicantBio, style: textTheme.bodyMedium),
@@ -277,6 +298,32 @@ class _OrganizationApplicationDetailsScreenState
               ],
             ),
           ),
+          if (applicant != null && applicant.skills.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SectionHeader(title: 'Skills'),
+                  const SizedBox(height: AppSpacing.xs),
+                  Wrap(
+                    spacing: AppSpacing.xs,
+                    runSpacing: AppSpacing.xxs,
+                    children: [
+                      for (final skill in applicant.skills)
+                        StatusChip(
+                          label: '${skill.skillName} · ${skill.evidenceLabel}',
+                          type: skill.isCvSupported
+                              ? AppStatusType.info
+                              : AppStatusType.neutral,
+                          compact: true,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.md),
           AppCard(
             child: Column(
@@ -434,6 +481,35 @@ class _StatusActionsSectionState extends State<_StatusActionsSection> {
     );
   }
 
+  /// Opens [CompleteInterviewSheet] for the currently-loaded Interview.
+  /// Unlike [_openSendOfferSheet], no explicit
+  /// `OrganizationApplicationsProvider` refresh is needed afterward —
+  /// completing an interview never changes `Application.status` (it stays
+  /// `in_assessment`), only `Assessment`/`Interview` state, which
+  /// `OrganizationAssessmentProvider.completeInterview()` already updates
+  /// in place and this widget already watches via `context.watch` in
+  /// `build()`, so Send Offer becomes visible automatically on the very
+  /// next frame.
+  Future<void> _openCompleteInterviewSheet(BuildContext context) async {
+    final interviewId = context
+        .read<OrganizationAssessmentProvider>()
+        .assessment
+        ?.interview
+        ?.id;
+    if (interviewId == null) return;
+
+    final completed = await showCompleteInterviewSheet(
+      context,
+      applicationId: widget.application.id,
+      interviewId: interviewId,
+    );
+    if (!completed || !context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Interview completed successfully')),
+    );
+  }
+
   /// Opens [SendOfferSheet] and, only on a successful send, refreshes the
   /// real Application from the backend so this screen picks up
   /// `status = offer_sent` — the send response itself carries only the
@@ -466,12 +542,19 @@ class _StatusActionsSectionState extends State<_StatusActionsSection> {
     final hasAssessment = assessmentProvider.hasAssessmentFor(
       widget.application.id,
     );
+    final assessment = assessmentProvider.assessment;
     final assessmentCompleted =
-        hasAssessment && assessmentProvider.assessment?.status == 'completed';
+        hasAssessment && assessment?.status == 'completed';
+    final canCompleteInterview =
+        hasAssessment &&
+        !assessmentCompleted &&
+        assessment?.type == 'interview' &&
+        assessment?.interview != null;
     final hasOffer = offerProvider.hasOfferFor(widget.application.id);
     final actions = _actionsFor(
       widget.application.status,
       hasAssessment: hasAssessment,
+      canCompleteInterview: canCompleteInterview,
       assessmentCompleted: assessmentCompleted,
       hasOffer: hasOffer,
     );
@@ -518,6 +601,13 @@ class _StatusActionsSectionState extends State<_StatusActionsSection> {
               context,
               applicationId: widget.application.id,
             ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        if (actions.contains(_StatusAction.completeInterview)) ...[
+          PrimaryButton(
+            label: 'Complete Interview',
+            onPressed: () => _openCompleteInterviewSheet(context),
           ),
           const SizedBox(height: AppSpacing.sm),
         ],
@@ -755,16 +845,10 @@ class _AssessmentDetailsCard extends StatelessWidget {
                 label: 'Duration',
                 value: '${interview.durationMinutes} minutes',
               ),
-            if (cleanDisplayText(interview.meetingLink) != null)
-              OpportunityDetailRow(
-                label: 'Meeting Link',
-                value: cleanDisplayText(interview.meetingLink)!,
-              ),
-            if (cleanDisplayText(interview.location) != null)
-              OpportunityDetailRow(
-                label: 'Location',
-                value: cleanDisplayText(interview.location)!,
-              ),
+            OpportunityDetailRow(
+              label: interviewContactDetailLabel(interview.interviewType),
+              value: interviewContactDetailValue(interview) ?? 'Not specified',
+            ),
             if (cleanDisplayText(interview.interviewerName) != null)
               OpportunityDetailRow(
                 label: 'Interviewer Name',

@@ -12,6 +12,7 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_organizations_repository.dart';
+import 'package:opportunityhub_flutter/features/admin/data/admin_skill_suggestions_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_skills_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_users_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_home_screen.dart';
@@ -24,9 +25,11 @@ import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/skill_model.dart';
+import 'package:opportunityhub_flutter/models/skill_suggestion_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_organizations_provider.dart';
+import 'package:opportunityhub_flutter/providers/admin_skill_suggestions_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_skills_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_users_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
@@ -131,6 +134,15 @@ class _FakeAdminSkillsRepository extends AdminSkillsRepository {
   Future<List<SkillModel>> getSkills() async => [];
 }
 
+class _FakeAdminSkillSuggestionsRepository
+    extends AdminSkillSuggestionsRepository {
+  _FakeAdminSkillSuggestionsRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<SkillSuggestionModel>> getPendingSuggestions() async => [];
+}
+
 class _FakeNotificationRepository extends NotificationRepository {
   _FakeNotificationRepository({this.listResult = const []})
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
@@ -211,6 +223,10 @@ Future<_Providers> _pumpScreen(
     repository: _FakeAdminSkillsRepository(),
     authProvider: authProvider,
   );
+  final skillSuggestionsProvider = AdminSkillSuggestionsProvider(
+    repository: _FakeAdminSkillSuggestionsRepository(),
+    authProvider: authProvider,
+  );
   final notificationProvider = NotificationProvider(
     repository: _FakeNotificationRepository(listResult: notificationListResult),
     authProvider: authProvider,
@@ -231,6 +247,9 @@ Future<_Providers> _pumpScreen(
         ),
         ChangeNotifierProvider<AdminSkillsProvider>.value(
           value: skillsProvider,
+        ),
+        ChangeNotifierProvider<AdminSkillSuggestionsProvider>.value(
+          value: skillSuggestionsProvider,
         ),
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,

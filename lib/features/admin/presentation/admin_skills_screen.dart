@@ -6,6 +6,8 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../models/skill_model.dart';
+import '../../../models/skill_suggestion_model.dart';
+import '../../../providers/admin_skill_suggestions_provider.dart';
 import '../../../providers/admin_skills_provider.dart';
 
 /// Lists every platform skill and lets an admin create, rename, or delete
@@ -31,6 +33,11 @@ class _AdminSkillsScreenState extends State<AdminSkillsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<AdminSkillsProvider>().load();
+      // Independent of the catalog load above — a pending-suggestions
+      // failure must never block the rest of this screen (see
+      // _PendingSuggestionsSection, which renders its own section-level
+      // loading/error state).
+      context.read<AdminSkillSuggestionsProvider>().load();
     });
   }
 
@@ -156,6 +163,15 @@ class _AdminSkillsScreenState extends State<AdminSkillsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(
+            AppSpacing.screenHorizontal,
+            AppSpacing.screenHorizontal,
+            AppSpacing.screenHorizontal,
+            0,
+          ),
+          child: _PendingSuggestionsSection(),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.screenHorizontal,
@@ -217,6 +233,158 @@ class _AdminSkillsScreenState extends State<AdminSkillsScreen> {
                   ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+/// Phase 8A-6.1: pending AI-derived Skill catalog suggestions awaiting
+/// Admin review. Renders nothing when there are none and nothing is
+/// loading/erroring, so it never adds empty chrome to a catalog with no
+/// suggestions outstanding — the same posture other section-level widgets
+/// in this app already take (e.g. Organization's `_AssessmentSection`).
+class _PendingSuggestionsSection extends StatelessWidget {
+  const _PendingSuggestionsSection();
+
+  Future<void> _approve(BuildContext context, int suggestionId) async {
+    final provider = context.read<AdminSkillSuggestionsProvider>();
+    final success = await provider.approve(suggestionId);
+    if (!context.mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Skill suggestion approved')),
+      );
+    } else if (provider.actionErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.actionErrorMessage!)));
+    }
+  }
+
+  Future<void> _reject(BuildContext context, int suggestionId) async {
+    final provider = context.read<AdminSkillSuggestionsProvider>();
+    final success = await provider.reject(suggestionId);
+    if (!context.mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Skill suggestion rejected')),
+      );
+    } else if (provider.actionErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.actionErrorMessage!)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<AdminSkillSuggestionsProvider>();
+
+    if (provider.isLoading && provider.suggestions.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: AppSpacing.sm),
+        child: AppLoading(compact: true),
+      );
+    }
+
+    if (provider.errorMessage != null && provider.suggestions.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+        child: AppErrorView(
+          compact: true,
+          title: 'Could Not Load Suggestions',
+          message: provider.errorMessage!,
+          onRetry: () => provider.load(forceRefresh: true),
+        ),
+      );
+    }
+
+    if (provider.suggestions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SectionHeader(title: 'Pending Skill Suggestions'),
+            const SizedBox(height: AppSpacing.xs),
+            for (final suggestion in provider.suggestions)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                child: _SuggestionRow(
+                  suggestion: suggestion,
+                  isBusy: provider.isBusy(suggestion.id),
+                  onApprove: () => _approve(context, suggestion.id),
+                  onReject: () => _reject(context, suggestion.id),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SuggestionRow extends StatelessWidget {
+  const _SuggestionRow({
+    required this.suggestion,
+    required this.isBusy,
+    required this.onApprove,
+    required this.onReject,
+  });
+
+  final SkillSuggestionModel suggestion;
+  final bool isBusy;
+  final VoidCallback onApprove;
+  final VoidCallback onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(suggestion.name, style: textTheme.bodyMedium),
+              Text(
+                'From AI CV extraction',
+                style: textTheme.bodySmall?.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (isBusy)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+            child: AppLoading(compact: true),
+          )
+        else ...[
+          IconButton(
+            key: Key('approve-suggestion-${suggestion.id}'),
+            onPressed: onApprove,
+            icon: const Icon(Icons.check_circle_outline),
+            color: AppColors.success,
+            tooltip: 'Approve',
+          ),
+          IconButton(
+            key: Key('reject-suggestion-${suggestion.id}'),
+            onPressed: onReject,
+            icon: const Icon(Icons.cancel_outlined),
+            color: AppColors.error,
+            tooltip: 'Reject',
+          ),
+        ],
       ],
     );
   }

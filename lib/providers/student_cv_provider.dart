@@ -3,7 +3,9 @@ import 'package:flutter/foundation.dart';
 import '../core/api/api_client.dart';
 import '../features/cv/data/cv_repository.dart';
 import '../features/cv/data/picked_cv_file.dart';
+import '../features/skills/data/student_skill_repository.dart';
 import '../models/cv_model.dart';
+import '../models/cv_skill_suggestion_model.dart';
 import 'auth_provider.dart';
 
 /// Holds the authenticated student's CV list and exposes create/delete/
@@ -13,11 +15,20 @@ import 'auth_provider.dart';
 /// per-item busy) rather than one shared `isLoading`, so e.g. deleting one
 /// card doesn't visually lock the whole screen or an unrelated action.
 class StudentCvProvider extends ChangeNotifier {
-  StudentCvProvider({required this.repository, required this._authProvider}) {
+  StudentCvProvider({
+    required this.repository,
+    required this.studentSkillRepository,
+    required this._authProvider,
+  }) {
     _authProvider.addListener(_handleAuthChanged);
   }
 
   final CvRepository repository;
+
+  /// Used only by [addSelectedSkills] to accept AI suggestions through
+  /// the existing Student Skill endpoint -- extraction itself never
+  /// touches this.
+  final StudentSkillRepository studentSkillRepository;
   final AuthProvider _authProvider;
 
   List<CvModel> cvs = [];
@@ -209,6 +220,97 @@ class StudentCvProvider extends ChangeNotifier {
     return success;
   }
 
+  // -----------------------------------------------------------------
+  // AI CV Skill Extraction (Phase 8A-6)
+  // -----------------------------------------------------------------
+
+  bool isExtracting = false;
+  String? extractionErrorMessage;
+
+  /// The CV currently being analyzed, if any -- lets the UI show a
+  /// per-card loading state instead of locking the whole screen.
+  int? extractingCvId;
+  List<CvSkillSuggestion> skillSuggestions = [];
+
+  bool isAddingSkills = false;
+  String? addSkillsErrorMessage;
+
+  /// Requests AI-derived skill suggestions for [cvId]. A duplicate tap
+  /// while one is already in flight is ignored. Failure preserves the
+  /// existing CV list untouched -- only [extractionErrorMessage] and
+  /// [skillSuggestions] change.
+  Future<void> extractSkills(int cvId) async {
+    if (isExtracting) return;
+
+    isExtracting = true;
+    extractingCvId = cvId;
+    extractionErrorMessage = null;
+    skillSuggestions = [];
+    notifyListeners();
+
+    try {
+      skillSuggestions = await repository.extractSkills(cvId);
+    } on ApiException catch (error) {
+      extractionErrorMessage = error.message;
+    } catch (_) {
+      extractionErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isExtracting = false;
+      notifyListeners();
+    }
+  }
+
+  /// Accepts a set of AI-suggested [skillIds] by POSTing each one
+  /// individually through the existing Student Skill endpoint -- the AI
+  /// extraction step never mutates the student's skills on its own; this
+  /// explicit, separate action is the only thing that does. Sent with
+  /// `source: 'cv_ai'` and the CV that was analyzed (Phase 8A-6.1), so the
+  /// resulting StudentSkill is correctly recorded as CV-supported rather
+  /// than self-declared -- the backend independently verifies this claim
+  /// against real extraction evidence, so nothing here can spoof it.
+  /// Returns `true` only if every skill was added successfully (see
+  /// [addSkillsErrorMessage] otherwise). Never triggers a match_score
+  /// recalculation -- that stays organization-controlled.
+  Future<bool> addSelectedSkills(List<int> skillIds) async {
+    if (skillIds.isEmpty || isAddingSkills) return false;
+
+    isAddingSkills = true;
+    addSkillsErrorMessage = null;
+    notifyListeners();
+
+    var allSucceeded = true;
+    final addedIds = <int>{};
+
+    for (final skillId in skillIds) {
+      try {
+        await studentSkillRepository.addSkill(
+          skillId: skillId,
+          source: 'cv_ai',
+          cvId: extractingCvId,
+        );
+        addedIds.add(skillId);
+      } on ApiException catch (error) {
+        allSucceeded = false;
+        addSkillsErrorMessage = error.message;
+      } catch (_) {
+        allSucceeded = false;
+        addSkillsErrorMessage = 'Something went wrong. Please try again.';
+      }
+    }
+
+    skillSuggestions = [
+      for (final suggestion in skillSuggestions)
+        if (addedIds.contains(suggestion.skillId))
+          suggestion.copyWith(alreadyAdded: true)
+        else
+          suggestion,
+    ];
+
+    isAddingSkills = false;
+    notifyListeners();
+    return allSucceeded;
+  }
+
   /// Clears all CV state — called when the signed-in user changes.
   void reset() {
     cvs = [];
@@ -221,6 +323,12 @@ class StudentCvProvider extends ChangeNotifier {
     _pendingListFetch = null;
     _downloadingIds.clear();
     downloadErrorMessage = null;
+    isExtracting = false;
+    extractionErrorMessage = null;
+    extractingCvId = null;
+    skillSuggestions = [];
+    isAddingSkills = false;
+    addSkillsErrorMessage = null;
     notifyListeners();
   }
 

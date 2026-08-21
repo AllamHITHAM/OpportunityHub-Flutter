@@ -8,6 +8,7 @@ import '../../../providers/admin_dashboard_provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/notification_provider.dart';
 import '../../../routes/app_routes.dart';
+import '../../auth/presentation/email_verification_banner.dart';
 import '../../notifications/presentation/notification_bell_action.dart';
 
 /// The Admin dashboard — platform-wide statistics, plus navigation entries
@@ -85,6 +86,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _AdminIdentityCard(authProvider: authProvider),
+            const SizedBox(height: AppSpacing.sm),
+            const EmailVerificationBanner(),
             if (provider.errorMessage != null) ...[
               const SizedBox(height: AppSpacing.md),
               AppErrorView(
@@ -148,6 +151,12 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               icon: Icons.psychology_outlined,
               label: 'Manage Skills',
               onTap: () => context.push(AppRoutes.adminSkills),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            _ManageEntry(
+              icon: Icons.school_outlined,
+              label: 'Education Verifications',
+              onTap: () => context.push(AppRoutes.adminEducationVerifications),
             ),
             const SizedBox(height: AppSpacing.lg),
             SecondaryButton(

@@ -3,15 +3,19 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/admin/presentation/admin_education_verifications_screen.dart';
 import '../features/admin/presentation/admin_home_screen.dart';
 import '../features/admin/presentation/admin_organization_details_screen.dart';
 import '../features/admin/presentation/admin_organizations_screen.dart';
 import '../features/admin/presentation/admin_skills_screen.dart';
 import '../features/admin/presentation/admin_users_screen.dart';
 import '../features/auth/presentation/account_type_selection_screen.dart';
+import '../features/auth/presentation/email_verified_screen.dart';
+import '../features/auth/presentation/forgot_password_screen.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/auth/presentation/organization_profile_setup_screen.dart';
 import '../features/auth/presentation/organization_registration_screen.dart';
+import '../features/auth/presentation/reset_password_screen.dart';
 import '../features/auth/presentation/splash_screen.dart';
 import '../features/auth/presentation/student_profile_registration_screen.dart';
 import '../features/auth/presentation/student_registration_screen.dart';
@@ -23,7 +27,11 @@ import '../features/assessments/presentation/create_quiz_screen.dart';
 import '../features/assessments/presentation/organization_quiz_editor_screen.dart';
 import '../features/assessments/presentation/schedule_interview_screen.dart';
 import '../features/assessments/presentation/student_quiz_screen.dart';
+import '../features/candidates/presentation/candidate_search_screen.dart';
 import '../features/cv/presentation/student_cv_screen.dart';
+import '../features/education_verification/presentation/student_education_verification_screen.dart';
+import '../features/invitations/presentation/student_invitations_screen.dart';
+import '../features/skills/presentation/student_skills_screen.dart';
 import '../features/opportunities/presentation/opportunity_form_screen.dart';
 import '../features/opportunities/presentation/organization_opportunities_screen.dart';
 import '../features/opportunities/presentation/organization_opportunity_details_screen.dart';
@@ -67,6 +75,14 @@ const _publicPaths = {
   AppRoutes.accountTypeSelection,
   AppRoutes.studentRegistration,
   AppRoutes.organizationRegistration,
+  // Phase 8B-2: reachable while unauthenticated (a user recovering a
+  // forgotten password isn't signed in), and deliberately never added to
+  // any "authenticated user must leave" redirect set below either — an
+  // already-authenticated session (e.g. a stale tab) must not be bounced
+  // away from a reset/verification link it just opened.
+  AppRoutes.forgotPassword,
+  AppRoutes.resetPassword,
+  AppRoutes.emailVerified,
 };
 
 /// Both steps of student registration — an authenticated student is never
@@ -126,6 +142,25 @@ const _organizationAssessmentsPathPrefix = AppRoutes.organizationAssessments;
 /// the same reason.
 const _studentAssessmentsPathPrefix = AppRoutes.studentAssessments;
 
+/// Student education-verification submission/status (Phase 8B-1) — a
+/// protected feature area, not onboarding. Matched by prefix for
+/// consistency with the other feature areas above, even though this one
+/// currently has no dynamic `:id` sub-routes.
+const _studentEducationVerificationPathPrefix =
+    AppRoutes.studentEducationVerification;
+
+/// Organization-only Candidate Search (Phase 8B-3, Flow B) — a protected
+/// feature area, not onboarding. Matched by prefix for consistency with
+/// the other feature areas above, even though this one currently has no
+/// dynamic `:id` sub-routes.
+const _organizationCandidatesPathPrefix = AppRoutes.organizationCandidates;
+
+/// Student-only received invitations (Phase 8B-3, Flow B) — a protected
+/// feature area, not onboarding. Matched by prefix for consistency with
+/// the other feature areas above, even though this one currently has no
+/// dynamic `:id` sub-routes.
+const _studentInvitationsPathPrefix = AppRoutes.studentInvitations;
+
 /// Defines the app's navigation routes and redirects based on
 /// [AuthProvider], [StudentProfileProvider], and [OrganizationProfileProvider].
 class AppRouter {
@@ -145,6 +180,22 @@ class AppRouter {
       routes: [
         GoRoute(path: _splashPath, builder: (_, _) => const SplashScreen()),
         GoRoute(path: _loginPath, builder: (_, _) => const LoginScreen()),
+        GoRoute(
+          path: AppRoutes.forgotPassword,
+          builder: (_, _) => const ForgotPasswordScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.resetPassword,
+          builder: (_, state) => ResetPasswordScreen(
+            token: state.uri.queryParameters['token'],
+            email: state.uri.queryParameters['email'],
+          ),
+        ),
+        GoRoute(
+          path: AppRoutes.emailVerified,
+          builder: (_, state) =>
+              EmailVerifiedScreen(status: state.uri.queryParameters['status']),
+        ),
         GoRoute(
           path: AppRoutes.accountTypeSelection,
           builder: (_, _) => const AccountTypeSelectionScreen(),
@@ -201,6 +252,18 @@ class AppRouter {
         GoRoute(
           path: AppRoutes.adminSkills,
           builder: (_, _) => const AdminSkillsScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.adminEducationVerifications,
+          builder: (_, _) => const AdminEducationVerificationsScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.organizationCandidates,
+          builder: (_, _) => const CandidateSearchScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.studentInvitations,
+          builder: (_, _) => const StudentInvitationsScreen(),
         ),
         // The literal "/new" segment is declared before the parameterized
         // "/:id" route below so it's never mistaken for an ID.
@@ -281,6 +344,10 @@ class AppRouter {
           builder: (_, _) => const StudentCvScreen(),
         ),
         GoRoute(
+          path: AppRoutes.studentSkills,
+          builder: (_, _) => const StudentSkillsScreen(),
+        ),
+        GoRoute(
           path: AppRoutes.studentApplications,
           builder: (_, _) => const StudentApplicationsScreen(),
         ),
@@ -295,6 +362,10 @@ class AppRouter {
           builder: (_, state) => StudentQuizScreen(
             assessmentId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
           ),
+        ),
+        GoRoute(
+          path: AppRoutes.studentEducationVerification,
+          builder: (_, _) => const StudentEducationVerificationScreen(),
         ),
       ],
     );
@@ -412,6 +483,27 @@ class AppRouter {
     // role.
     if (role != 'student' &&
         currentPath.startsWith(_studentAssessmentsPathPrefix)) {
+      return homePath;
+    }
+
+    // Education verification is a student-only feature area — not
+    // onboarding, but still off-limits to every other role.
+    if (role != 'student' &&
+        currentPath.startsWith(_studentEducationVerificationPathPrefix)) {
+      return homePath;
+    }
+
+    // Candidate Search (Phase 8B-3) is an organization-only feature area —
+    // not onboarding, but still off-limits to every other role.
+    if (role != 'organization' &&
+        currentPath.startsWith(_organizationCandidatesPathPrefix)) {
+      return homePath;
+    }
+
+    // Received invitations (Phase 8B-3) is a student-only feature area —
+    // not onboarding, but still off-limits to every other role.
+    if (role != 'student' &&
+        currentPath.startsWith(_studentInvitationsPathPrefix)) {
       return homePath;
     }
 

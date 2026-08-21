@@ -16,6 +16,7 @@ import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
+import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
@@ -184,6 +185,9 @@ Future<void> _pumpAsRole(
   );
   final cvProvider = StudentCvProvider(
     repository: _FakeCvRepository(),
+    studentSkillRepository: StudentSkillRepository(
+      apiClient: ApiClient(tokenStorageService: TokenStorageService()),
+    ),
     authProvider: authProvider,
   );
   final applicationsProvider = StudentApplicationsProvider(
@@ -272,6 +276,9 @@ void main() {
     );
     final cvProvider = StudentCvProvider(
       repository: _FakeCvRepository(),
+      studentSkillRepository: StudentSkillRepository(
+        apiClient: ApiClient(tokenStorageService: TokenStorageService()),
+      ),
       authProvider: authProvider,
     );
     final applicationsProvider = StudentApplicationsProvider(

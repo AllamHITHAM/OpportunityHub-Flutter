@@ -127,6 +127,7 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
+    List<String>? eligibleMajors,
   }) async {
     isSubmitting = true;
     formErrorMessage = null;
@@ -149,6 +150,7 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
         applicationDeadline: applicationDeadline,
         positionsAvailable: positionsAvailable,
         status: status,
+        eligibleMajors: eligibleMajors,
       );
       opportunities = [...opportunities, created];
     } on ApiException catch (error) {
@@ -176,6 +178,7 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
+    List<String>? eligibleMajors,
   }) async {
     isSubmitting = true;
     formErrorMessage = null;
@@ -199,6 +202,7 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
         applicationDeadline: applicationDeadline,
         positionsAvailable: positionsAvailable,
         status: status,
+        eligibleMajors: eligibleMajors,
       );
       opportunities = [
         for (final existing in opportunities)

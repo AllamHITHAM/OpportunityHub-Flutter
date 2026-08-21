@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../models/assessment_model.dart';
+import '../../../models/interview_model.dart';
 import '../../../models/question_model.dart';
 import '../../../models/quiz_attempt_model.dart';
 import '../../../models/quiz_model.dart';
@@ -105,6 +106,55 @@ class AssessmentRepository {
       type: 'quiz',
       quizInput: quizInput,
     );
+  }
+
+  /// Completes [interviewId] (the final step needed for
+  /// `Assessment.status` to become `completed`, which is what makes Send
+  /// Offer eligible) with
+  /// `PUT /api/organization/interviews/{interviewId}/complete`.
+  ///
+  /// [decision]/[rating]/[companyFeedback] are all optional — matching
+  /// `CompleteInterviewRequest`'s fully-nullable backend rules, an
+  /// interview can be completed with none of them set. Each is trimmed
+  /// and, if empty/whitespace-only or null, omitted from the request body
+  /// entirely, the same "not specified" convention
+  /// [InterviewCreateInput.toJson] already uses.
+  ///
+  /// Returns the updated Interview — the actual shape this endpoint
+  /// returns (see docs/API.md section 6), not a synthesized Assessment.
+  ///
+  /// Errors: 401, 403, 404 (interview not owned/missing), 422 (field
+  /// validation).
+  Future<InterviewModel> completeInterview({
+    required int interviewId,
+    String? decision,
+    int? rating,
+    String? companyFeedback,
+  }) async {
+    final body = <String, dynamic>{};
+
+    final trimmedDecision = decision?.trim();
+    if (trimmedDecision != null && trimmedDecision.isNotEmpty) {
+      body['decision'] = trimmedDecision;
+    }
+
+    if (rating != null) body['rating'] = rating;
+
+    final trimmedFeedback = companyFeedback?.trim();
+    if (trimmedFeedback != null && trimmedFeedback.isNotEmpty) {
+      body['company_feedback'] = trimmedFeedback;
+    }
+
+    try {
+      final response = await apiClient.dio.put(
+        '/organization/interviews/$interviewId/complete',
+        data: body,
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return InterviewModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
   }
 
   /// Fetches the one assessment (if any) belonging to [applicationId] with

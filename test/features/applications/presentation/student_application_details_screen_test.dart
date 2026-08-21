@@ -133,6 +133,7 @@ InterviewModel _interview({
   int? durationMinutes,
   String? meetingLink,
   String? location,
+  String? contactPhone,
   String? interviewerName,
   String? interviewerEmail,
   String? notes,
@@ -149,6 +150,7 @@ InterviewModel _interview({
     durationMinutes: durationMinutes,
     meetingLink: meetingLink,
     location: location,
+    contactPhone: contactPhone,
     interviewerName: interviewerName,
     interviewerEmail: interviewerEmail,
     notes: notes,
@@ -782,6 +784,64 @@ void main() {
         expect(find.text('Meeting Link'), findsNothing);
         expect(find.text('Location'), findsNothing);
         expect(find.text('Phone'), findsOneWidget);
+      },
+    );
+
+    testWidgets('phone interview shows the Contact Phone number', (
+      tester,
+    ) async {
+      final applicationRepository = _FakeApplicationRepository(
+        listResult: [_application(id: 1, status: 'interview_scheduled')],
+      );
+      final assessmentRepository = _FakeAssessmentRepository()
+        ..resultsByApplication = {
+          1: _assessment(
+            interview: _interview(
+              interviewType: 'phone',
+              meetingLink: null,
+              location: null,
+              contactPhone: '+1 555-0100',
+            ),
+          ),
+        };
+      await _pumpDetails(
+        tester,
+        repository: applicationRepository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Contact Phone'), findsOneWidget);
+      expect(find.text('+1 555-0100'), findsOneWidget);
+      expect(find.text('Meeting Link'), findsNothing);
+      expect(find.text('Location'), findsNothing);
+    });
+
+    testWidgets(
+      'a legacy phone interview with no contact_phone shows Not specified, not a crash',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              interview: _interview(
+                interviewType: 'phone',
+                meetingLink: null,
+                location: null,
+                contactPhone: null,
+              ),
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Contact Phone'), findsOneWidget);
+        expect(find.text('Not specified'), findsOneWidget);
+        expect(tester.takeException(), isNull);
       },
     );
 

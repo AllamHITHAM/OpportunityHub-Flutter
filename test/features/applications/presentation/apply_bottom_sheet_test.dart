@@ -16,6 +16,7 @@ import 'package:opportunityhub_flutter/features/applications/data/application_re
 import 'package:opportunityhub_flutter/features/applications/presentation/apply_bottom_sheet.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
+import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
@@ -150,6 +151,9 @@ Future<(StudentCvProvider, StudentApplicationsProvider)> _pumpHostAndOpenSheet(
   final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
   final cvProvider = StudentCvProvider(
     repository: cvRepository,
+    studentSkillRepository: StudentSkillRepository(
+      apiClient: ApiClient(tokenStorageService: TokenStorageService()),
+    ),
     authProvider: authProvider,
   );
   final applicationsProvider = StudentApplicationsProvider(
@@ -209,6 +213,9 @@ void main() {
       repository: _FakeCvRepository(
         listResult: [_cv(id: 1, isDefault: true)],
         listDelay: const Duration(milliseconds: 200),
+      ),
+      studentSkillRepository: StudentSkillRepository(
+        apiClient: ApiClient(tokenStorageService: TokenStorageService()),
       ),
       authProvider: authProvider,
     );

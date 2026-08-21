@@ -332,9 +332,10 @@ class _StudentInterviewDetails extends StatelessWidget {
     if (interview == null) return const SizedBox.shrink();
 
     final meetingLink = cleanDisplayText(interview.meetingLink);
-    final location = cleanDisplayText(interview.location);
     final interviewerName = cleanDisplayText(interview.interviewerName);
     final notes = cleanDisplayText(interview.notes);
+    final isOnlineWithLink =
+        interview.interviewType == 'online' && meetingLink != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -363,8 +364,19 @@ class _StudentInterviewDetails extends StatelessWidget {
             label: 'Duration',
             value: '${interview.durationMinutes} minutes',
           ),
-        if (location != null)
-          OpportunityDetailRow(label: 'Location', value: location),
+        // Phase Final-QA-1: exactly one attendance-detail row, matching
+        // whichever field this interview's type actually needs — a
+        // real, tappable-looking meeting link keeps its own selectable
+        // row; phone/onsite (and a legacy interview missing its detail)
+        // fall back to a plain labeled row, "Not specified" if empty.
+        if (isOnlineWithLink) ...[
+          const SizedBox(height: AppSpacing.xxs),
+          _MeetingLinkRow(link: meetingLink),
+        ] else
+          OpportunityDetailRow(
+            label: interviewContactDetailLabel(interview.interviewType),
+            value: interviewContactDetailValue(interview) ?? 'Not specified',
+          ),
         if (interviewerName != null)
           OpportunityDetailRow(
             label: 'Interviewer Name',
@@ -374,10 +386,6 @@ class _StudentInterviewDetails extends StatelessWidget {
           label: 'Interview Status',
           value: interviewStatusLabels[interview.status] ?? interview.status,
         ),
-        if (meetingLink != null) ...[
-          const SizedBox(height: AppSpacing.xxs),
-          _MeetingLinkRow(link: meetingLink),
-        ],
         if (notes != null) ...[
           const SizedBox(height: AppSpacing.xs),
           Text(notes, style: Theme.of(context).textTheme.bodyMedium),

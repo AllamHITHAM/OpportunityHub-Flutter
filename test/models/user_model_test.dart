@@ -103,6 +103,45 @@ void main() {
       expect(user.role, '');
       expect(user.status, '');
       expect(user.createdAt, isNull);
+      expect(user.emailVerified, isFalse);
+    });
+
+    test('parses email_verified true (Phase 8B-2)', () {
+      final user = UserModel.fromJson({
+        'id': 1,
+        'name': 'Jane Admin',
+        'email': 'jane@example.com',
+        'role': 'admin',
+        'status': 'active',
+        'email_verified': true,
+      });
+
+      expect(user.emailVerified, isTrue);
+    });
+
+    test('parses email_verified false (Phase 8B-2)', () {
+      final user = UserModel.fromJson({
+        'id': 1,
+        'name': 'Jane Admin',
+        'email': 'jane@example.com',
+        'role': 'admin',
+        'status': 'active',
+        'email_verified': false,
+      });
+
+      expect(user.emailVerified, isFalse);
+    });
+
+    test('a missing email_verified defaults to false', () {
+      final user = UserModel.fromJson({
+        'id': 1,
+        'name': 'Jane Admin',
+        'email': 'jane@example.com',
+        'role': 'admin',
+        'status': 'active',
+      });
+
+      expect(user.emailVerified, isFalse);
     });
   });
 
@@ -158,6 +197,7 @@ void main() {
       expect(json['email'], 'jane@example.com');
       expect(json['role'], 'admin');
       expect(json['status'], 'active');
+      expect(json['email_verified'], false);
     });
   });
 }

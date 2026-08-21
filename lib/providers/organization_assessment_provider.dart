@@ -56,6 +56,12 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
   /// `OrganizationApplicationsProvider.busyApplicationIds`.
   final Set<int> busyApplicationIds = {};
 
+  /// Interview IDs with a complete request currently in flight — the same
+  /// duplicate-submission guard as [busyApplicationIds], keyed by
+  /// interview rather than application since completion always targets a
+  /// specific Interview.
+  final Set<int> completingInterviewIds = {};
+
   /// The in-flight load fetch, if any — guards against concurrent
   /// duplicate requests for the *same* application, without preventing an
   /// explicit refresh once the previous fetch has finished.
@@ -65,6 +71,9 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
 
   bool isCreatingFor(int applicationId) =>
       busyApplicationIds.contains(applicationId);
+
+  bool isCompletingInterview(int interviewId) =>
+      completingInterviewIds.contains(interviewId);
 
   bool hasAssessmentFor(int applicationId) =>
       loadedApplicationId == applicationId && assessment != null;
@@ -198,6 +207,58 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
     return success;
   }
 
+  /// Completes [interviewId] (belonging to [applicationId]'s currently
+  /// tracked assessment) and, only on success, refreshes [assessment] from
+  /// the backend so its `status`/`result`/nested `interview` all reflect
+  /// the post-completion state — the completion endpoint itself returns
+  /// the updated Interview, not the Assessment shape this provider holds,
+  /// so a targeted reload through the same [loadForApplication] path
+  /// already used elsewhere is the least-coupled way to stay in sync
+  /// without duplicating the backend's own decision -> result mapping
+  /// here. Returns `true` only on success. A duplicate submission for the
+  /// same interview while one is already in flight is ignored (returns
+  /// `false` immediately, no second repository call).
+  Future<bool> completeInterview({
+    required int applicationId,
+    required int interviewId,
+    String? decision,
+    int? rating,
+    String? companyFeedback,
+  }) async {
+    if (completingInterviewIds.contains(interviewId)) return false;
+
+    completingInterviewIds.add(interviewId);
+    actionErrorMessage = null;
+    fieldErrors = {};
+    notifyListeners();
+
+    var success = false;
+    try {
+      await repository.completeInterview(
+        interviewId: interviewId,
+        decision: decision,
+        rating: rating,
+        companyFeedback: companyFeedback,
+      );
+
+      await loadForApplication(applicationId, forceRefresh: true);
+      success = true;
+    } on ApiException catch (error) {
+      actionErrorMessage = error.message;
+      fieldErrors = error.errors ?? {};
+    } catch (_) {
+      // An unexpected parsing/runtime error — never propagates as a raw
+      // exception, never shows raw exception/stack-trace text, and never
+      // touches `assessment`, so the previous state is preserved exactly
+      // as it was before this attempt.
+      actionErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      completingInterviewIds.remove(interviewId);
+      notifyListeners();
+    }
+    return success;
+  }
+
   void clearActionError() {
     actionErrorMessage = null;
     notifyListeners();
@@ -217,6 +278,7 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
     actionErrorMessage = null;
     fieldErrors = {};
     busyApplicationIds.clear();
+    completingInterviewIds.clear();
     _pendingLoadFetch = null;
     notifyListeners();
   }

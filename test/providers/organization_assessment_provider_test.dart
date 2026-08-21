@@ -13,6 +13,7 @@ import 'package:opportunityhub_flutter/features/assessments/data/interview_creat
 import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_input.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
+import 'package:opportunityhub_flutter/models/interview_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
 
@@ -61,6 +62,39 @@ AssessmentModel _quizAssessment({int id = 1, int applicationId = 5}) {
     applicationId: applicationId,
     type: 'quiz',
     status: 'pending',
+  );
+}
+
+InterviewModel _completedInterview({
+  int id = 1,
+  int assessmentId = 1,
+  String? decision = 'passed',
+}) {
+  return InterviewModel(
+    id: id,
+    assessmentId: assessmentId,
+    interviewType: 'online',
+    status: 'completed',
+    decision: decision,
+    completedAt: DateTime(2026, 8, 15, 11),
+  );
+}
+
+/// The refreshed [AssessmentModel] `completeInterview()` reads back via
+/// [OrganizationAssessmentProvider.loadForApplication] after a successful
+/// completion — its own nested `interview` reflects the completed state.
+AssessmentModel _completedAssessment({
+  int id = 1,
+  int applicationId = 5,
+  String? result = 'passed',
+}) {
+  return AssessmentModel(
+    id: id,
+    applicationId: applicationId,
+    type: 'interview',
+    status: 'completed',
+    result: result,
+    interview: _completedInterview(assessmentId: id, decision: result),
   );
 }
 
@@ -127,6 +161,36 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     if (createError != null) throw createError!;
     return createResult!;
   }
+
+  InterviewModel? completeResult;
+  ApiException? completeError;
+  Object? completeRuntimeError;
+  Duration completeDelay = Duration.zero;
+  int completeCallCount = 0;
+  int? lastCompleteInterviewId;
+  String? lastCompleteDecision;
+  int? lastCompleteRating;
+  String? lastCompleteCompanyFeedback;
+
+  @override
+  Future<InterviewModel> completeInterview({
+    required int interviewId,
+    String? decision,
+    int? rating,
+    String? companyFeedback,
+  }) async {
+    completeCallCount++;
+    lastCompleteInterviewId = interviewId;
+    lastCompleteDecision = decision;
+    lastCompleteRating = rating;
+    lastCompleteCompanyFeedback = companyFeedback;
+    if (completeDelay > Duration.zero) {
+      await Future<void>.delayed(completeDelay);
+    }
+    if (completeRuntimeError != null) throw completeRuntimeError!;
+    if (completeError != null) throw completeError!;
+    return completeResult!;
+  }
 }
 
 void main() {
@@ -152,6 +216,7 @@ void main() {
     expect(provider.actionErrorMessage, isNull);
     expect(provider.fieldErrors, isEmpty);
     expect(provider.busyApplicationIds, isEmpty);
+    expect(provider.completingInterviewIds, isEmpty);
   });
 
   test('loading an existing assessment populates state', () async {
@@ -595,6 +660,174 @@ void main() {
     expect(provider.fieldErrors, isEmpty);
   });
 
+  test(
+    'completeInterview success refreshes assessment from the backend',
+    () async {
+      repository.loadResult = _completedAssessment(applicationId: 5);
+      repository.completeResult = _completedInterview();
+
+      final success = await provider.completeInterview(
+        applicationId: 5,
+        interviewId: 1,
+      );
+
+      expect(success, isTrue);
+      expect(provider.assessment?.status, 'completed');
+      expect(provider.assessment?.interview?.status, 'completed');
+      expect(provider.actionErrorMessage, isNull);
+      expect(provider.fieldErrors, isEmpty);
+    },
+  );
+
+  test('completeInterview succeeds with a completely empty payload', () async {
+    repository.loadResult = _completedAssessment(applicationId: 5, result: null);
+    repository.completeResult = _completedInterview(decision: null);
+
+    final success = await provider.completeInterview(
+      applicationId: 5,
+      interviewId: 1,
+    );
+
+    expect(success, isTrue);
+    expect(repository.lastCompleteDecision, isNull);
+    expect(repository.lastCompleteRating, isNull);
+    expect(repository.lastCompleteCompanyFeedback, isNull);
+  });
+
+  test('completeInterview forwards the decision', () async {
+    repository.loadResult = _completedAssessment(applicationId: 5);
+    repository.completeResult = _completedInterview();
+
+    await provider.completeInterview(
+      applicationId: 5,
+      interviewId: 1,
+      decision: 'passed',
+    );
+
+    expect(repository.lastCompleteInterviewId, 1);
+    expect(repository.lastCompleteDecision, 'passed');
+  });
+
+  test('completeInterview forwards rating and company feedback', () async {
+    repository.loadResult = _completedAssessment(applicationId: 5);
+    repository.completeResult = _completedInterview();
+
+    await provider.completeInterview(
+      applicationId: 5,
+      interviewId: 1,
+      rating: 5,
+      companyFeedback: 'Great candidate.',
+    );
+
+    expect(repository.lastCompleteRating, 5);
+    expect(repository.lastCompleteCompanyFeedback, 'Great candidate.');
+  });
+
+  test('completeInterview validation error exposes field errors', () async {
+    repository.loadResult = _assessment(applicationId: 5);
+    await provider.loadForApplication(5);
+
+    repository.completeError = ApiException(
+      'The given data was invalid.',
+      statusCode: 422,
+      errors: {
+        'rating': ['The rating must be at least 1.'],
+      },
+    );
+
+    final success = await provider.completeInterview(
+      applicationId: 5,
+      interviewId: 1,
+      rating: 0,
+    );
+
+    expect(success, isFalse);
+    expect(provider.fieldErrors['rating'], isNotNull);
+    // The previous (still-scheduled) assessment is untouched — no false
+    // completion.
+    expect(provider.assessment?.status, 'scheduled');
+  });
+
+  test(
+    'completeInterview business error exposes the backend message and leaves assessment untouched',
+    () async {
+      repository.loadResult = _assessment(applicationId: 5);
+      await provider.loadForApplication(5);
+
+      repository.completeError = ApiException(
+        'Interview not found',
+        statusCode: 404,
+      );
+
+      final success = await provider.completeInterview(
+        applicationId: 5,
+        interviewId: 1,
+      );
+
+      expect(success, isFalse);
+      expect(provider.actionErrorMessage, 'Interview not found');
+      expect(provider.assessment?.status, 'scheduled');
+    },
+  );
+
+  test('completeInterview unexpected failure exposes a safe message', () async {
+    repository.completeRuntimeError = TypeError();
+
+    final success = await provider.completeInterview(
+      applicationId: 5,
+      interviewId: 1,
+    );
+
+    expect(success, isFalse);
+    expect(
+      provider.actionErrorMessage,
+      'Something went wrong. Please try again.',
+    );
+  });
+
+  test(
+    'a duplicate completeInterview submission for the same interview is blocked',
+    () async {
+      repository.completeDelay = const Duration(milliseconds: 50);
+      repository.completeResult = _completedInterview();
+      repository.loadResult = _completedAssessment(applicationId: 5);
+
+      final first = provider.completeInterview(
+        applicationId: 5,
+        interviewId: 1,
+      );
+      final second = provider.completeInterview(
+        applicationId: 5,
+        interviewId: 1,
+      );
+
+      final results = await Future.wait([first, second]);
+
+      expect(repository.completeCallCount, 1);
+      expect(results.where((success) => success).length, 1);
+      expect(results.where((success) => !success).length, 1);
+    },
+  );
+
+  test(
+    'isCompletingInterview is true only while in flight, for the right interview',
+    () async {
+      repository.completeDelay = const Duration(milliseconds: 50);
+      repository.completeResult = _completedInterview();
+      repository.loadResult = _completedAssessment(applicationId: 5);
+
+      expect(provider.isCompletingInterview(1), isFalse);
+      final future = provider.completeInterview(
+        applicationId: 5,
+        interviewId: 1,
+      );
+      expect(provider.isCompletingInterview(1), isTrue);
+      expect(provider.isCompletingInterview(2), isFalse);
+      await future;
+      expect(provider.isCompletingInterview(1), isFalse);
+    },
+  );
+
   test('reset clears all state (called on logout)', () async {
     repository.loadResult = _assessment(applicationId: 5);
     await provider.loadForApplication(5);
@@ -609,6 +842,7 @@ void main() {
     expect(provider.actionErrorMessage, isNull);
     expect(provider.fieldErrors, isEmpty);
     expect(provider.busyApplicationIds, isEmpty);
+    expect(provider.completingInterviewIds, isEmpty);
   });
 
   test(

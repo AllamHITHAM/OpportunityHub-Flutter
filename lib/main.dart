@@ -1,27 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:provider/provider.dart';
 
 import 'core/api/api_client.dart';
 import 'core/storage/token_storage_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/admin/data/admin_dashboard_repository.dart';
+import 'features/admin/data/admin_education_verifications_repository.dart';
 import 'features/admin/data/admin_organizations_repository.dart';
+import 'features/admin/data/admin_skill_suggestions_repository.dart';
 import 'features/admin/data/admin_skills_repository.dart';
 import 'features/admin/data/admin_users_repository.dart';
 import 'features/applications/data/application_repository.dart';
 import 'features/assessments/data/assessment_repository.dart';
 import 'features/auth/data/auth_repository.dart';
+import 'features/candidates/data/candidate_repository.dart';
 import 'features/cv/data/cv_repository.dart';
+import 'features/education_verification/data/education_verification_repository.dart';
+import 'features/invitations/data/invitation_repository.dart';
 import 'features/notifications/data/notification_repository.dart';
 import 'features/offers/data/offer_repository.dart';
 import 'features/opportunities/data/opportunity_repository.dart';
 import 'features/organization/data/organization_profile_repository.dart';
+import 'features/skills/data/student_skill_repository.dart';
 import 'features/student/data/student_profile_repository.dart';
 import 'providers/admin_dashboard_provider.dart';
+import 'providers/admin_education_verifications_provider.dart';
 import 'providers/admin_organizations_provider.dart';
+import 'providers/admin_skill_suggestions_provider.dart';
 import 'providers/admin_skills_provider.dart';
 import 'providers/admin_users_provider.dart';
 import 'providers/auth_provider.dart';
+import 'providers/candidate_search_provider.dart';
 import 'providers/notification_provider.dart';
 import 'providers/organization_applications_provider.dart';
 import 'providers/organization_assessment_provider.dart';
@@ -33,13 +43,25 @@ import 'providers/organization_quiz_provider.dart';
 import 'providers/student_applications_provider.dart';
 import 'providers/student_assessment_provider.dart';
 import 'providers/student_cv_provider.dart';
+import 'providers/student_education_verification_provider.dart';
+import 'providers/student_invitations_provider.dart';
 import 'providers/student_offer_provider.dart';
 import 'providers/student_opportunities_provider.dart';
 import 'providers/student_profile_provider.dart';
+import 'providers/student_skill_provider.dart';
 import 'providers/student_quiz_provider.dart';
 import 'routes/app_router.dart';
 
 void main() {
+  // Without this, Flutter Web defaults to hash-based URLs (e.g.
+  // `#/reset-password?...`). A plain path link -- like the one the
+  // password-reset email sends (`/reset-password?token=...&email=...`) --
+  // opened directly (not via in-app navigation) would never reach
+  // GoRouter as the requested location at all: the app would boot at `/`
+  // and lose the token/email query entirely before any router redirect
+  // logic ever runs. `usePathUrlStrategy()` is a no-op on non-web
+  // platforms.
+  usePathUrlStrategy();
   runApp(const MyApp());
 }
 
@@ -112,9 +134,35 @@ class MyApp extends StatelessWidget {
         ProxyProvider<ApiClient, CvRepository>(
           update: (_, apiClient, _) => CvRepository(apiClient: apiClient),
         ),
+        ProxyProvider<ApiClient, StudentSkillRepository>(
+          update: (_, apiClient, _) =>
+              StudentSkillRepository(apiClient: apiClient),
+        ),
         ChangeNotifierProxyProvider<AuthProvider, StudentCvProvider>(
           create: (context) => StudentCvProvider(
             repository: context.read<CvRepository>(),
+            studentSkillRepository: context.read<StudentSkillRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, StudentSkillProvider>(
+          create: (context) => StudentSkillProvider(
+            repository: context.read<StudentSkillRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, EducationVerificationRepository>(
+          update: (_, apiClient, _) =>
+              EducationVerificationRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<
+          AuthProvider,
+          StudentEducationVerificationProvider
+        >(
+          create: (context) => StudentEducationVerificationProvider(
+            repository: context.read<EducationVerificationRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,
@@ -242,6 +290,56 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, AdminSkillsProvider>(
           create: (context) => AdminSkillsProvider(
             repository: context.read<AdminSkillsRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, AdminSkillSuggestionsRepository>(
+          update: (_, apiClient, _) =>
+              AdminSkillSuggestionsRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<
+          AuthProvider,
+          AdminSkillSuggestionsProvider
+        >(
+          create: (context) => AdminSkillSuggestionsProvider(
+            repository: context.read<AdminSkillSuggestionsRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, AdminEducationVerificationsRepository>(
+          update: (_, apiClient, _) =>
+              AdminEducationVerificationsRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<
+          AuthProvider,
+          AdminEducationVerificationsProvider
+        >(
+          create: (context) => AdminEducationVerificationsProvider(
+            repository: context.read<AdminEducationVerificationsRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, CandidateRepository>(
+          update: (_, apiClient, _) => CandidateRepository(apiClient: apiClient),
+        ),
+        ProxyProvider<ApiClient, InvitationRepository>(
+          update: (_, apiClient, _) =>
+              InvitationRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, CandidateSearchProvider>(
+          create: (context) => CandidateSearchProvider(
+            repository: context.read<CandidateRepository>(),
+            invitationRepository: context.read<InvitationRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, StudentInvitationsProvider>(
+          create: (context) => StudentInvitationsProvider(
+            repository: context.read<InvitationRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,

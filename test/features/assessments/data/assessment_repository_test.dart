@@ -105,6 +105,42 @@ Map<String, dynamic> _interviewJson({int id = 1, int assessmentId = 1}) {
   };
 }
 
+Map<String, dynamic> _completedInterviewJson({
+  int id = 1,
+  int assessmentId = 1,
+  String? decision = 'passed',
+  int? rating = 4,
+  String? companyFeedback = 'Strong technical answers.',
+}) {
+  return {
+    'id': id,
+    'assessment_id': assessmentId,
+    'interview_type': 'online',
+    'scheduled_at': '2026-08-10T10:00:00.000000Z',
+    'duration_minutes': 60,
+    'meeting_link': 'https://meet.example.com/room',
+    'location': null,
+    'interviewer_name': 'Jane Recruiter',
+    'interviewer_email': 'jane@example.com',
+    'notes': null,
+    'status': 'completed',
+    'decision': decision,
+    'rating': rating,
+    'company_feedback': companyFeedback,
+    'completed_at': '2026-08-15T11:00:00.000000Z',
+    'application': {'id': 5, 'status': 'in_assessment'},
+    'assessment': {
+      'id': assessmentId,
+      'application_id': 5,
+      'type': 'interview',
+      'status': 'completed',
+      'result': decision,
+      'completed_at': '2026-08-15T11:00:00.000000Z',
+      'application': {'id': 5, 'status': 'in_assessment'},
+    },
+  };
+}
+
 Map<String, dynamic> _assessmentJson({
   int id = 1,
   int applicationId = 5,
@@ -778,6 +814,177 @@ void main() {
               .having((e) => e.statusCode, 'statusCode', 404)
               .having((e) => e.message, 'message', 'Application not found'),
         ),
+      );
+    });
+  });
+
+  group('completeInterview', () {
+    test('uses the exact documented method and path', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _completedInterviewJson()}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.completeInterview(interviewId: 1);
+
+      expect(adapter.lastRequest?.method, 'PUT');
+      expect(
+        adapter.lastRequest?.path,
+        '/organization/interviews/1/complete',
+      );
+    });
+
+    test('an empty payload sends no keys at all', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _completedInterviewJson()}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.completeInterview(interviewId: 1);
+
+      final body = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(body, isEmpty);
+    });
+
+    test('sends only the decision when only decision is given', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _completedInterviewJson()}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.completeInterview(interviewId: 1, decision: 'passed');
+
+      final body = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(body, {'decision': 'passed'});
+    });
+
+    test('sends rating and company_feedback when given', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _completedInterviewJson()}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.completeInterview(
+        interviewId: 1,
+        rating: 5,
+        companyFeedback: 'Great candidate.',
+      );
+
+      final body = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(body, {'rating': 5, 'company_feedback': 'Great candidate.'});
+    });
+
+    test(
+      'a blank/whitespace-only decision or feedback is omitted, not sent as an empty string',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({'data': _completedInterviewJson()}, 200);
+        });
+        final repository = _repositoryWithAdapter(adapter);
+
+        await repository.completeInterview(
+          interviewId: 1,
+          decision: '   ',
+          companyFeedback: '   ',
+        );
+
+        final body = adapter.lastRequest?.data as Map<String, dynamic>;
+        expect(body, isEmpty);
+      },
+    );
+
+    test('parses the updated (completed) interview', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': _completedInterviewJson(decision: 'passed', rating: 4),
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.completeInterview(
+        interviewId: 1,
+        decision: 'passed',
+        rating: 4,
+      );
+
+      expect(result.status, 'completed');
+      expect(result.decision, 'passed');
+      expect(result.rating, 4);
+      expect(result.completedAt, isNotNull);
+    });
+
+    test('throws ApiException on a 401', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Unauthenticated',
+          'data': null,
+        }, 401);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.completeInterview(interviewId: 1),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
+        ),
+      );
+    });
+
+    test('throws ApiException on a 404 (interview not owned/missing)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Interview not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.completeInterview(interviewId: 1),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having((e) => e.message, 'message', 'Interview not found'),
+        ),
+      );
+    });
+
+    test('preserves field validation errors', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'message': 'The given data was invalid.',
+          'errors': {
+            'rating': ['The rating must be at least 1.'],
+          },
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.completeInterview(interviewId: 1, rating: 0),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.errors?['rating'],
+            'errors[rating]',
+            isNotNull,
+          ),
+        ),
+      );
+    });
+
+    test('malformed success response is never silently swallowed', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {'id': 'not-an-int'},
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.completeInterview(interviewId: 1),
+        throwsA(anything),
       );
     });
   });

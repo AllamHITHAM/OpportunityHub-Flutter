@@ -17,6 +17,7 @@ class InterviewModel {
     this.durationMinutes,
     this.meetingLink,
     this.location,
+    this.contactPhone,
     this.interviewerName,
     this.interviewerEmail,
     this.notes,
@@ -37,6 +38,12 @@ class InterviewModel {
   final int? durationMinutes;
   final String? meetingLink;
   final String? location;
+
+  /// Required by validation when [interviewType] is `phone` (Phase
+  /// Final-QA-1) — absent/null on legacy interviews scheduled before that
+  /// phase, and on every non-phone interview.
+  final String? contactPhone;
+
   final String? interviewerName;
   final String? interviewerEmail;
   final String? notes;
@@ -67,6 +74,7 @@ class InterviewModel {
       durationMinutes: _parseInt(json['duration_minutes']),
       meetingLink: json['meeting_link'] as String?,
       location: json['location'] as String?,
+      contactPhone: json['contact_phone'] as String?,
       interviewerName: json['interviewer_name'] as String?,
       interviewerEmail: json['interviewer_email'] as String?,
       notes: json['notes'] as String?,

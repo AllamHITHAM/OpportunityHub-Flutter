@@ -38,6 +38,7 @@ class _OpportunityFormScreenState extends State<OpportunityFormScreen> {
   final _salaryMaxController = TextEditingController();
   final _positionsAvailableController = TextEditingController();
   final _deadlineDisplayController = TextEditingController();
+  final _eligibleMajorController = TextEditingController();
 
   String? _opportunityType;
   String? _employmentType;
@@ -46,6 +47,12 @@ class _OpportunityFormScreenState extends State<OpportunityFormScreen> {
   String? _educationLevel;
   String? _status = 'open';
   DateTime? _applicationDeadline;
+
+  /// Eligible Majors (Phase 8B-3.2) — a plain text list managed entirely
+  /// client-side until submit; deduplicated case/whitespace-insensitively
+  /// on add, mirroring (not duplicating) the backend's own normalization
+  /// rule closely enough for this purely local UX check.
+  final List<String> _eligibleMajors = [];
 
   /// Guards against re-filling the form (and stomping on in-progress edits)
   /// every time the provider notifies while editing.
@@ -77,6 +84,7 @@ class _OpportunityFormScreenState extends State<OpportunityFormScreen> {
     _salaryMaxController.dispose();
     _positionsAvailableController.dispose();
     _deadlineDisplayController.dispose();
+    _eligibleMajorController.dispose();
     super.dispose();
   }
 
@@ -99,6 +107,29 @@ class _OpportunityFormScreenState extends State<OpportunityFormScreen> {
     if (_applicationDeadline != null) {
       _deadlineDisplayController.text = formatDate(_applicationDeadline!);
     }
+    _eligibleMajors
+      ..clear()
+      ..addAll(opportunity.eligibleMajors);
+  }
+
+  void _addEligibleMajor() {
+    final value = _eligibleMajorController.text.trim();
+    if (value.isEmpty) return;
+    final alreadyAdded = _eligibleMajors.any(
+      (existing) => existing.trim().toLowerCase() == value.toLowerCase(),
+    );
+    if (alreadyAdded) {
+      _eligibleMajorController.clear();
+      return;
+    }
+    setState(() {
+      _eligibleMajors.add(value);
+      _eligibleMajorController.clear();
+    });
+  }
+
+  void _removeEligibleMajor(String major) {
+    setState(() => _eligibleMajors.remove(major));
   }
 
   String? _requiredValidator(String? value, String fieldLabel) {
@@ -211,6 +242,7 @@ class _OpportunityFormScreenState extends State<OpportunityFormScreen> {
             ? null
             : int.tryParse(positionsText),
         status: _status,
+        eligibleMajors: _eligibleMajors,
       );
     } else {
       result = await provider.createOpportunity(
@@ -234,6 +266,7 @@ class _OpportunityFormScreenState extends State<OpportunityFormScreen> {
             ? null
             : int.tryParse(positionsText),
         status: _status,
+        eligibleMajors: _eligibleMajors,
       );
     }
 
@@ -440,6 +473,58 @@ class _OpportunityFormScreenState extends State<OpportunityFormScreen> {
                         hint: 'e.g. Computer Science',
                         enabled: !isLoading,
                         textInputAction: TextInputAction.next,
+                      ),
+                      const SizedBox(height: AppSpacing.inputSpacing),
+                      Text(
+                        'Eligible Majors (optional)',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        'Students outside these majors will not appear when '
+                        'inviting for this opportunity. Leave empty to '
+                        'accept any major.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      if (_eligibleMajors.isNotEmpty) ...[
+                        Wrap(
+                          spacing: AppSpacing.xs,
+                          runSpacing: AppSpacing.xxs,
+                          children: [
+                            for (final major in _eligibleMajors)
+                              Chip(
+                                label: Text(major),
+                                onDeleted: isLoading
+                                    ? null
+                                    : () => _removeEligibleMajor(major),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                      ],
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: AppTextField(
+                              controller: _eligibleMajorController,
+                              label: 'Add a major',
+                              hint: 'e.g. Computer Science',
+                              enabled: !isLoading,
+                              textInputAction: TextInputAction.done,
+                              onFieldSubmitted: isLoading
+                                  ? null
+                                  : (_) => _addEligibleMajor(),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          IconButton(
+                            onPressed: isLoading ? null : _addEligibleMajor,
+                            icon: const Icon(Icons.add_circle_outline),
+                            tooltip: 'Add major',
+                          ),
+                        ],
                       ),
                       const SizedBox(height: AppSpacing.inputSpacing),
                       AppTextField(

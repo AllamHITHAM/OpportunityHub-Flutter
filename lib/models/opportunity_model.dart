@@ -39,6 +39,7 @@ class OpportunityModel {
     this.createdAt,
     this.organizationProfile,
     this.opportunitySkills = const [],
+    this.eligibleMajors = const [],
   });
 
   final int id;
@@ -87,9 +88,18 @@ class OpportunityModel {
   /// check before iterating.
   final List<OpportunitySkillModel> opportunitySkills;
 
+  /// Explicit accepted majors (Phase 8B-3.2) — the backend always appends
+  /// this field, but empty (not null) here too for the same "never null
+  /// check before iterating" reason, and to stay safe against any legacy
+  /// response that predates this field entirely. An empty list means "no
+  /// explicit majors" — see [fieldOfStudy] for the legacy single-major
+  /// fallback this app's eligibility rule falls back to in that case.
+  final List<String> eligibleMajors;
+
   factory OpportunityModel.fromJson(Map<String, dynamic> json) {
     final organizationProfileJson = json['organization_profile'];
     final opportunitySkillsJson = json['opportunity_skills'];
+    final eligibleMajorsJson = json['eligible_majors'];
 
     return OpportunityModel(
       id: json['id'] as int,
@@ -119,6 +129,9 @@ class OpportunityModel {
                   ),
                 )
                 .toList()
+          : const [],
+      eligibleMajors: eligibleMajorsJson is List
+          ? eligibleMajorsJson.map((m) => m as String).toList()
           : const [],
     );
   }

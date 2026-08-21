@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/notification_provider.dart';
 import '../../../routes/app_routes.dart';
+import '../../auth/presentation/email_verification_banner.dart';
 import '../../notifications/presentation/notification_bell_action.dart';
 
 /// A temporary home screen for logged-in students.
@@ -43,34 +44,54 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         actions: const [NotificationBellAction()],
       ),
       body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Role: Student'),
-            const SizedBox(height: 8),
-            Text(user?.name ?? ''),
-            Text(user?.email ?? ''),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => context.push(AppRoutes.studentOpportunities),
-              child: const Text('Browse Opportunities'),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () => context.push(AppRoutes.studentCvs),
-              child: const Text('My CVs'),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () => context.push(AppRoutes.studentApplications),
-              child: const Text('My Applications'),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () => authProvider.logout(),
-              child: const Text('Logout'),
-            ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const EmailVerificationBanner(),
+              const SizedBox(height: 12),
+              const Text('Role: Student'),
+              const SizedBox(height: 8),
+              Text(user?.name ?? ''),
+              Text(user?.email ?? ''),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () => context.push(AppRoutes.studentOpportunities),
+                child: const Text('Browse Opportunities'),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () => context.push(AppRoutes.studentCvs),
+                child: const Text('My CVs'),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () => context.push(AppRoutes.studentSkills),
+                child: const Text('My Skills'),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () => context.push(AppRoutes.studentApplications),
+                child: const Text('My Applications'),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () =>
+                    context.push(AppRoutes.studentEducationVerification),
+                child: const Text('Education Verification'),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () => context.push(AppRoutes.studentInvitations),
+                child: const Text('Invitations'),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () => authProvider.logout(),
+                child: const Text('Logout'),
+              ),
+            ],
+          ),
         ),
       ),
     );

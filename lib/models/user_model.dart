@@ -6,6 +6,7 @@ class UserModel {
     required this.email,
     required this.role,
     required this.status,
+    this.emailVerified = false,
     this.createdAt,
     this.updatedAt,
   });
@@ -19,6 +20,12 @@ class UserModel {
 
   /// One of: active, suspended (or pending, for new organizations).
   final String status;
+
+  /// Phase 8B-2 — derived from the backend's appended `email_verified`
+  /// boolean (itself derived from `email_verified_at`). Not a gate on
+  /// anything yet: every existing flow works regardless of this value —
+  /// see docs/BUSINESS_RULES.md section 1a for the explicit decision.
+  final bool emailVerified;
 
   /// When this account was created — only populated on responses that
   /// include it (e.g. `GET /admin/users`); the auth/session endpoints this
@@ -34,6 +41,7 @@ class UserModel {
       email: json['email'] as String? ?? '',
       role: json['role'] as String? ?? '',
       status: json['status'] as String? ?? '',
+      emailVerified: json['email_verified'] as bool? ?? false,
       createdAt: _parseDate(json['created_at']),
       updatedAt: _parseDate(json['updated_at']),
     );
@@ -52,6 +60,7 @@ class UserModel {
       'email': email,
       'role': role,
       'status': status,
+      'email_verified': emailVerified,
       'created_at': createdAt?.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
     };

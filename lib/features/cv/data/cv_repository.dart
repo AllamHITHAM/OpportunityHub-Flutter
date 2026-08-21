@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../models/cv_model.dart';
+import '../../../models/cv_skill_suggestion_model.dart';
 import 'picked_cv_file.dart';
 
 /// Talks to the Laravel student-CV endpoints.
@@ -87,6 +88,30 @@ class CvRepository {
       final response = await apiClient.dio.put('/student/cvs/$cvId/default');
       final data = apiClient.parseData(response) as Map<String, dynamic>;
       return CvModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Requests AI-derived skill suggestions from a CV's already-extracted
+  /// text with `POST /api/student/cvs/{cvId}/extract-skills` (Phase
+  /// 8A-6). Suggestions are transient -- nothing is persisted server-side
+  /// by this call, and the raw parsed text is never returned.
+  ///
+  /// Errors: 401, 403, 404 (not found / not yours), 422 (no extractable
+  /// text on this CV), 503 (AI provider unavailable).
+  Future<List<CvSkillSuggestion>> extractSkills(int cvId) async {
+    try {
+      final response = await apiClient.dio.post(
+        '/student/cvs/$cvId/extract-skills',
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      final skills = data['skills'] as List;
+      return skills
+          .map(
+            (json) => CvSkillSuggestion.fromJson(json as Map<String, dynamic>),
+          )
+          .toList();
     } on DioException catch (error) {
       throw apiClient.handleError(error);
     }

@@ -9,6 +9,7 @@ class InterviewCreateInput {
     this.durationMinutes,
     this.meetingLink,
     this.location,
+    this.contactPhone,
     this.interviewerName,
     this.interviewerEmail,
     this.notes,
@@ -21,6 +22,7 @@ class InterviewCreateInput {
   final int? durationMinutes;
   final String? meetingLink;
   final String? location;
+  final String? contactPhone;
   final String? interviewerName;
   final String? interviewerEmail;
   final String? notes;
@@ -44,6 +46,9 @@ class InterviewCreateInput {
 
     final locationValue = _cleaned(location);
     if (locationValue != null) json['location'] = locationValue;
+
+    final contactPhoneValue = _cleaned(contactPhone);
+    if (contactPhoneValue != null) json['contact_phone'] = contactPhoneValue;
 
     final interviewerNameValue = _cleaned(interviewerName);
     if (interviewerNameValue != null) {

@@ -30,6 +30,7 @@ import 'package:opportunityhub_flutter/models/match_analysis_model.dart';
 import 'package:opportunityhub_flutter/models/offer_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/quiz_model.dart';
+import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/providers/organization_quiz_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
@@ -265,6 +266,52 @@ class _FakeAssessmentRepository extends AssessmentRepository {
   }
 
   QuizModel? quizGetResult;
+
+  /// What `getAssessmentForApplication` returns is switched to this once
+  /// `completeInterview` succeeds — simulating the real backend, where the
+  /// completion PUT actually changes the state a follow-up GET would then
+  /// see. Defaults to a completed version of [getResult] so a test only
+  /// needs to set [getResult] (scheduled) to get realistic before/after
+  /// behavior for free.
+  AssessmentModel? completeAssessmentResult;
+  InterviewModel? completeResult;
+  ApiException? completeError;
+  int completeCallCount = 0;
+  int? lastCompleteInterviewId;
+  String? lastCompleteDecision;
+  int? lastCompleteRating;
+  String? lastCompleteCompanyFeedback;
+
+  @override
+  Future<InterviewModel> completeInterview({
+    required int interviewId,
+    String? decision,
+    int? rating,
+    String? companyFeedback,
+  }) async {
+    completeCallCount++;
+    lastCompleteInterviewId = interviewId;
+    lastCompleteDecision = decision;
+    lastCompleteRating = rating;
+    lastCompleteCompanyFeedback = companyFeedback;
+    if (completeError != null) throw completeError!;
+
+    getResult =
+        completeAssessmentResult ??
+        _assessment(status: 'completed', result: decision);
+
+    return completeResult ??
+        InterviewModel(
+          id: interviewId,
+          assessmentId: getResult!.id,
+          interviewType: 'online',
+          status: 'completed',
+          decision: decision,
+          rating: rating,
+          companyFeedback: companyFeedback,
+          completedAt: DateTime(2026, 9, 2),
+        );
+  }
 }
 
 MatchAnalysisModel _analysis({
@@ -587,6 +634,171 @@ void main() {
     expect(find.text('Computer Science'), findsOneWidget);
     expect(find.text('2027'), findsOneWidget);
     expect(find.text('Backend developer.'), findsOneWidget);
+  });
+
+  group('Skill evidence (Phase 8A-6.1)', () {
+    testWidgets(
+      'CV-supported and Self-declared skills both render with their labels',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(
+            applicant: const ApplicantSummaryModel(
+              id: 1,
+              name: 'Jane Student',
+              skills: [
+                StudentSkillModel(
+                  id: 1,
+                  skillId: 10,
+                  skillName: 'AutoCAD',
+                  level: 'advanced',
+                  source: 'cv_ai',
+                ),
+                StudentSkillModel(
+                  id: 2,
+                  skillId: 11,
+                  skillName: 'Primavera P6',
+                  level: 'intermediate',
+                  source: 'manual',
+                ),
+              ],
+            ),
+          ),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(find.text('Skills'), findsOneWidget);
+        expect(find.text('AutoCAD · CV-supported'), findsOneWidget);
+        expect(find.text('Primavera P6 · Self-declared'), findsOneWidget);
+        // Never labeled "Verified" -- CV-supported is not credential
+        // verification (see StudentSkillModel's own doc comment).
+        expect(find.textContaining('Verified'), findsNothing);
+      },
+    );
+
+    testWidgets('No Skills card renders when the applicant has no skills', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Skills'), findsNothing);
+    });
+
+    testWidgets(
+      'No raw CV text, AI confidence, or suggestion data ever leaks into the UI',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(
+            applicant: const ApplicantSummaryModel(
+              id: 1,
+              name: 'Jane Student',
+              skills: [
+                StudentSkillModel(
+                  id: 1,
+                  skillId: 10,
+                  skillName: 'AutoCAD',
+                  level: 'advanced',
+                  source: 'cv_ai',
+                ),
+              ],
+            ),
+          ),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(find.textContaining('confidence'), findsNothing);
+        expect(find.textContaining('parsed_text'), findsNothing);
+        expect(find.textContaining('suggestion'), findsNothing);
+      },
+    );
+  });
+
+  group('Education verification (Phase 8B-1)', () {
+    testWidgets('A not_submitted applicant shows Not Submitted', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(
+          applicant: const ApplicantSummaryModel(
+            id: 1,
+            name: 'Jane Student',
+            educationVerificationStatus: 'not_submitted',
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Education Verification'), findsOneWidget);
+      expect(find.text('Not Submitted'), findsOneWidget);
+    });
+
+    testWidgets('A pending applicant shows Pending Review', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(
+          applicant: const ApplicantSummaryModel(
+            id: 1,
+            name: 'Jane Student',
+            educationVerificationStatus: 'pending',
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Pending Review'), findsOneWidget);
+    });
+
+    testWidgets('A verified applicant shows Verified', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(
+          applicant: const ApplicantSummaryModel(
+            id: 1,
+            name: 'Jane Student',
+            educationVerificationStatus: 'verified',
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Verified'), findsOneWidget);
+    });
+
+    testWidgets('A rejected applicant shows Rejected', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(
+          applicant: const ApplicantSummaryModel(
+            id: 1,
+            name: 'Jane Student',
+            educationVerificationStatus: 'rejected',
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Rejected'), findsOneWidget);
+    });
+
+    testWidgets(
+      'No document path, rejection reason, or reviewer id ever leaks into the UI',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(
+            applicant: const ApplicantSummaryModel(
+              id: 1,
+              name: 'Jane Student',
+              educationVerificationStatus: 'rejected',
+            ),
+          ),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(find.textContaining('.pdf'), findsNothing);
+        expect(find.textContaining('document_path'), findsNothing);
+        expect(find.textContaining('reviewed_by'), findsNothing);
+        expect(find.textContaining('institution'), findsNothing);
+      },
+    );
   });
 
   testWidgets('Empty-string applicant name falls back to "Unnamed applicant"', (
@@ -1317,6 +1529,336 @@ void main() {
       expect(repository.getOrganizationApplicationCallCount, 1);
     },
   );
+
+  group('Complete Interview (Phase Final-QA-2.1)', () {
+    testWidgets(
+      'in_assessment with a scheduled interview assessment shows Complete Interview',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _assessment(status: 'scheduled'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Complete Interview'), findsOneWidget);
+        expect(find.text('Send Offer'), findsNothing);
+      },
+    );
+
+    testWidgets('does not appear for a Quiz assessment', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _quizAssessment(quizStatus: 'published'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Complete Interview'), findsNothing);
+    });
+
+    testWidgets('does not appear once the assessment is already completed', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _assessment(status: 'completed', result: 'passed'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Complete Interview'), findsNothing);
+      expect(find.text('Send Offer'), findsOneWidget);
+    });
+
+    testWidgets('does not appear for a non in_assessment status', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'shortlisted'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _assessment(status: 'scheduled'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      expect(find.text('Complete Interview'), findsNothing);
+    });
+
+    testWidgets('tapping Complete Interview opens the completion form', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _assessment(status: 'scheduled'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      await tester.tap(find.text('Complete Interview'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Decision (optional)'), findsOneWidget);
+      expect(find.text('Rating (optional)'), findsOneWidget);
+      expect(find.text('Feedback (optional)'), findsOneWidget);
+      // Two matches: the main screen's own action button (still mounted
+      // underneath the modal sheet) plus the sheet's own submit button —
+      // matches the Send Offer sheet's identical situation.
+      expect(
+        find.widgetWithText(ElevatedButton, 'Complete Interview'),
+        findsWidgets,
+      );
+    });
+
+    testWidgets(
+      'submitting with every field left empty succeeds (all fields optional)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _assessment(status: 'scheduled'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        await tester.tap(find.text('Complete Interview'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Complete Interview').last,
+        );
+        await tester.pumpAndSettle();
+
+        expect(assessmentRepository.completeCallCount, 1);
+        expect(assessmentRepository.lastCompleteDecision, isNull);
+        expect(assessmentRepository.lastCompleteRating, isNull);
+        // The raw, untrimmed widget-layer value -- an empty string, not
+        // null. Normalizing a blank string to "omit entirely" is the real
+        // AssessmentRepository.completeInterview()'s job (already proven
+        // in assessment_repository_test.dart), not this sheet's.
+        expect(assessmentRepository.lastCompleteCompanyFeedback, isEmpty);
+        expect(
+          find.text('Interview completed successfully'),
+          findsOneWidget,
+        );
+      },
+    );
+
+    for (final decision in ['Passed', 'Failed', 'Waiting']) {
+      testWidgets('selecting $decision submits the correct decision value', (
+        tester,
+      ) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _assessment(status: 'scheduled'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        await tester.tap(find.text('Complete Interview'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Decision (optional)'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(decision).last);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Complete Interview').last,
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          assessmentRepository.lastCompleteDecision,
+          decision.toLowerCase(),
+        );
+      });
+    }
+
+    testWidgets('rating and feedback are sent when entered', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _assessment(status: 'scheduled'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+      );
+
+      await tester.tap(find.text('Complete Interview'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Rating (optional)'),
+        '5',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Feedback (optional)'),
+        'Great candidate.',
+      );
+      await tester.tap(
+        find.widgetWithText(ElevatedButton, 'Complete Interview').last,
+      );
+      await tester.pumpAndSettle();
+
+      expect(assessmentRepository.lastCompleteRating, 5);
+      expect(
+        assessmentRepository.lastCompleteCompanyFeedback,
+        'Great candidate.',
+      );
+    });
+
+    testWidgets(
+      'a rating below 1 is rejected client-side before any request is sent',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _assessment(status: 'scheduled'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        await tester.tap(find.text('Complete Interview'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Rating (optional)'),
+          '0',
+        );
+        await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Complete Interview').last,
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Enter a whole number of at least 1'), findsOneWidget);
+        expect(assessmentRepository.completeCallCount, 0);
+      },
+    );
+
+    testWidgets(
+      'successful completion closes the sheet, removes Complete Interview, '
+      'and makes Send Offer visible without a manual refresh',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _assessment(status: 'scheduled'),
+        )..completeAssessmentResult = _assessment(
+          status: 'completed',
+          result: 'passed',
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Complete Interview'), findsOneWidget);
+        expect(find.text('Send Offer'), findsNothing);
+
+        await tester.tap(find.text('Complete Interview'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Decision (optional)'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Passed').last);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Complete Interview').last,
+        );
+        await tester.pumpAndSettle();
+
+        // The sheet is gone (only the SnackBar and the underlying screen
+        // remain), no manual reload was triggered on this screen, and the
+        // provider's own state update is enough to flip both actions.
+        expect(find.text('Decision (optional)'), findsNothing);
+        expect(find.text('Complete Interview'), findsNothing);
+        expect(find.text('Send Offer'), findsOneWidget);
+        // Only the completion request was made -- no separate application
+        // details reload, unlike Send Offer's own bridging pattern (which
+        // is unnecessary here since Application.status never changes).
+        expect(repository.getOrganizationApplicationCallCount, 1);
+      },
+    );
+
+    testWidgets(
+      'a business error keeps the sheet open, preserves entered values, and never shows a false-completed state',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _assessment(status: 'scheduled'),
+        )..completeError = ApiException(
+          'Interview not found',
+          statusCode: 404,
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        await tester.tap(find.text('Complete Interview'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Feedback (optional)'),
+          'Draft notes, not yet submitted.',
+        );
+        await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Complete Interview').last,
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Interview not found'), findsOneWidget);
+        expect(find.text('Draft notes, not yet submitted.'), findsOneWidget);
+        // Still on the sheet, still eligible -- the action was never
+        // marked as if it had succeeded. Two matches: the main screen's
+        // own button (still mounted underneath) plus the still-open
+        // sheet's own submit button.
+        expect(
+          find.widgetWithText(ElevatedButton, 'Complete Interview'),
+          findsWidgets,
+        );
+      },
+    );
+  });
 
   group('Offer — Send Offer eligibility (Phase 6C-2)', () {
     testWidgets(
@@ -2064,8 +2606,8 @@ void main() {
     });
 
     testWidgets(
-      'there is no Education factor anywhere on the card (removed in the '
-      'v1.1 backend formula)',
+      'there is no Education match factor anywhere on the card (removed '
+      'in the v1.1 backend formula)',
       (tester) async {
         final repository = _FakeApplicationRepository(
           detailsResult: _application(),
@@ -2073,7 +2615,12 @@ void main() {
         );
         await _pumpDetails(tester, repository: repository);
 
-        expect(find.textContaining('Education'), findsNothing);
+        // Scoped to the match-factor label format specifically (see
+        // matchFactorLabels: "Skills Match", "Field / Major Match",
+        // "Experience Match") -- a bare "Education" substring check would
+        // now also match the unrelated, legitimate "Education
+        // Verification" applicant field (Phase 8B-1).
+        expect(find.textContaining('Education Match'), findsNothing);
       },
     );
 

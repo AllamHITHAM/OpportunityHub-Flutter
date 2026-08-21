@@ -52,6 +52,21 @@ String? cleanDisplayText(String? value) {
   return trimmed;
 }
 
+/// User-facing labels for every `education_verification_status` value
+/// (Phase 8B-1) an Organization may see on an applicant. "Verified" here
+/// means an Admin reviewed the document and approved it -- never a direct
+/// university/government check (see docs/BUSINESS_RULES.md).
+const educationVerificationStatusLabels = {
+  'not_submitted': 'Not Submitted',
+  'pending': 'Pending Review',
+  'verified': 'Verified',
+  'rejected': 'Rejected',
+};
+
+String educationVerificationStatusLabel(String? status) {
+  return educationVerificationStatusLabels[status] ?? 'Not Submitted';
+}
+
 /// User-facing labels for the deterministic v1.1 match-analysis factors
 /// (`App\Services\MatchingService`, Phase 8A-2 backend) — Skills, Field/
 /// Major, and Experience only. There is no education/location/work-mode

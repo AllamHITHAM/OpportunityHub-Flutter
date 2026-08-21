@@ -502,4 +502,162 @@ void main() {
       );
     });
   });
+
+  group('forgotPassword (Phase 8B-2)', () {
+    test('posts only the email to /forgot-password', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': true,
+          'message':
+              'If an account exists for this email, password reset instructions have been sent.',
+          'data': null,
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter, TokenStorageService());
+
+      await repository.forgotPassword('jane@example.com');
+
+      expect(adapter.lastRequest?.path, '/forgot-password');
+      final sentBody = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(sentBody, {'email': 'jane@example.com'});
+    });
+
+    test('throws with the backend message on 422 validation', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'message': 'The given data was invalid.',
+          'errors': {
+            'email': ['The email field must be a valid email address.'],
+          },
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter, TokenStorageService());
+
+      await expectLater(
+        repository.forgotPassword('not-an-email'),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 422),
+        ),
+      );
+    });
+
+    test('throws a friendly message on a 429 rate-limit response', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Too Many Attempts.',
+          'data': null,
+        }, 429);
+      });
+      final repository = _repositoryWithAdapter(adapter, TokenStorageService());
+
+      await expectLater(
+        repository.forgotPassword('jane@example.com'),
+        throwsA(
+          isA<ApiException>().having((e) => e.statusCode, 'statusCode', 429),
+        ),
+      );
+    });
+  });
+
+  group('resetPassword (Phase 8B-2)', () {
+    test('sends email, token, password, and password_confirmation', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': true,
+          'message': 'Your password has been reset successfully.',
+          'data': null,
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter, TokenStorageService());
+
+      await repository.resetPassword(
+        email: 'jane@example.com',
+        token: 'real-token-value',
+        password: 'new-password-456',
+      );
+
+      expect(adapter.lastRequest?.path, '/reset-password');
+      final sentBody = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(sentBody, {
+        'email': 'jane@example.com',
+        'token': 'real-token-value',
+        'password': 'new-password-456',
+        'password_confirmation': 'new-password-456',
+      });
+    });
+
+    test(
+      'throws with the backend message on an invalid/expired token',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': false,
+            'message': 'This password reset token is invalid.',
+            'data': null,
+          }, 422);
+        });
+        final repository = _repositoryWithAdapter(
+          adapter,
+          TokenStorageService(),
+        );
+
+        await expectLater(
+          repository.resetPassword(
+            email: 'jane@example.com',
+            token: 'wrong-token',
+            password: 'new-password-456',
+          ),
+          throwsA(
+            isA<ApiException>().having(
+              (e) => e.message,
+              'message',
+              'This password reset token is invalid.',
+            ),
+          ),
+        );
+      },
+    );
+  });
+
+  group('resendVerificationEmail (Phase 8B-2)', () {
+    test('posts to /email/verification-notification with no body', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': true,
+          'message': 'Verification link sent.',
+          'data': null,
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter, TokenStorageService());
+
+      await repository.resendVerificationEmail();
+
+      expect(adapter.lastRequest?.path, '/email/verification-notification');
+    });
+
+    test(
+      'throws with the backend message on a 401 (unauthenticated)',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'success': false,
+            'message': 'Unauthenticated',
+            'data': null,
+          }, 401);
+        });
+        final repository = _repositoryWithAdapter(
+          adapter,
+          TokenStorageService(),
+        );
+
+        await expectLater(
+          repository.resendVerificationEmail(),
+          throwsA(
+            isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
+          ),
+        );
+      },
+    );
+  });
 }

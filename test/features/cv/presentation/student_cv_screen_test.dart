@@ -14,7 +14,9 @@ import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/picked_cv_file.dart';
 import 'package:opportunityhub_flutter/features/cv/presentation/student_cv_screen.dart';
+import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
+import 'package:opportunityhub_flutter/models/cv_skill_suggestion_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
@@ -69,6 +71,8 @@ class _FakeCvRepository extends CvRepository {
     this.setDefaultResult,
     this.downloadResult,
     this.downloadError,
+    this.extractSkillsResult = const [],
+    this.extractSkillsError,
   }) : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   List<CvModel> listResult;
@@ -90,6 +94,17 @@ class _FakeCvRepository extends CvRepository {
   Uint8List? downloadResult;
   ApiException? downloadError;
   int downloadCallCount = 0;
+
+  List<CvSkillSuggestion> extractSkillsResult = const [];
+  ApiException? extractSkillsError;
+  int extractSkillsCallCount = 0;
+
+  @override
+  Future<List<CvSkillSuggestion>> extractSkills(int cvId) async {
+    extractSkillsCallCount++;
+    if (extractSkillsError != null) throw extractSkillsError!;
+    return extractSkillsResult;
+  }
 
   @override
   Future<List<CvModel>> getStudentCvs() async {
@@ -132,9 +147,33 @@ class _FakeCvRepository extends CvRepository {
   }
 }
 
+class _FakeStudentSkillRepository extends StudentSkillRepository {
+  _FakeStudentSkillRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  final List<int> addedSkillIds = [];
+  final List<String> addedSources = [];
+  final List<int?> addedCvIds = [];
+  ApiException? addSkillError;
+
+  @override
+  Future<void> addSkill({
+    required int skillId,
+    String level = 'intermediate',
+    String source = 'manual',
+    int? cvId,
+  }) async {
+    addedSkillIds.add(skillId);
+    addedSources.add(source);
+    addedCvIds.add(cvId);
+    if (addSkillError != null) throw addSkillError!;
+  }
+}
+
 Future<StudentCvProvider> _pumpScreen(
   WidgetTester tester, {
   required _FakeCvRepository repository,
+  StudentSkillRepository? studentSkillRepository,
   Future<PickedCvFile?> Function() pickCvFile = _defaultTestPicker,
   Size size = const Size(420, 800),
 }) async {
@@ -146,6 +185,8 @@ Future<StudentCvProvider> _pumpScreen(
   final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
   final provider = StudentCvProvider(
     repository: repository,
+    studentSkillRepository:
+        studentSkillRepository ?? _FakeStudentSkillRepository(),
     authProvider: authProvider,
   );
 
@@ -190,6 +231,7 @@ void main() {
     final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
     final provider = StudentCvProvider(
       repository: repository,
+      studentSkillRepository: _FakeStudentSkillRepository(),
       authProvider: authProvider,
     );
     final router = GoRouter(
@@ -657,5 +699,164 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
+  });
+
+  group('Analyze CV with AI (Phase 8A-6)', () {
+    testWidgets('An Analyze CV action is offered on every CV card', (
+      tester,
+    ) async {
+      final repository = _FakeCvRepository(
+        listResult: [_cv(id: 1, title: 'My CV')],
+      );
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.text('Analyze CV'), findsOneWidget);
+    });
+
+    testWidgets(
+      'Success opens a sheet listing the suggested skills with their confidence',
+      (tester) async {
+        final repository = _FakeCvRepository(
+          listResult: [_cv(id: 1, title: 'My CV')],
+          extractSkillsResult: const [
+            CvSkillSuggestion(
+              name: 'AutoCAD',
+              confidence: 0.95,
+              skillId: 5,
+              isAvailable: true,
+              alreadyAdded: false,
+            ),
+          ],
+        );
+        await _pumpScreen(tester, repository: repository);
+
+        await tester.tap(find.text('Analyze CV'));
+        await tester.pumpAndSettle();
+
+        expect(repository.extractSkillsCallCount, 1);
+        expect(find.text('AI-Suggested Skills'), findsOneWidget);
+        expect(find.text('AutoCAD'), findsOneWidget);
+        expect(find.textContaining('95%'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'An unmatched suggestion shows "Pending catalog approval" and cannot be selected',
+      (tester) async {
+        final repository = _FakeCvRepository(
+          listResult: [_cv(id: 1, title: 'My CV')],
+          extractSkillsResult: const [
+            CvSkillSuggestion(
+              name: 'Primavera P6',
+              confidence: 0.6,
+              skillId: null,
+              isAvailable: false,
+              alreadyAdded: false,
+              suggestionId: 9,
+              suggestionStatus: 'pending',
+            ),
+          ],
+        );
+        await _pumpScreen(tester, repository: repository);
+
+        await tester.tap(find.text('Analyze CV'));
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('Pending catalog approval'), findsOneWidget);
+        expect(find.textContaining('Not in skill catalog'), findsNothing);
+        final tile = tester.widget<CheckboxListTile>(
+          find.byType(CheckboxListTile),
+        );
+        expect(tile.onChanged, isNull);
+      },
+    );
+
+    testWidgets(
+      'An already-added suggestion is flagged and cannot be re-selected',
+      (tester) async {
+        final repository = _FakeCvRepository(
+          listResult: [_cv(id: 1, title: 'My CV')],
+          extractSkillsResult: const [
+            CvSkillSuggestion(
+              name: 'Python',
+              confidence: 0.8,
+              skillId: 9,
+              isAvailable: true,
+              alreadyAdded: true,
+            ),
+          ],
+        );
+        await _pumpScreen(tester, repository: repository);
+
+        await tester.tap(find.text('Analyze CV'));
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('Already added'), findsOneWidget);
+        final tile = tester.widget<CheckboxListTile>(
+          find.byType(CheckboxListTile),
+        );
+        expect(tile.onChanged, isNull);
+      },
+    );
+
+    testWidgets(
+      'Selecting a suggestion and adding it posts to the Student Skill endpoint',
+      (tester) async {
+        final studentSkillRepository = _FakeStudentSkillRepository();
+        final repository = _FakeCvRepository(
+          listResult: [_cv(id: 1, title: 'My CV')],
+          extractSkillsResult: const [
+            CvSkillSuggestion(
+              name: 'AutoCAD',
+              confidence: 0.9,
+              skillId: 5,
+              isAvailable: true,
+              alreadyAdded: false,
+            ),
+          ],
+        );
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          studentSkillRepository: studentSkillRepository,
+        );
+
+        await tester.tap(find.text('Analyze CV'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byType(CheckboxListTile));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add Selected Skills'));
+        await tester.pumpAndSettle();
+
+        expect(studentSkillRepository.addedSkillIds, [5]);
+        expect(find.text('Skills added successfully'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Extraction failure (e.g. no extractable text) shows the backend '
+      'message and never opens the suggestions sheet',
+      (tester) async {
+        final repository = _FakeCvRepository(
+          listResult: [_cv(id: 1, title: 'My CV')],
+          extractSkillsError: ApiException(
+            'Text could not be extracted from this CV.',
+            statusCode: 422,
+          ),
+        );
+        await _pumpScreen(tester, repository: repository);
+
+        await tester.tap(find.text('Analyze CV'));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Text could not be extracted from this CV.'),
+          findsOneWidget,
+        );
+        expect(find.text('AI-Suggested Skills'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

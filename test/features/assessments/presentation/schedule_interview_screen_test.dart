@@ -282,7 +282,9 @@ void main() {
     expect(find.text('Meeting Link'), findsNothing);
   });
 
-  testWidgets('phone hides both Meeting Link and Location', (tester) async {
+  testWidgets('phone hides both Meeting Link and Location, shows Contact Phone Number', (
+    tester,
+  ) async {
     await _pumpScreen(
       tester,
       assessmentRepository: _FakeAssessmentRepository(),
@@ -295,7 +297,66 @@ void main() {
 
     expect(find.text('Meeting Link'), findsNothing);
     expect(find.text('Location'), findsNothing);
+    expect(find.text('Contact Phone Number'), findsOneWidget);
   });
+
+  testWidgets('online and onsite hide Contact Phone Number', (tester) async {
+    await _pumpScreen(
+      tester,
+      assessmentRepository: _FakeAssessmentRepository(),
+    );
+
+    expect(find.text('Contact Phone Number'), findsNothing); // default: online
+
+    await tester.tap(find.text('Interview Type'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Onsite').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Contact Phone Number'), findsNothing);
+  });
+
+  testWidgets(
+    'switching from phone to online clears the entered contact phone from the submitted payload',
+    (tester) async {
+      final repository = _FakeAssessmentRepository()
+        ..createResult = _assessment();
+      await _pumpScreen(tester, assessmentRepository: repository);
+
+      await tester.tap(find.text('Interview Type'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Phone').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Contact Phone Number'),
+        '+1 555-0100',
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Interview Type'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Online').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Contact Phone Number'), findsNothing);
+
+      await _pickValidDateAndTime(tester);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Meeting Link'),
+        'https://meet.example.com/room',
+      );
+      await tester.tap(
+        find.widgetWithText(ElevatedButton, 'Schedule Interview'),
+      );
+      await tester.pumpAndSettle();
+
+      final sentInput = repository.lastInterviewInput!;
+      expect(sentInput.interviewType, 'online');
+      expect(sentInput.meetingLink, 'https://meet.example.com/room');
+      expect(sentInput.contactPhone, isNull);
+    },
+  );
 
   testWidgets('online without a meeting link is rejected', (tester) async {
     await _pumpScreen(
@@ -332,6 +393,55 @@ void main() {
       find.text('Location is required for onsite interviews'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('phone without a contact phone number is rejected', (
+    tester,
+  ) async {
+    await _pumpScreen(
+      tester,
+      assessmentRepository: _FakeAssessmentRepository(),
+    );
+
+    await tester.tap(find.text('Interview Type'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Phone').last);
+    await tester.pumpAndSettle();
+
+    await _pickValidDateAndTime(tester);
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Schedule Interview'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Contact phone number is required for phone interviews'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a valid phone submission sends contact_phone and no meeting_link/location', (
+    tester,
+  ) async {
+    final repository = _FakeAssessmentRepository()..createResult = _assessment();
+    await _pumpScreen(tester, assessmentRepository: repository);
+
+    await tester.tap(find.text('Interview Type'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Phone').last);
+    await tester.pumpAndSettle();
+
+    await _pickValidDateAndTime(tester);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Contact Phone Number'),
+      '+1 555-0100',
+    );
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Schedule Interview'));
+    await tester.pumpAndSettle();
+
+    final sentInput = repository.lastInterviewInput!;
+    expect(sentInput.interviewType, 'phone');
+    expect(sentInput.contactPhone, '+1 555-0100');
+    expect(sentInput.meetingLink, isNull);
+    expect(sentInput.location, isNull);
   });
 
   testWidgets('missing date is rejected', (tester) async {

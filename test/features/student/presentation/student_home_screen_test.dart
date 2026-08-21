@@ -79,6 +79,22 @@ Future<void> _pumpScreen(
         path: AppRoutes.notifications,
         builder: (_, _) => const Scaffold(body: Text('NOTIFICATIONS_SCREEN')),
       ),
+      GoRoute(
+        path: AppRoutes.studentOpportunities,
+        builder: (_, _) => const Scaffold(body: Text('OPPORTUNITIES_SCREEN')),
+      ),
+      GoRoute(
+        path: AppRoutes.studentCvs,
+        builder: (_, _) => const Scaffold(body: Text('CVS_SCREEN')),
+      ),
+      GoRoute(
+        path: AppRoutes.studentSkills,
+        builder: (_, _) => const Scaffold(body: Text('SKILLS_SCREEN')),
+      ),
+      GoRoute(
+        path: AppRoutes.studentApplications,
+        builder: (_, _) => const Scaffold(body: Text('APPLICATIONS_SCREEN')),
+      ),
     ],
   );
 
@@ -152,5 +168,72 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('NOTIFICATIONS_SCREEN'), findsOneWidget);
+  });
+
+  group('My Skills navigation (Phase 8A-6.1 fix)', () {
+    testWidgets('Student Home shows a My Skills action', (tester) async {
+      await _pumpScreen(
+        tester,
+        notificationRepository: _FakeNotificationRepository(),
+      );
+
+      expect(find.text('My Skills'), findsOneWidget);
+    });
+
+    testWidgets('Tapping My Skills navigates to the Skills route', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        notificationRepository: _FakeNotificationRepository(),
+      );
+
+      await tester.tap(find.text('My Skills'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('SKILLS_SCREEN'), findsOneWidget);
+    });
+
+    testWidgets('Existing Student Home actions still work', (tester) async {
+      await _pumpScreen(
+        tester,
+        notificationRepository: _FakeNotificationRepository(),
+      );
+
+      expect(find.text('Browse Opportunities'), findsOneWidget);
+      expect(find.text('My CVs'), findsOneWidget);
+      expect(find.text('My Applications'), findsOneWidget);
+      expect(find.text('Logout'), findsOneWidget);
+
+      await tester.tap(find.text('Browse Opportunities'));
+      await tester.pumpAndSettle();
+      expect(find.text('OPPORTUNITIES_SCREEN'), findsOneWidget);
+    });
+
+    testWidgets('My CVs still navigates to its own route', (tester) async {
+      await _pumpScreen(
+        tester,
+        notificationRepository: _FakeNotificationRepository(),
+      );
+
+      await tester.tap(find.text('My CVs'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('CVS_SCREEN'), findsOneWidget);
+    });
+
+    testWidgets('My Applications still navigates to its own route', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        notificationRepository: _FakeNotificationRepository(),
+      );
+
+      await tester.tap(find.text('My Applications'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('APPLICATIONS_SCREEN'), findsOneWidget);
+    });
   });
 }

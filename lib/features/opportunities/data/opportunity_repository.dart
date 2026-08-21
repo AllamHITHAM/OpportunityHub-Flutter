@@ -71,6 +71,7 @@ class OpportunityRepository {
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
+    List<String>? eligibleMajors,
   }) async {
     try {
       final response = await apiClient.dio.post(
@@ -90,6 +91,7 @@ class OpportunityRepository {
           applicationDeadline: applicationDeadline,
           positionsAvailable: positionsAvailable,
           status: status,
+          eligibleMajors: eligibleMajors,
         ),
       );
       final data = apiClient.parseData(response) as Map<String, dynamic>;
@@ -119,6 +121,7 @@ class OpportunityRepository {
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
+    List<String>? eligibleMajors,
   }) async {
     try {
       final response = await apiClient.dio.put(
@@ -138,6 +141,7 @@ class OpportunityRepository {
           applicationDeadline: applicationDeadline,
           positionsAvailable: positionsAvailable,
           status: status,
+          eligibleMajors: eligibleMajors,
         ),
       );
       final data = apiClient.parseData(response) as Map<String, dynamic>;
@@ -248,6 +252,7 @@ class OpportunityRepository {
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
+    List<String>? eligibleMajors,
   }) {
     final blankableFieldOfStudy = (fieldOfStudy?.isNotEmpty ?? false)
         ? fieldOfStudy
@@ -272,6 +277,12 @@ class OpportunityRepository {
       'application_deadline': ?formattedDeadline,
       'positions_available': ?positionsAvailable,
       'status': ?status,
+      // Sent only when non-null -- an explicit empty list still sends
+      // the key (clearing the Opportunity's eligible majors on update),
+      // while `null` omits it entirely (leaves the existing set
+      // untouched on update; means "none" on create). See
+      // `OpportunityController::update()`'s own doc comment (backend).
+      'eligible_majors': ?eligibleMajors,
     };
   }
 

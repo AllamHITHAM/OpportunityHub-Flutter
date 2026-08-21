@@ -125,6 +125,61 @@ class AuthRepository {
     }
   }
 
+  /// Requests a password-reset email with `POST /forgot-password` (Phase
+  /// 8B-2). The backend always returns the same safe response whether or
+  /// not [email] belongs to a real account — this method never exposes
+  /// that distinction either; a caller only ever sees success or a
+  /// network/validation [ApiException].
+  ///
+  /// Errors: 422 (malformed/missing email), 429 (rate-limited).
+  Future<void> forgotPassword(String email) async {
+    try {
+      await apiClient.dio.post('/forgot-password', data: {'email': email});
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Completes a password reset with `POST /reset-password` (Phase
+  /// 8B-2), using the `token`/`email` pair from the reset link. Does
+  /// **not** log the user in — the caller navigates to Login on success,
+  /// per this phase's own explicit design.
+  ///
+  /// Errors: 422 (validation, or an invalid/expired/already-used token),
+  /// 429 (rate-limited).
+  Future<void> resetPassword({
+    required String email,
+    required String token,
+    required String password,
+  }) async {
+    try {
+      await apiClient.dio.post(
+        '/reset-password',
+        data: {
+          'email': email,
+          'token': token,
+          'password': password,
+          'password_confirmation': password,
+        },
+      );
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Resends the email-verification link to the authenticated user with
+  /// `POST /email/verification-notification` (Phase 8B-2). Safe/idempotent
+  /// if already verified — the backend sends nothing and still succeeds.
+  ///
+  /// Errors: 401 (unauthenticated), 429 (rate-limited).
+  Future<void> resendVerificationEmail() async {
+    try {
+      await apiClient.dio.post('/email/verification-notification');
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
   /// Fetches the currently authenticated user using the saved token.
   Future<UserModel> getCurrentUser() async {
     try {

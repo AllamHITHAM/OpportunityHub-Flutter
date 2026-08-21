@@ -103,6 +103,7 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
+    List<String>? eligibleMajors,
   }) async {
     createCallCount++;
     if (createError != null) throw createError!;
@@ -126,6 +127,7 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
+    List<String>? eligibleMajors,
   }) async {
     updateCallCount++;
     if (updateError != null) throw updateError!;

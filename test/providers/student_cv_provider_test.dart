@@ -11,7 +11,9 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/picked_cv_file.dart';
+import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
+import 'package:opportunityhub_flutter/models/cv_skill_suggestion_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
 
@@ -85,6 +87,21 @@ class _FakeCvRepository extends CvRepository {
   Duration downloadDelay = Duration.zero;
   int downloadCallCount = 0;
 
+  List<CvSkillSuggestion> extractSkillsResult = [];
+  ApiException? extractSkillsError;
+  Duration extractSkillsDelay = Duration.zero;
+  int extractSkillsCallCount = 0;
+
+  @override
+  Future<List<CvSkillSuggestion>> extractSkills(int cvId) async {
+    extractSkillsCallCount++;
+    if (extractSkillsDelay > Duration.zero) {
+      await Future<void>.delayed(extractSkillsDelay);
+    }
+    if (extractSkillsError != null) throw extractSkillsError!;
+    return extractSkillsResult;
+  }
+
   @override
   Future<List<CvModel>> getStudentCvs() async {
     getStudentCvsCallCount++;
@@ -135,6 +152,32 @@ class _FakeCvRepository extends CvRepository {
   }
 }
 
+class _FakeStudentSkillRepository extends StudentSkillRepository {
+  _FakeStudentSkillRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  /// skillId -> error to throw for that specific skill, if any. Skills not
+  /// present here succeed.
+  final Map<int, ApiException> errorsBySkillId = {};
+  final List<int> addedSkillIds = [];
+  final List<String> addedSources = [];
+  final List<int?> addedCvIds = [];
+
+  @override
+  Future<void> addSkill({
+    required int skillId,
+    String level = 'intermediate',
+    String source = 'manual',
+    int? cvId,
+  }) async {
+    addedSkillIds.add(skillId);
+    addedSources.add(source);
+    addedCvIds.add(cvId);
+    final error = errorsBySkillId[skillId];
+    if (error != null) throw error;
+  }
+}
+
 PickedCvFile _file({String filename = 'resume.pdf'}) {
   return PickedCvFile(
     filename: filename,
@@ -145,13 +188,16 @@ PickedCvFile _file({String filename = 'resume.pdf'}) {
 void main() {
   late AuthProvider authProvider;
   late _FakeCvRepository repository;
+  late _FakeStudentSkillRepository studentSkillRepository;
   late StudentCvProvider provider;
 
   setUp(() {
     authProvider = AuthProvider(authRepository: _FakeAuthRepository());
     repository = _FakeCvRepository();
+    studentSkillRepository = _FakeStudentSkillRepository();
     provider = StudentCvProvider(
       repository: repository,
+      studentSkillRepository: studentSkillRepository,
       authProvider: authProvider,
     );
   });
@@ -547,5 +593,205 @@ void main() {
 
     expect(provider.downloadErrorMessage, isNull);
     expect(provider.isDownloading(1), isFalse);
+  });
+
+  // -----------------------------------------------------------------
+  // AI CV Skill Extraction (Phase 8A-6)
+  // -----------------------------------------------------------------
+
+  test('extractSkills success populates suggestions', () async {
+    repository.extractSkillsResult = [
+      const CvSkillSuggestion(
+        name: 'AutoCAD',
+        confidence: 0.9,
+        skillId: 5,
+        isAvailable: true,
+        alreadyAdded: false,
+      ),
+    ];
+
+    await provider.extractSkills(7);
+
+    expect(provider.skillSuggestions, hasLength(1));
+    expect(provider.skillSuggestions.single.name, 'AutoCAD');
+    expect(provider.extractionErrorMessage, isNull);
+    expect(provider.isExtracting, isFalse);
+  });
+
+  test(
+    'extractSkills failure surfaces the error and clears suggestions',
+    () async {
+      repository.extractSkillsError = ApiException(
+        'Text could not be extracted from this CV.',
+        statusCode: 422,
+      );
+
+      await provider.extractSkills(7);
+
+      expect(provider.skillSuggestions, isEmpty);
+      expect(
+        provider.extractionErrorMessage,
+        'Text could not be extracted from this CV.',
+      );
+    },
+  );
+
+  test(
+    'extractSkills failure preserves the existing CV list untouched',
+    () async {
+      repository.listResult = [_cv(id: 1)];
+      await provider.loadCvs();
+
+      repository.extractSkillsError = ApiException('AI unavailable');
+      await provider.extractSkills(1);
+
+      expect(provider.cvs, hasLength(1));
+    },
+  );
+
+  test(
+    'isExtracting is true only during an in-flight extraction, scoped to the CV',
+    () async {
+      repository.extractSkillsDelay = const Duration(milliseconds: 50);
+
+      expect(provider.isExtracting, isFalse);
+      final future = provider.extractSkills(3);
+      expect(provider.isExtracting, isTrue);
+      expect(provider.extractingCvId, 3);
+
+      await future;
+      expect(provider.isExtracting, isFalse);
+    },
+  );
+
+  test(
+    'a duplicate extractSkills call while one is in flight is ignored',
+    () async {
+      repository.extractSkillsDelay = const Duration(milliseconds: 50);
+
+      final first = provider.extractSkills(1);
+      final second = provider.extractSkills(1);
+
+      await Future.wait([first, second]);
+
+      expect(repository.extractSkillsCallCount, 1);
+    },
+  );
+
+  test(
+    'addSelectedSkills posts each skill and marks it already added',
+    () async {
+      repository.extractSkillsResult = [
+        const CvSkillSuggestion(
+          name: 'AutoCAD',
+          confidence: 0.9,
+          skillId: 5,
+          isAvailable: true,
+          alreadyAdded: false,
+        ),
+        const CvSkillSuggestion(
+          name: 'Revit',
+          confidence: 0.8,
+          skillId: 6,
+          isAvailable: true,
+          alreadyAdded: false,
+        ),
+      ];
+      await provider.extractSkills(1);
+
+      final success = await provider.addSelectedSkills([5, 6]);
+
+      expect(success, isTrue);
+      expect(studentSkillRepository.addedSkillIds, containsAll([5, 6]));
+      expect(provider.skillSuggestions.every((s) => s.alreadyAdded), isTrue);
+    },
+  );
+
+  test('addSelectedSkills always claims source cv_ai with the analyzed CV id '
+      'as secure evidence -- never a spoofable manual claim', () async {
+    repository.extractSkillsResult = [
+      const CvSkillSuggestion(
+        name: 'AutoCAD',
+        confidence: 0.9,
+        skillId: 5,
+        isAvailable: true,
+        alreadyAdded: false,
+      ),
+    ];
+    await provider.extractSkills(42);
+
+    await provider.addSelectedSkills([5]);
+
+    expect(studentSkillRepository.addedSources, ['cv_ai']);
+    expect(studentSkillRepository.addedCvIds, [42]);
+  });
+
+  test(
+    'addSelectedSkills partial failure reports an error but still adds the successful ones',
+    () async {
+      repository.extractSkillsResult = [
+        const CvSkillSuggestion(
+          name: 'AutoCAD',
+          confidence: 0.9,
+          skillId: 5,
+          isAvailable: true,
+          alreadyAdded: false,
+        ),
+        const CvSkillSuggestion(
+          name: 'Revit',
+          confidence: 0.8,
+          skillId: 6,
+          isAvailable: true,
+          alreadyAdded: false,
+        ),
+      ];
+      await provider.extractSkills(1);
+      studentSkillRepository.errorsBySkillId[6] = ApiException(
+        'You have already added this skill',
+        statusCode: 409,
+      );
+
+      final success = await provider.addSelectedSkills([5, 6]);
+
+      expect(success, isFalse);
+      expect(
+        provider.addSkillsErrorMessage,
+        'You have already added this skill',
+      );
+      expect(
+        provider.skillSuggestions
+            .firstWhere((s) => s.skillId == 5)
+            .alreadyAdded,
+        isTrue,
+      );
+    },
+  );
+
+  test('addSelectedSkills with an empty selection does nothing', () async {
+    final success = await provider.addSelectedSkills([]);
+
+    expect(success, isFalse);
+    expect(studentSkillRepository.addedSkillIds, isEmpty);
+  });
+
+  test('reset also clears extraction and add-skills state', () async {
+    repository.extractSkillsResult = [
+      const CvSkillSuggestion(
+        name: 'AutoCAD',
+        confidence: 0.9,
+        skillId: 5,
+        isAvailable: true,
+        alreadyAdded: false,
+      ),
+    ];
+    await provider.extractSkills(1);
+    expect(provider.skillSuggestions, isNotEmpty);
+
+    await authProvider.logout();
+
+    expect(provider.skillSuggestions, isEmpty);
+    expect(provider.extractionErrorMessage, isNull);
+    expect(provider.extractingCvId, isNull);
+    expect(provider.addSkillsErrorMessage, isNull);
   });
 }

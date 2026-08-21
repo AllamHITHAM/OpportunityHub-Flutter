@@ -17,6 +17,19 @@ class AppRoutes {
   static const String studentProfileRegistration = '/register/student/profile';
   static const String organizationRegistration = '/register/organization';
 
+  /// Phase 8B-2 password recovery — public (reachable while
+  /// unauthenticated) and role-agnostic, like the backend endpoints
+  /// behind them. See `AppRouter` for why an authenticated session is
+  /// still allowed to open these too, unlike [login].
+  static const String forgotPassword = '/forgot-password';
+  static const String resetPassword = '/reset-password';
+
+  /// Phase 8B-2 — where the backend's signed email-verification link
+  /// redirects to after verifying (or rejecting) it server-side. Reads a
+  /// `status` query parameter (`success`/`invalid`); see
+  /// `EmailVerifiedScreen`.
+  static const String emailVerified = '/email-verified';
+
   /// A defensive landing spot for an authenticated organization whose
   /// profile is confirmed missing. Under normal operation this can't
   /// happen — `POST /register/organization` creates the account and its
@@ -118,6 +131,12 @@ class AppRoutes {
   /// role/profile-completion gating applied to this.
   static const String studentCvs = '/student/cvs';
 
+  /// Student-only read-only "My Skills" list (Phase 8A-6.1) — nested
+  /// under [studentCvs] so it's covered by that same route's existing
+  /// role/profile-completion gating in `AppRouter` without needing a
+  /// second prefix/redirect check of its own.
+  static const String studentSkills = '$studentCvs/skills';
+
   /// Student-only application management — see `AppRouter` for the
   /// role/profile-completion gating applied to these.
   static const String studentApplications = '/student/applications';
@@ -135,4 +154,26 @@ class AppRoutes {
   /// Student-only Quiz taking for one Assessment — see [studentAssessments].
   static String studentQuiz(int assessmentId) =>
       '$studentAssessments/$assessmentId/quiz';
+
+  /// Student-only education-verification submission/status (Phase 8B-1) —
+  /// see `AppRouter` for the role/profile-completion gating applied to
+  /// this. A top-level prefix of its own (not nested under [studentCvs])
+  /// since this is a distinct feature area, matching the majority
+  /// convention every other student area here already follows.
+  static const String studentEducationVerification =
+      '/student/education-verification';
+
+  /// Admin-only education-verification review (Phase 8B-1) — see
+  /// `AppRouter` for the role gating applied to it (shares the same
+  /// `/admin` prefix guard as [adminHome]).
+  static const String adminEducationVerifications =
+      '$adminHome/education-verifications';
+
+  /// Organization-only Candidate Search (Phase 8B-3, Flow B) — see
+  /// `AppRouter` for the role gating applied to it.
+  static const String organizationCandidates = '/organization/candidates';
+
+  /// Student-only received invitations (Phase 8B-3, Flow B) — see
+  /// `AppRouter` for the role gating applied to it.
+  static const String studentInvitations = '/student/invitations';
 }

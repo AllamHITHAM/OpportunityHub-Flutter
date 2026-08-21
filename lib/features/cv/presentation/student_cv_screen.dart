@@ -1,12 +1,15 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../models/cv_model.dart';
+import '../../../models/cv_skill_suggestion_model.dart';
 import '../../../providers/student_cv_provider.dart';
+import '../../../routes/app_routes.dart';
 import '../data/picked_cv_file.dart';
 
 /// Opens the platform file picker restricted to a single PDF and returns
@@ -135,6 +138,34 @@ class _StudentCvScreenState extends State<StudentCvScreen> {
     }
   }
 
+  /// Runs AI skill extraction for [cv] and, on success, opens a sheet of
+  /// suggestions the student can select from. On failure (including a
+  /// scanned/no-text CV, which the backend reports as a controlled 422),
+  /// shows the error as a snackbar instead -- the CV list itself is never
+  /// affected either way.
+  Future<void> _analyzeCv(CvModel cv) async {
+    final provider = context.read<StudentCvProvider>();
+
+    await provider.extractSkills(cv.id);
+    if (!mounted) return;
+
+    if (provider.extractionErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.extractionErrorMessage!)));
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: provider,
+        child: const _SkillSuggestionsSheet(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<StudentCvProvider>();
@@ -143,6 +174,11 @@ class _StudentCvScreenState extends State<StudentCvScreen> {
       appBar: AppBar(
         title: const Text('My CVs'),
         actions: [
+          IconButton(
+            onPressed: () => context.push(AppRoutes.studentSkills),
+            icon: const Icon(Icons.psychology_outlined),
+            tooltip: 'My Skills',
+          ),
           IconButton(
             onPressed: _openAddCvSheet,
             icon: const Icon(Icons.add),
@@ -188,9 +224,12 @@ class _StudentCvScreenState extends State<StudentCvScreen> {
             cv: cv,
             isBusy: provider.isBusy(cv.id),
             isDownloading: provider.isDownloading(cv.id),
+            isAnalyzing:
+                provider.isExtracting && provider.extractingCvId == cv.id,
             onSetDefault: () => _setDefault(cv),
             onDelete: () => _confirmDelete(cv),
             onView: () => _viewCv(cv),
+            onAnalyze: () => _analyzeCv(cv),
           );
         },
       ),
@@ -203,17 +242,21 @@ class _CvCard extends StatelessWidget {
     required this.cv,
     required this.isBusy,
     required this.isDownloading,
+    required this.isAnalyzing,
     required this.onSetDefault,
     required this.onDelete,
     required this.onView,
+    required this.onAnalyze,
   });
 
   final CvModel cv;
   final bool isBusy;
   final bool isDownloading;
+  final bool isAnalyzing;
   final VoidCallback onSetDefault;
   final VoidCallback onDelete;
   final VoidCallback onView;
+  final VoidCallback onAnalyze;
 
   @override
   Widget build(BuildContext context) {
@@ -279,6 +322,13 @@ class _CvCard extends StatelessWidget {
                 tooltip: 'Delete',
               ),
             ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SecondaryButton(
+            label: 'Analyze CV',
+            icon: Icons.auto_awesome,
+            isLoading: isAnalyzing,
+            onPressed: isAnalyzing ? null : onAnalyze,
           ),
         ],
       ),
@@ -449,6 +499,142 @@ class _AddCvSheetState extends State<_AddCvSheet> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Shows AI-suggested skills from the most recent [StudentCvProvider]
+/// extraction and lets the student select which existing-catalog
+/// suggestions to accept. Selecting and confirming never mutates
+/// anything on its own -- "Add Selected Skills" is the one explicit
+/// action that does, via the existing Student Skill endpoint
+/// ([StudentCvProvider.addSelectedSkills]).
+class _SkillSuggestionsSheet extends StatefulWidget {
+  const _SkillSuggestionsSheet();
+
+  @override
+  State<_SkillSuggestionsSheet> createState() => _SkillSuggestionsSheetState();
+}
+
+class _SkillSuggestionsSheetState extends State<_SkillSuggestionsSheet> {
+  final Set<int> _selectedSkillIds = {};
+
+  void _toggle(int skillId, bool? selected) {
+    setState(() {
+      if (selected ?? false) {
+        _selectedSkillIds.add(skillId);
+      } else {
+        _selectedSkillIds.remove(skillId);
+      }
+    });
+  }
+
+  Future<void> _addSelected(StudentCvProvider provider) async {
+    final success = await provider.addSelectedSkills(
+      _selectedSkillIds.toList(),
+    );
+    if (!mounted) return;
+
+    if (success) {
+      setState(_selectedSkillIds.clear);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Skills added successfully')),
+      );
+    } else if (provider.addSkillsErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.addSkillsErrorMessage!)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<StudentCvProvider>();
+    final suggestions = provider.skillSuggestions;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: AppSpacing.screenHorizontal,
+        right: AppSpacing.screenHorizontal,
+        top: AppSpacing.md,
+        bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.md,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SectionHeader(title: 'AI-Suggested Skills'),
+          const SizedBox(height: AppSpacing.xs),
+          if (suggestions.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
+              child: Text('No skills were found in this CV.'),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: suggestions.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, index) => _SuggestionTile(
+                  suggestion: suggestions[index],
+                  selected: _selectedSkillIds.contains(
+                    suggestions[index].skillId,
+                  ),
+                  onChanged: _toggle,
+                ),
+              ),
+            ),
+          const SizedBox(height: AppSpacing.md),
+          PrimaryButton(
+            label: 'Add Selected Skills',
+            isLoading: provider.isAddingSkills,
+            onPressed: _selectedSkillIds.isEmpty || provider.isAddingSkills
+                ? null
+                : () => _addSelected(provider),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SuggestionTile extends StatelessWidget {
+  const _SuggestionTile({
+    required this.suggestion,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final CvSkillSuggestion suggestion;
+  final bool selected;
+  final void Function(int skillId, bool? selected) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final canSelect = suggestion.isAvailable && !suggestion.alreadyAdded;
+    final percent = (suggestion.confidence * 100).round();
+
+    final String subtitle;
+    if (suggestion.alreadyAdded) {
+      subtitle = 'Already added · $percent% confidence';
+    } else if (!suggestion.isAvailable) {
+      // Phase 8A-6.1: an unmatched name always resolves to a pending
+      // SkillSuggestion now (never a dead end) -- Admin review is what it
+      // is actually waiting on, not a permanent "not supported" state.
+      subtitle = 'Pending catalog approval · $percent% confidence';
+    } else {
+      subtitle = '$percent% confidence';
+    }
+
+    return CheckboxListTile(
+      value: canSelect ? selected : false,
+      onChanged: canSelect
+          ? (value) => onChanged(suggestion.skillId!, value)
+          : null,
+      controlAffinity: ListTileControlAffinity.leading,
+      title: Text(suggestion.name),
+      subtitle: Text(subtitle),
     );
   }
 }

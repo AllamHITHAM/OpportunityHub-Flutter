@@ -12,10 +12,13 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/core/widgets/app_widgets.dart';
+import 'package:opportunityhub_flutter/features/admin/data/admin_skill_suggestions_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_skills_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_skills_screen.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/skill_model.dart';
+import 'package:opportunityhub_flutter/models/skill_suggestion_model.dart';
+import 'package:opportunityhub_flutter/providers/admin_skill_suggestions_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_skills_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 
@@ -100,15 +103,78 @@ class _FakeAdminSkillsRepository extends AdminSkillsRepository {
   }
 }
 
+SkillSuggestionModel _suggestion({
+  int id = 1,
+  String name = 'Primavera P6',
+  String source = 'ai_cv',
+  String status = 'pending',
+}) {
+  return SkillSuggestionModel(
+    id: id,
+    name: name,
+    source: source,
+    status: status,
+  );
+}
+
+class _FakeAdminSkillSuggestionsRepository
+    extends AdminSkillSuggestionsRepository {
+  _FakeAdminSkillSuggestionsRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  List<SkillSuggestionModel>? loadResult;
+  ApiException? loadError;
+  Duration loadDelay = Duration.zero;
+  int getPendingSuggestionsCallCount = 0;
+
+  ApiException? approveError;
+  Duration approveDelay = Duration.zero;
+  final List<int> approvedIds = [];
+
+  ApiException? rejectError;
+  Duration rejectDelay = Duration.zero;
+  final List<int> rejectedIds = [];
+
+  @override
+  Future<List<SkillSuggestionModel>> getPendingSuggestions() async {
+    getPendingSuggestionsCallCount++;
+    if (loadDelay > Duration.zero) {
+      await Future<void>.delayed(loadDelay);
+    }
+    if (loadError != null) throw loadError!;
+    return loadResult ?? [];
+  }
+
+  @override
+  Future<void> approve(int suggestionId) async {
+    approvedIds.add(suggestionId);
+    if (approveDelay > Duration.zero) {
+      await Future<void>.delayed(approveDelay);
+    }
+    if (approveError != null) throw approveError!;
+  }
+
+  @override
+  Future<void> reject(int suggestionId) async {
+    rejectedIds.add(suggestionId);
+    if (rejectDelay > Duration.zero) {
+      await Future<void>.delayed(rejectDelay);
+    }
+    if (rejectError != null) throw rejectError!;
+  }
+}
+
 class _Providers {
-  _Providers({required this.skills});
+  _Providers({required this.skills, required this.suggestions});
 
   final AdminSkillsProvider skills;
+  final AdminSkillSuggestionsProvider suggestions;
 }
 
 Future<_Providers> _pumpScreen(
   WidgetTester tester, {
   required AdminSkillsRepository repository,
+  AdminSkillSuggestionsRepository? suggestionsRepository,
   Size size = const Size(420, 1400),
 }) async {
   tester.view.physicalSize = size;
@@ -119,6 +185,10 @@ Future<_Providers> _pumpScreen(
   final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
   final skillsProvider = AdminSkillsProvider(
     repository: repository,
+    authProvider: authProvider,
+  );
+  final suggestionsProvider = AdminSkillSuggestionsProvider(
+    repository: suggestionsRepository ?? _FakeAdminSkillSuggestionsRepository(),
     authProvider: authProvider,
   );
 
@@ -139,6 +209,9 @@ Future<_Providers> _pumpScreen(
         ChangeNotifierProvider<AdminSkillsProvider>.value(
           value: skillsProvider,
         ),
+        ChangeNotifierProvider<AdminSkillSuggestionsProvider>.value(
+          value: suggestionsProvider,
+        ),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -148,7 +221,7 @@ Future<_Providers> _pumpScreen(
   );
   await tester.pumpAndSettle();
 
-  return _Providers(skills: skillsProvider);
+  return _Providers(skills: skillsProvider, suggestions: suggestionsProvider);
 }
 
 Future<void> _openAddSheet(WidgetTester tester) async {
@@ -174,6 +247,10 @@ void main() {
       repository: repository,
       authProvider: authProvider,
     );
+    final suggestionsProvider = AdminSkillSuggestionsProvider(
+      repository: _FakeAdminSkillSuggestionsRepository(),
+      authProvider: authProvider,
+    );
     final router = GoRouter(
       initialLocation: '/admin/skills',
       routes: [
@@ -190,6 +267,9 @@ void main() {
           ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
           ChangeNotifierProvider<AdminSkillsProvider>.value(
             value: skillsProvider,
+          ),
+          ChangeNotifierProvider<AdminSkillSuggestionsProvider>.value(
+            value: suggestionsProvider,
           ),
         ],
         child: MaterialApp.router(
@@ -658,5 +738,225 @@ void main() {
     );
 
     expect(tester.takeException(), isNull);
+  });
+
+  group('Pending Skill Suggestions', () {
+    testWidgets('Renders pending suggestions above the search field', (
+      tester,
+    ) async {
+      final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
+      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+        ..loadResult = [_suggestion(id: 1, name: 'Primavera P6')];
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        suggestionsRepository: suggestionsRepository,
+      );
+
+      expect(find.text('Pending Skill Suggestions'), findsOneWidget);
+      expect(find.text('Primavera P6'), findsOneWidget);
+      expect(find.text('From AI CV extraction'), findsOneWidget);
+    });
+
+    testWidgets('Renders nothing when there are no pending suggestions', (
+      tester,
+    ) async {
+      final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
+      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+        ..loadResult = [];
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        suggestionsRepository: suggestionsRepository,
+      );
+
+      expect(find.text('Pending Skill Suggestions'), findsNothing);
+    });
+
+    testWidgets('Loading state shows a compact loading indicator', (
+      tester,
+    ) async {
+      final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
+      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+        ..loadResult = [_suggestion(id: 1, name: 'Primavera P6')]
+        ..loadDelay = const Duration(milliseconds: 200);
+
+      tester.view.physicalSize = const Size(420, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+      final skillsProvider = AdminSkillsProvider(
+        repository: repository,
+        authProvider: authProvider,
+      );
+      final suggestionsProvider = AdminSkillSuggestionsProvider(
+        repository: suggestionsRepository,
+        authProvider: authProvider,
+      );
+      final router = GoRouter(
+        initialLocation: '/admin/skills',
+        routes: [
+          GoRoute(
+            path: '/admin/skills',
+            builder: (_, _) => const AdminSkillsScreen(),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+            ChangeNotifierProvider<AdminSkillsProvider>.value(
+              value: skillsProvider,
+            ),
+            ChangeNotifierProvider<AdminSkillSuggestionsProvider>.value(
+              value: suggestionsProvider,
+            ),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(suggestionsProvider.isLoading, isTrue);
+      expect(find.text('Primavera P6'), findsNothing);
+
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('Error state shows a retry that reloads the suggestions', (
+      tester,
+    ) async {
+      final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
+      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+        ..loadError = ApiException('Server error, please try again later.');
+
+      final providers = await _pumpScreen(
+        tester,
+        repository: repository,
+        suggestionsRepository: suggestionsRepository,
+      );
+
+      expect(find.text('Could Not Load Suggestions'), findsOneWidget);
+      expect(
+        find.text('Server error, please try again later.'),
+        findsOneWidget,
+      );
+
+      suggestionsRepository.loadError = null;
+      suggestionsRepository.loadResult = [
+        _suggestion(id: 1, name: 'Primavera P6'),
+      ];
+      await tester.tap(find.text('Try Again'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Primavera P6'), findsOneWidget);
+      expect(providers.suggestions.suggestions, hasLength(1));
+    });
+
+    testWidgets(
+      'Approve calls the repository, removes the row, shows a SnackBar',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = [_skill()];
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = [_suggestion(id: 5, name: 'Primavera P6')];
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+        );
+
+        await tester.tap(find.byKey(const Key('approve-suggestion-5')));
+        await tester.pumpAndSettle();
+
+        expect(suggestionsRepository.approvedIds, [5]);
+        expect(find.text('Primavera P6'), findsNothing);
+        expect(find.text('Skill suggestion approved'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Reject calls the repository, removes the row, shows a SnackBar',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = [_skill()];
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = [_suggestion(id: 5, name: 'Primavera P6')];
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+        );
+
+        await tester.tap(find.byKey(const Key('reject-suggestion-5')));
+        await tester.pumpAndSettle();
+
+        expect(suggestionsRepository.rejectedIds, [5]);
+        expect(find.text('Primavera P6'), findsNothing);
+        expect(find.text('Skill suggestion rejected'), findsOneWidget);
+      },
+    );
+
+    testWidgets('A failed approve keeps the row and shows the error', (
+      tester,
+    ) async {
+      final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
+      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+        ..loadResult = [_suggestion(id: 5, name: 'Primavera P6')]
+        ..approveError = ApiException(
+          'This suggestion has already been reviewed.',
+          statusCode: 409,
+        );
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        suggestionsRepository: suggestionsRepository,
+      );
+
+      await tester.tap(find.byKey(const Key('approve-suggestion-5')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Primavera P6'), findsOneWidget); // row preserved
+      expect(
+        find.text('This suggestion has already been reviewed.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('Busy state disables the row actions while in flight', (
+      tester,
+    ) async {
+      final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
+      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+        ..loadResult = [_suggestion(id: 5, name: 'Primavera P6')]
+        ..approveDelay = const Duration(milliseconds: 2000);
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        suggestionsRepository: suggestionsRepository,
+      );
+
+      await tester.tap(find.byKey(const Key('approve-suggestion-5')));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.byKey(const Key('approve-suggestion-5')), findsNothing);
+      expect(find.byKey(const Key('reject-suggestion-5')), findsNothing);
+
+      await tester.pumpAndSettle();
+    });
   });
 }

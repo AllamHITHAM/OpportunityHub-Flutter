@@ -32,6 +32,7 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
   final _durationController = TextEditingController(text: '60');
   final _meetingLinkController = TextEditingController();
   final _locationController = TextEditingController();
+  final _contactPhoneController = TextEditingController();
   final _interviewerNameController = TextEditingController();
   final _interviewerEmailController = TextEditingController();
   final _notesController = TextEditingController();
@@ -68,6 +69,7 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
     _durationController.dispose();
     _meetingLinkController.dispose();
     _locationController.dispose();
+    _contactPhoneController.dispose();
     _interviewerNameController.dispose();
     _interviewerEmailController.dispose();
     _notesController.dispose();
@@ -187,6 +189,19 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
     return null;
   }
 
+  String? _contactPhoneValidator(String? value) {
+    final backendError = _fieldError('contact_phone');
+    if (backendError != null) return backendError;
+    if (_interviewType != 'phone') return null;
+    if (value == null || value.trim().isEmpty) {
+      return 'Contact phone number is required for phone interviews';
+    }
+    if (value.trim().length > 30) {
+      return 'Contact phone number must be 30 characters or fewer';
+    }
+    return null;
+  }
+
   String? _interviewerEmailValidator(String? value) {
     final backendError = _fieldError('interviewer_email');
     if (backendError != null) return backendError;
@@ -223,6 +238,9 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
           ? orNull(_meetingLinkController)
           : null,
       location: _interviewType == 'onsite' ? orNull(_locationController) : null,
+      contactPhone: _interviewType == 'phone'
+          ? orNull(_contactPhoneController)
+          : null,
       interviewerName: orNull(_interviewerNameController),
       interviewerEmail: orNull(_interviewerEmailController),
       notes: orNull(_notesController),
@@ -321,6 +339,9 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
                                   if (value != 'onsite') {
                                     _locationController.clear();
                                   }
+                                  if (value != 'phone') {
+                                    _contactPhoneController.clear();
+                                  }
                                 });
                               },
                       ),
@@ -389,6 +410,19 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
                           enabled: !isLoading,
                           textInputAction: TextInputAction.next,
                           validator: _locationValidator,
+                        ),
+                      ],
+                      if (_interviewType == 'phone') ...[
+                        const SizedBox(height: AppSpacing.inputSpacing),
+                        AppTextField(
+                          controller: _contactPhoneController,
+                          label: 'Contact Phone Number',
+                          hint: '+1 555-0100',
+                          keyboardType: TextInputType.phone,
+                          maxLength: 30,
+                          enabled: !isLoading,
+                          textInputAction: TextInputAction.next,
+                          validator: _contactPhoneValidator,
                         ),
                       ],
                       const SizedBox(height: AppSpacing.inputSpacing),
