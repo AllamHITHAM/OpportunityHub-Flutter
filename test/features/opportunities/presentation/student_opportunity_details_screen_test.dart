@@ -9,22 +9,29 @@ import 'package:provider/provider.dart';
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
+import 'package:opportunityhub_flutter/core/widgets/app_skeleton.dart';
+import 'package:opportunityhub_flutter/core/widgets/secondary_button.dart';
+import 'package:opportunityhub_flutter/core/widgets/theme_toggle_button.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/presentation/student_opportunity_details_screen.dart';
 import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
+import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_skill_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/skill_model.dart';
+import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_opportunities_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
 class _FakeAuthRepository extends AuthRepository {
@@ -61,17 +68,39 @@ OpportunityModel _opportunity({
 }
 
 class _FakeOpportunityRepository extends OpportunityRepository {
-  _FakeOpportunityRepository({this.getResult, this.getError})
-    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+  _FakeOpportunityRepository({
+    this.getResult,
+    this.getError,
+    this.getDelay = Duration.zero,
+  }) : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   OpportunityModel? getResult;
   ApiException? getError;
+  Duration getDelay;
 
   @override
   Future<OpportunityModel> getPublicOpportunity(int id) async {
+    if (getDelay > Duration.zero) {
+      await Future<void>.delayed(getDelay);
+    }
     if (getError != null) throw getError!;
     return getResult!;
   }
+}
+
+class _FakeStudentProfileRepository extends StudentProfileRepository {
+  _FakeStudentProfileRepository({this.major})
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  final String? major;
+
+  @override
+  Future<StudentProfileModel?> getProfile() async => StudentProfileModel(
+    id: 1,
+    university: 'State University',
+    major: major,
+    graduationYear: 2027,
+  );
 }
 
 class _FakeCvRepository extends CvRepository {
@@ -127,6 +156,7 @@ Future<StudentOpportunitiesProvider> _pumpDetails(
   required _FakeOpportunityRepository repository,
   _FakeCvRepository? cvRepository,
   _FakeApplicationRepository? applicationRepository,
+  String? studentMajor = 'Computer Science',
   int opportunityId = 1,
   Size size = const Size(420, 1400),
 }) async {
@@ -150,6 +180,19 @@ Future<StudentOpportunitiesProvider> _pumpDetails(
   final applicationsProvider = StudentApplicationsProvider(
     repository: applicationRepository ?? _FakeApplicationRepository(),
     authProvider: authProvider,
+  );
+  // Set directly rather than via `checkProfileStatus()` -- the redirect
+  // logic that normally triggers that call doesn't exist in this test's
+  // minimal router, and a student can only ever reach this screen with an
+  // already-known-complete profile in the real app anyway.
+  final studentProfileProvider = StudentProfileProvider(
+    repository: _FakeStudentProfileRepository(major: studentMajor),
+    authProvider: authProvider,
+  )..profile = StudentProfileModel(
+    id: 1,
+    university: 'State University',
+    major: studentMajor,
+    graduationYear: 2027,
   );
 
   final router = GoRouter(
@@ -182,10 +225,21 @@ Future<StudentOpportunitiesProvider> _pumpDetails(
         ChangeNotifierProvider<StudentApplicationsProvider>.value(
           value: applicationsProvider,
         ),
+        ChangeNotifierProvider<StudentProfileProvider>.value(
+          value: studentProfileProvider,
+        ),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
       ],
-      child: MaterialApp.router(
-        theme: AppTheme.lightTheme,
-        routerConfig: router,
+      child: Builder(
+        builder: (context) {
+          final mode = context.watch<ThemeProvider>().mode;
+          return MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: mode,
+            routerConfig: router,
+          );
+        },
       ),
     ),
   );
@@ -222,13 +276,18 @@ void main() {
     await _pumpDetails(tester, repository: repository);
 
     expect(find.text('Software Engineer'), findsOneWidget);
-    expect(find.text('Acme Corp'), findsOneWidget);
+    // Once in the hero subtitle, once more in the "About the Organization"
+    // card (UI Phase 2) -- the same real name shown in two places, not a
+    // duplicate render of one.
+    expect(find.text('Acme Corp'), findsNWidgets(2));
     expect(find.text('Job'), findsOneWidget);
     expect(find.text('Full Time'), findsOneWidget);
     expect(find.text('Remote'), findsOneWidget);
     expect(find.text('Junior'), findsOneWidget);
     expect(find.text('A great opportunity.'), findsOneWidget);
-    expect(find.text('Amman, Jordan'), findsOneWidget);
+    // Once as a hero location chip, once more in the Details facts grid
+    // (UI Phase 2) -- the same real value shown in two places.
+    expect(find.text('Amman, Jordan'), findsNWidgets(2));
   });
 
   testWidgets('Nested skills render as chips when present', (tester) async {
@@ -407,6 +466,651 @@ void main() {
       expect(find.text('Already Applied'), findsOneWidget);
       expect(find.text('Apply Now'), findsNothing);
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'On a wide desktop viewport, the side panel keeps Apply reachable '
+    'without a bottom bar, and no overflow occurs',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(
+          id: 1,
+          organizationProfile: const OrganizationProfileModel(
+            id: 3,
+            organizationName: 'Acme Corp',
+            organizationType: 'company',
+            approvalStatus: 'approved',
+          ),
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        opportunityId: 1,
+        size: const Size(1280, 900),
+      );
+
+      expect(find.text('Apply Now'), findsOneWidget);
+      expect(find.byType(BottomNavigationBar), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'A near deadline shows a closing-soon warning badge',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: OpportunityModel(
+          id: 1,
+          title: 'Software Engineer',
+          description: 'A great opportunity.',
+          opportunityType: 'job',
+          employmentType: 'full_time',
+          workMode: 'remote',
+          experienceLevel: 'junior',
+          positionsAvailable: 2,
+          status: 'open',
+          applicationDeadline: DateTime.now().add(const Duration(days: 2)),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository, opportunityId: 1);
+
+      expect(find.textContaining('closing soon'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'A far-off deadline shows a plain apply-by date, not a warning',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: OpportunityModel(
+          id: 1,
+          title: 'Software Engineer',
+          description: 'A great opportunity.',
+          opportunityType: 'job',
+          employmentType: 'full_time',
+          workMode: 'remote',
+          experienceLevel: 'junior',
+          positionsAvailable: 2,
+          status: 'open',
+          applicationDeadline: DateTime.now().add(const Duration(days: 30)),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository, opportunityId: 1);
+
+      expect(find.textContaining('closing soon'), findsNothing);
+      expect(find.textContaining('Apply by'), findsOneWidget);
+    },
+  );
+
+  testWidgets('No deadline badge renders when none is set', (tester) async {
+    final repository = _FakeOpportunityRepository(getResult: _opportunity());
+    await _pumpDetails(tester, repository: repository);
+
+    expect(find.textContaining('Apply by'), findsNothing);
+    expect(find.textContaining('deadline'), findsNothing);
+  });
+
+  testWidgets(
+    'The theme toggle is reachable and switches the resolved theme',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(getResult: _opportunity());
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.byType(ThemeToggleButton), findsOneWidget);
+      expect(
+        Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+        Brightness.light,
+      );
+
+      await tester.tap(find.byType(ThemeToggleButton));
+      await tester.pumpAndSettle();
+
+      expect(
+        Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+        Brightness.dark,
+      );
+    },
+  );
+
+  testWidgets(
+    'Reduced motion renders content immediately, without waiting through '
+    'the staged entrance',
+    (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(title: 'Software Engineer'),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Software Engineer'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Does not overflow at a narrow 320x720 viewport', (
+    tester,
+  ) async {
+    final repository = _FakeOpportunityRepository(
+      getResult: _opportunity(
+        opportunitySkills: const [
+          OpportunitySkillModel(
+            id: 1,
+            isRequired: true,
+            skill: SkillModel(id: 1, name: 'Flutter'),
+          ),
+        ],
+        organizationProfile: const OrganizationProfileModel(
+          id: 3,
+          organizationName: 'Acme Corp',
+          organizationType: 'company',
+          approvalStatus: 'approved',
+        ),
+      ),
+    );
+    await _pumpDetails(
+      tester,
+      repository: repository,
+      size: const Size(320, 720),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Apply Now'), findsOneWidget);
+  });
+
+  testWidgets('The loading skeleton renders before details arrive', (
+    tester,
+  ) async {
+    final repository = _FakeOpportunityRepository(
+      getResult: _opportunity(),
+      getDelay: const Duration(milliseconds: 200),
+    );
+    tester.view.physicalSize = const Size(420, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+    final provider = StudentOpportunitiesProvider(
+      repository: repository,
+      authProvider: authProvider,
+    );
+    final cvProvider = StudentCvProvider(
+      repository: _FakeCvRepository(),
+      studentSkillRepository: StudentSkillRepository(
+        apiClient: ApiClient(tokenStorageService: TokenStorageService()),
+      ),
+      authProvider: authProvider,
+    );
+    final applicationsProvider = StudentApplicationsProvider(
+      repository: _FakeApplicationRepository(),
+      authProvider: authProvider,
+    );
+    final studentProfileProvider =
+        StudentProfileProvider(
+            repository: _FakeStudentProfileRepository(),
+            authProvider: authProvider,
+          )
+          ..profile = const StudentProfileModel(
+            id: 1,
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+          );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<StudentOpportunitiesProvider>.value(
+            value: provider,
+          ),
+          ChangeNotifierProvider<StudentCvProvider>.value(value: cvProvider),
+          ChangeNotifierProvider<StudentApplicationsProvider>.value(
+            value: applicationsProvider,
+          ),
+          ChangeNotifierProvider<StudentProfileProvider>.value(
+            value: studentProfileProvider,
+          ),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: const StudentOpportunityDetailsScreen(opportunityId: 1),
+        ),
+      ),
+    );
+
+    // Before the post-frame callback's load even resolves, the skeleton
+    // (not a crash, not the real content) is what's on screen.
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(AppSkeleton), findsWidgets);
+    expect(find.text('Software Engineer'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+    'Eligible Majors renders as chips, and an eligible student sees a '
+    'positive eligibility confirmation',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: OpportunityModel(
+          id: 1,
+          title: 'Software Engineer',
+          description: 'A great opportunity.',
+          opportunityType: 'job',
+          employmentType: 'full_time',
+          workMode: 'remote',
+          experienceLevel: 'junior',
+          positionsAvailable: 2,
+          status: 'open',
+          eligibleMajors: const ['Computer Science', 'Computer Engineering'],
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        studentMajor: 'Computer Science',
+      );
+
+      expect(find.text('Eligible Majors'), findsOneWidget);
+      expect(find.text('Computer Science'), findsOneWidget);
+      expect(find.text('Computer Engineering'), findsOneWidget);
+      expect(
+        find.text('Your major is eligible for this opportunity.'),
+        findsOneWidget,
+      );
+      expect(find.text('Apply Now'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'A student whose major is not eligible sees Apply blocked with an '
+    'explanation, not a silent failure later',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: OpportunityModel(
+          id: 1,
+          title: 'Software Engineer',
+          description: 'A great opportunity.',
+          opportunityType: 'job',
+          employmentType: 'full_time',
+          workMode: 'remote',
+          experienceLevel: 'junior',
+          positionsAvailable: 2,
+          status: 'open',
+          eligibleMajors: const ['Computer Science'],
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        studentMajor: 'Fine Arts',
+      );
+
+      expect(find.text('Not Eligible'), findsOneWidget);
+      expect(find.text('Apply Now'), findsNothing);
+      expect(
+        find.text('Your major is not eligible for this opportunity.'),
+        findsOneWidget,
+      );
+
+      final button = tester.widget<SecondaryButton>(
+        find.widgetWithText(SecondaryButton, 'Not Eligible'),
+      );
+      expect(button.onPressed, isNull);
+    },
+  );
+
+  testWidgets(
+    'An unrestricted opportunity shows neither an eligibility line nor an '
+    'Eligible Majors section',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(getResult: _opportunity());
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Eligible Majors'), findsNothing);
+      expect(
+        find.text('Your major is eligible for this opportunity.'),
+        findsNothing,
+      );
+      expect(find.text('Apply Now'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'A closed opportunity blocks Apply with an explanation',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: OpportunityModel(
+          id: 1,
+          title: 'Software Engineer',
+          description: 'A great opportunity.',
+          opportunityType: 'job',
+          employmentType: 'full_time',
+          workMode: 'remote',
+          experienceLevel: 'junior',
+          positionsAvailable: 2,
+          status: 'closed',
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Opportunity Closed'), findsOneWidget);
+      expect(find.text('Apply Now'), findsNothing);
+      expect(
+        find.text('This opportunity is no longer accepting applications.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'A passed deadline blocks Apply with an explanation, distinct from a '
+    'closed opportunity',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: OpportunityModel(
+          id: 1,
+          title: 'Software Engineer',
+          description: 'A great opportunity.',
+          opportunityType: 'job',
+          employmentType: 'full_time',
+          workMode: 'remote',
+          experienceLevel: 'junior',
+          positionsAvailable: 2,
+          status: 'open',
+          applicationDeadline: DateTime.now().subtract(
+            const Duration(days: 3),
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('Deadline Passed'), findsOneWidget);
+      expect(find.text('Apply Now'), findsNothing);
+      expect(
+        find.text('The application deadline has passed.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'Applied always shows Already Applied, even for an opportunity that '
+    'would otherwise be blocked (already succeeded once, not re-litigated)',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: OpportunityModel(
+          id: 1,
+          title: 'Software Engineer',
+          description: 'A great opportunity.',
+          opportunityType: 'job',
+          employmentType: 'full_time',
+          workMode: 'remote',
+          experienceLevel: 'junior',
+          positionsAvailable: 2,
+          status: 'closed',
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        applicationRepository: _FakeApplicationRepository(
+          listResult: [_application(opportunityId: 1)],
+        ),
+      );
+
+      expect(find.text('Already Applied'), findsOneWidget);
+      expect(find.text('Opportunity Closed'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'Back to Discover pops back to the opportunities list, exactly like '
+    'the browser/system back action would',
+    (tester) async {
+      tester.view.physicalSize = const Size(420, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+      final repository = _FakeOpportunityRepository(getResult: _opportunity());
+      final provider = StudentOpportunitiesProvider(
+        repository: repository,
+        authProvider: authProvider,
+      );
+      final cvProvider = StudentCvProvider(
+        repository: _FakeCvRepository(),
+        studentSkillRepository: StudentSkillRepository(
+          apiClient: ApiClient(tokenStorageService: TokenStorageService()),
+        ),
+        authProvider: authProvider,
+      );
+      final applicationsProvider = StudentApplicationsProvider(
+        repository: _FakeApplicationRepository(),
+        authProvider: authProvider,
+      );
+      final studentProfileProvider =
+          StudentProfileProvider(
+              repository: _FakeStudentProfileRepository(),
+              authProvider: authProvider,
+            )
+            ..profile = const StudentProfileModel(
+              id: 1,
+              university: 'State University',
+              major: 'Computer Science',
+              graduationYear: 2027,
+            );
+
+      // Starts on the list (matching a real user's actual navigation
+      // history), then pushes to Details -- unlike `_pumpDetails`'s router
+      // (which starts *at* the details URL directly, modeling a fresh
+      // direct visit/refresh with no history to pop), this one has a real
+      // back stack for "Back to Discover" to pop.
+      final router = GoRouter(
+        initialLocation: AppRoutes.studentOpportunities,
+        routes: [
+          GoRoute(
+            path: AppRoutes.studentOpportunities,
+            builder: (_, _) => const Scaffold(body: Text('LIST_PLACEHOLDER')),
+          ),
+          GoRoute(
+            path: '${AppRoutes.studentOpportunities}/:id',
+            builder: (_, state) => StudentOpportunityDetailsScreen(
+              opportunityId: int.parse(state.pathParameters['id']!),
+            ),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<StudentOpportunitiesProvider>.value(
+              value: provider,
+            ),
+            ChangeNotifierProvider<StudentCvProvider>.value(value: cvProvider),
+            ChangeNotifierProvider<StudentApplicationsProvider>.value(
+              value: applicationsProvider,
+            ),
+            ChangeNotifierProvider<StudentProfileProvider>.value(
+              value: studentProfileProvider,
+            ),
+            ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      router.push(AppRoutes.studentOpportunityDetails(1));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Back to Discover'), findsOneWidget);
+      await tester.tap(find.text('Back to Discover'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('LIST_PLACEHOLDER'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'On a 900-1199px viewport, the desktop side panel still applies with '
+    'no overflow',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(getResult: _opportunity());
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        size: const Size(1024, 800),
+      );
+
+      expect(find.text('Apply Now'), findsOneWidget);
+      expect(find.byType(BottomNavigationBar), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'On a 600-899px tablet viewport, Apply is an in-flow block, not a '
+    'sticky bottom bar or a squeezed two-column layout',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(
+          organizationProfile: const OrganizationProfileModel(
+            id: 3,
+            organizationName: 'Acme Corp',
+            organizationType: 'company',
+            approvalStatus: 'approved',
+          ),
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        size: const Size(720, 1000),
+      );
+
+      expect(find.text('Apply Now'), findsOneWidget);
+      expect(find.byType(BottomNavigationBar), findsNothing);
+      // Organization identity appears exactly once here (unlike desktop,
+      // the tablet tier has no side panel to duplicate it into).
+      expect(find.text('Acme Corp'), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'An organization with no logo field falls back to a designed initials '
+    'avatar, not a broken image',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(
+          organizationProfile: const OrganizationProfileModel(
+            id: 3,
+            organizationName: 'Acme Corp',
+            organizationType: 'company',
+            approvalStatus: 'approved',
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.text('AC'), findsWidgets);
+      expect(find.byType(Image), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'An approved organization shows a real, backend-driven verified badge',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(
+          organizationProfile: const OrganizationProfileModel(
+            id: 3,
+            organizationName: 'Acme Corp',
+            organizationType: 'company',
+            approvalStatus: 'approved',
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.byIcon(Icons.verified_rounded), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'A pending (not yet approved) organization shows no verified badge',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(
+          organizationProfile: const OrganizationProfileModel(
+            id: 3,
+            organizationName: 'Acme Corp',
+            organizationType: 'company',
+            approvalStatus: 'pending',
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.byIcon(Icons.verified_rounded), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'The dominant Apply panel shows an arrow icon and the truthful '
+    'supporting line, on desktop where Apply Now is unblocked',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(getResult: _opportunity());
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        size: const Size(1280, 900),
+      );
+
+      expect(find.byIcon(Icons.arrow_forward_rounded), findsOneWidget);
+      expect(
+        find.text('Your application goes directly to the organization.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'The supporting line and arrow disappear once applied -- the panel '
+    'shows a real confirmation instead',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(getResult: _opportunity());
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        size: const Size(1280, 900),
+        applicationRepository: _FakeApplicationRepository(
+          listResult: [_application(opportunityId: 1)],
+        ),
+      );
+
+      expect(find.byIcon(Icons.arrow_forward_rounded), findsNothing);
+      expect(
+        find.text('Your application goes directly to the organization.'),
+        findsNothing,
+      );
+      expect(find.text('Application Submitted'), findsOneWidget);
     },
   );
 }

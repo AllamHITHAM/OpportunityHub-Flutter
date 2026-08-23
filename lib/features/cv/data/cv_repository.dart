@@ -69,6 +69,24 @@ class CvRepository {
     }
   }
 
+  /// Renames a CV with `PATCH /api/student/cvs/{id}` (Phase 8A-6.2) —
+  /// title only, never re-uploads or replaces the PDF file itself.
+  ///
+  /// Errors: 401, 403, 404 (not found / not yours), 422 (missing/blank/
+  /// over-255 `title`).
+  Future<CvModel> updateTitle({required int cvId, required String title}) async {
+    try {
+      final response = await apiClient.dio.patch(
+        '/student/cvs/$cvId',
+        data: {'title': title},
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return CvModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
   /// Deletes a CV with `DELETE /api/student/cvs/{id}`.
   ///
   /// Errors: 404 (not found / not yours), 409 ("Cannot delete a CV that has

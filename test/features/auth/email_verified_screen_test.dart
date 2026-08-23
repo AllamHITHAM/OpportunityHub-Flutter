@@ -4,10 +4,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
+import 'package:opportunityhub_flutter/core/storage/theme_preference_storage.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/auth/presentation/email_verified_screen.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
+
+class _FakeThemePreferenceStorage extends ThemePreferenceStorage {
+  ThemeMode? saved;
+
+  @override
+  Future<void> saveThemeMode(ThemeMode mode) async {
+    saved = mode;
+  }
+
+  @override
+  Future<ThemeMode> readThemeMode() async => saved ?? ThemeMode.system;
+}
 
 Future<void> _pumpScreen(
   WidgetTester tester, {
@@ -29,7 +44,10 @@ Future<void> _pumpScreen(
   );
 
   await tester.pumpWidget(
-    MaterialApp.router(theme: AppTheme.lightTheme, routerConfig: router),
+    ChangeNotifierProvider<ThemeProvider>.value(
+      value: ThemeProvider(storage: _FakeThemePreferenceStorage()),
+      child: MaterialApp.router(theme: AppTheme.lightTheme, routerConfig: router),
+    ),
   );
   await tester.pumpAndSettle();
 }

@@ -113,7 +113,7 @@ class _StudentQuizScreenState extends State<StudentQuizScreen> {
     final quiz = isThisOne ? provider.quiz : null;
 
     return Scaffold(
-      appBar: AppBar(title: Text(quiz?.title ?? 'Quiz')),
+      appBar: AppBar(title: Text(quiz?.title ?? 'Quiz'), actions: const [ThemeToggleButton()]),
       body: SafeArea(child: _buildBody(provider, quiz, isThisOne)),
     );
   }
@@ -231,7 +231,7 @@ class _QuizIntroView extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(
+                Icon(
                   Icons.check_circle_outline,
                   color: AppColors.success,
                 ),
@@ -369,7 +369,7 @@ class _QuizTakingView extends StatelessWidget {
                   child: Text(
                     provider.actionErrorMessage!,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: AppColors.error),
+                    style: TextStyle(color: AppColors.error),
                   ),
                 ),
               PrimaryButton(
@@ -492,7 +492,7 @@ class _QuizResultView extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.check_circle_outline,
                       color: AppColors.success,
                     ),

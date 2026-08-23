@@ -20,6 +20,7 @@ import 'package:opportunityhub_flutter/features/education_verification/presentat
 import 'package:opportunityhub_flutter/models/education_verification_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_education_verification_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository()
@@ -139,6 +140,7 @@ Future<StudentEducationVerificationProvider> _pumpScreen(
         ChangeNotifierProvider<StudentEducationVerificationProvider>.value(
           value: provider,
         ),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -190,6 +192,7 @@ void main() {
           ChangeNotifierProvider<StudentEducationVerificationProvider>.value(
             value: provider,
           ),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,

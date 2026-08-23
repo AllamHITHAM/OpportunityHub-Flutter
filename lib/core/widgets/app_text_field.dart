@@ -27,6 +27,7 @@ class AppTextField extends StatelessWidget {
     this.obscureText = false,
     this.autofillHints,
     this.focusNode,
+    this.autofocus = false,
   });
 
   final TextEditingController? controller;
@@ -51,12 +52,14 @@ class AppTextField extends StatelessWidget {
   final bool obscureText;
   final Iterable<String>? autofillHints;
   final FocusNode? focusNode;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
       focusNode: focusNode,
+      autofocus: autofocus,
       keyboardType: keyboardType,
       textInputAction: textInputAction,
       validator: validator,

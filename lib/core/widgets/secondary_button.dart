@@ -30,16 +30,18 @@ class SecondaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      height: height ?? _defaultHeight,
-      child: OutlinedButton(
-        onPressed: isLoading ? () {} : onPressed,
-        child: AppButtonContent(
-          label: label,
-          icon: icon,
-          isLoading: isLoading,
-          spinnerColor: AppColors.primary,
+    return ButtonInteractionSurface(
+      child: SizedBox(
+        width: width,
+        height: height ?? _defaultHeight,
+        child: OutlinedButton(
+          onPressed: isLoading ? () {} : onPressed,
+          child: AppButtonContent(
+            label: label,
+            icon: icon,
+            isLoading: isLoading,
+            spinnerColor: AppColors.primary,
+          ),
         ),
       ),
     );

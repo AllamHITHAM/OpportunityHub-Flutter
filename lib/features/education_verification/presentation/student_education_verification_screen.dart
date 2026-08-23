@@ -71,7 +71,7 @@ class _StudentEducationVerificationScreenState
     final provider = context.watch<StudentEducationVerificationProvider>();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Education Verification')),
+      appBar: AppBar(title: const Text('Education Verification'), actions: const [ThemeToggleButton()]),
       body: SafeArea(child: _buildBody(provider)),
     );
   }
@@ -275,7 +275,7 @@ class _SubmissionFormState extends State<_SubmissionForm> {
                 const SizedBox(height: AppSpacing.xxs),
                 Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.picture_as_pdf_outlined,
                       size: 18,
                       color: AppColors.textSecondary,

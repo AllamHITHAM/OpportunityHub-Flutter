@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_radius.dart';
 import '../theme/app_shadows.dart';
 import '../theme/app_spacing.dart';
@@ -13,6 +14,13 @@ enum AppCardElevation { none, card, elevated }
 /// Uses [Material]+[InkWell] (not a bare [GestureDetector]) when [onTap]
 /// is provided, so taps get a proper ripple clipped to the card's rounded
 /// corners.
+///
+/// [interactive] is opt-in and defaults to `false`, so every existing
+/// call site renders exactly as before — set it `true` on a per-card
+/// basis (UI Phase 1: Student Home's quick-action/opportunity cards) to
+/// add a subtle Web hover lift (border + shadow) and a mobile press-scale,
+/// on top of the ripple [onTap] already provides. Has no effect without
+/// [onTap], since there's nothing to press.
 class AppCard extends StatelessWidget {
   const AppCard({
     super.key,
@@ -24,6 +32,7 @@ class AppCard extends StatelessWidget {
     this.borderColor,
     this.borderRadius,
     this.elevation = AppCardElevation.card,
+    this.interactive = false,
   });
 
   final Widget child;
@@ -34,6 +43,7 @@ class AppCard extends StatelessWidget {
   final Color? borderColor;
   final BorderRadius? borderRadius;
   final AppCardElevation elevation;
+  final bool interactive;
 
   List<BoxShadow> get _shadow {
     switch (elevation) {
@@ -49,24 +59,117 @@ class AppCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = borderRadius ?? AppRadius.largeRadius;
+    final resolvedBorderColor = borderColor ?? AppColors.border;
+    final resolvedBackgroundColor = backgroundColor ?? AppColors.card;
+
+    final content = Material(
+      color: AppColors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: radius,
+        child: Padding(
+          padding: padding ?? const EdgeInsets.all(AppSpacing.cardPadding),
+          child: child,
+        ),
+      ),
+    );
+
+    if (interactive && onTap != null) {
+      return _InteractiveCardSurface(
+        margin: margin,
+        radius: radius,
+        backgroundColor: resolvedBackgroundColor,
+        borderColor: resolvedBorderColor,
+        baseShadow: _shadow,
+        child: content,
+      );
+    }
 
     return Container(
       margin: margin,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: backgroundColor ?? AppColors.card,
+        color: resolvedBackgroundColor,
         borderRadius: radius,
-        border: Border.all(color: borderColor ?? AppColors.border),
+        border: Border.all(color: resolvedBorderColor),
         boxShadow: _shadow,
       ),
-      child: Material(
-        color: AppColors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: radius,
-          child: Padding(
-            padding: padding ?? const EdgeInsets.all(AppSpacing.cardPadding),
-            child: child,
+      child: content,
+    );
+  }
+}
+
+/// The hover/press-aware surface used when [AppCard.interactive] is true.
+/// Purely a decoration animation — the actual tap handling/ripple still
+/// comes from the [InkWell] passed in as [child], so semantics/behavior
+/// are unaffected.
+class _InteractiveCardSurface extends StatefulWidget {
+  const _InteractiveCardSurface({
+    required this.child,
+    required this.margin,
+    required this.radius,
+    required this.backgroundColor,
+    required this.borderColor,
+    required this.baseShadow,
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry? margin;
+  final BorderRadius radius;
+  final Color backgroundColor;
+  final Color borderColor;
+  final List<BoxShadow> baseShadow;
+
+  @override
+  State<_InteractiveCardSurface> createState() =>
+      _InteractiveCardSurfaceState();
+}
+
+class _InteractiveCardSurfaceState extends State<_InteractiveCardSurface> {
+  bool _isHovered = false;
+  bool _isPressed = false;
+
+  void _setHovered(bool value) {
+    if (_isHovered == value) return;
+    setState(() => _isHovered = value);
+  }
+
+  void _setPressed(bool value) {
+    if (_isPressed == value) return;
+    setState(() => _isPressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final duration = AppMotion.reduced(context, AppMotion.fast);
+    final scale = _isPressed ? 0.98 : 1.0;
+
+    return MouseRegion(
+      onEnter: (_) => _setHovered(true),
+      onExit: (_) => _setHovered(false),
+      child: Listener(
+        onPointerDown: (_) => _setPressed(true),
+        onPointerUp: (_) => _setPressed(false),
+        onPointerCancel: (_) => _setPressed(false),
+        child: AnimatedScale(
+          scale: scale,
+          duration: duration,
+          curve: AppMotion.standard,
+          child: AnimatedContainer(
+            duration: duration,
+            curve: AppMotion.standard,
+            margin: widget.margin,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: widget.backgroundColor,
+              borderRadius: widget.radius,
+              border: Border.all(
+                color: _isHovered ? AppColors.primary : widget.borderColor,
+                width: _isHovered ? 1.5 : 1,
+              ),
+              boxShadow: _isHovered ? AppShadows.elevated : widget.baseShadow,
+            ),
+            child: widget.child,
           ),
         ),
       ),

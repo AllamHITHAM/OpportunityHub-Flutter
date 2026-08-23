@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_motion.dart';
+import '../../../core/theme/app_radius.dart';
+import '../../../core/theme/app_shadows.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/widgets/app_widgets.dart';
@@ -20,17 +25,31 @@ import '../../offers/presentation/offer_display.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
 import 'application_display.dart';
 
-/// Read-only application details for students. Reached by ID alone (a
-/// route parameter, never GoRouter `extra`) — since no single-application
-/// GET endpoint exists on the backend, a cached copy from the already-
-/// loaded list is used when available, otherwise the full list is loaded
-/// once and this ID is resolved from it. No applicant-review/shortlist UI
-/// belongs here. A read-only Assessment section (see
-/// `_StudentAssessmentSection`) and the Offer response section (see
-/// `_StudentOfferSection`, Phase 6C-3) are the two exceptions — the
-/// student's own view of, and one-time response to, records an
-/// organization already created, not applicant-review actions this screen
-/// exposes.
+const _desktopBreakpoint = 900.0;
+const _tabletBreakpoint = 600.0;
+
+enum _ScreenTier { mobile, tablet, desktop }
+
+_ScreenTier _tierFor(double width) {
+  if (width >= _desktopBreakpoint) return _ScreenTier.desktop;
+  if (width >= _tabletBreakpoint) return _ScreenTier.tablet;
+  return _ScreenTier.mobile;
+}
+
+/// Read-only application details for students, rebuilt into a premium
+/// application-tracking view (UI Phase 4) — a real progress rail (current
+/// stage only, never a fabricated history), a truthful "What's Next" panel,
+/// and a desktop two-column layout. Reached by ID alone (a route parameter,
+/// never GoRouter `extra`) — since no single-application GET endpoint
+/// exists on the backend, a cached copy from the already-loaded list is
+/// used when available, otherwise the full list is loaded once and this ID
+/// is resolved from it.
+///
+/// The Assessment section (see `_StudentAssessmentSection`) and Offer
+/// response section (see `_StudentOfferSection`) below are unchanged from
+/// the prior phase's data/business-rule wiring — only their outer
+/// presentation context changed. No applicant-review/shortlist UI belongs
+/// here.
 class StudentApplicationDetailsScreen extends StatefulWidget {
   const StudentApplicationDetailsScreen({
     super.key,
@@ -45,7 +64,10 @@ class StudentApplicationDetailsScreen extends StatefulWidget {
 }
 
 class _StudentApplicationDetailsScreenState
-    extends State<StudentApplicationDetailsScreen> {
+    extends State<StudentApplicationDetailsScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entranceController;
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +92,24 @@ class _StudentApplicationDetailsScreenState
         widget.applicationId,
       );
     });
+
+    final reducedMotion = SchedulerBinding
+        .instance
+        .platformDispatcher
+        .accessibilityFeatures
+        .disableAnimations;
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: reducedMotion
+          ? const Duration(milliseconds: 1)
+          : const Duration(milliseconds: 650),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _entranceController.dispose();
+    super.dispose();
   }
 
   @override
@@ -79,7 +119,13 @@ class _StudentApplicationDetailsScreenState
     final isThisOne = application?.id == widget.applicationId;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Application Details')),
+      appBar: AppBar(
+        title: const Text('Application Details'),
+        actions: const [
+          ThemeToggleButton(),
+          SizedBox(width: AppSpacing.xs),
+        ],
+      ),
       body: SafeArea(child: _buildBody(provider, application, isThisOne)),
     );
   }
@@ -90,7 +136,7 @@ class _StudentApplicationDetailsScreenState
     bool isThisOne,
   ) {
     if (provider.isLoadingDetails && !isThisOne) {
-      return const AppLoading();
+      return const _DetailsSkeleton();
     }
 
     if (provider.detailsErrorMessage != null && !isThisOne) {
@@ -104,29 +150,1062 @@ class _StudentApplicationDetailsScreenState
     }
 
     if (application == null || !isThisOne) {
-      return const AppLoading();
+      return const _DetailsSkeleton();
     }
 
-    final textTheme = Theme.of(context).textTheme;
-    final organization = application.opportunity?.organizationProfile;
-    final coverLetter = application.coverLetter;
+    final tier = _tierFor(MediaQuery.sizeOf(context).width);
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
+    return _DetailsContent(
+      application: application,
+      refreshErrorMessage: provider.detailsErrorMessage,
+      onRetryRefresh: () => provider.loadApplicationDetails(
+        widget.applicationId,
+        forceRefresh: true,
+      ),
+      tier: tier,
+      entranceController: _entranceController,
+    );
+  }
+}
+
+class _DetailsContent extends StatelessWidget {
+  const _DetailsContent({
+    required this.application,
+    required this.refreshErrorMessage,
+    required this.onRetryRefresh,
+    required this.tier,
+    required this.entranceController,
+  });
+
+  final ApplicationModel application;
+  final String? refreshErrorMessage;
+  final VoidCallback onRetryRefresh;
+  final _ScreenTier tier;
+  final AnimationController entranceController;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDesktop = tier == _ScreenTier.desktop;
+    final coverLetter = application.coverLetter;
+    final horizontalPadding = tier == _ScreenTier.mobile
+        ? AppSpacing.screenHorizontal
+        : AppSpacing.xl;
+
+    final mainSections = <Widget>[
+      if (refreshErrorMessage != null) ...[
+        AppErrorView(
+          compact: true,
+          message: refreshErrorMessage!,
+          onRetry: onRetryRefresh,
+        ),
+        const SizedBox(height: AppSpacing.md),
+      ],
+      ApplicationProgressRail(status: application.status),
+      const SizedBox(height: AppSpacing.md),
+      if (coverLetter != null && coverLetter.isNotEmpty) ...[
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SectionHeader(title: 'Cover Letter'),
+              Text(coverLetter, style: Theme.of(context).textTheme.bodyMedium),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+      ],
+      _StudentAssessmentSection(application: application),
+      _StudentOfferSection(application: application),
+    ];
+
+    final sideSections = <Widget>[
+      _SummaryPanel(application: application),
+      const SizedBox(height: AppSpacing.md),
+      _WhatsNextPanel(application: application),
+    ];
+
+    if (!isDesktop) {
+      return SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const _BackToApplicationsBar(),
+            _ApplicationHero(
+              application: application,
+              isWide: false,
+              entranceController: entranceController,
+            ),
+            _Stagger(
+              controller: entranceController,
+              index: 1,
+              count: 2,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  AppSpacing.md,
+                  horizontalPadding,
+                  AppSpacing.xxl,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ...sideSections,
+                    const SizedBox(height: AppSpacing.md),
+                    ...mainSections,
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _BackToApplicationsBar(),
+        Expanded(
+          child: SizedBox.expand(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  flex: 7,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _ApplicationHero(
+                          application: application,
+                          isWide: true,
+                          entranceController: entranceController,
+                        ),
+                        _Stagger(
+                          controller: entranceController,
+                          index: 1,
+                          count: 2,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpacing.xl,
+                              AppSpacing.lg,
+                              AppSpacing.lg,
+                              AppSpacing.xxl,
+                            ),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 780),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: mainSections,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 340,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.lg,
+                      AppSpacing.xl,
+                      AppSpacing.xxl,
+                    ),
+                    child: _Stagger(
+                      controller: entranceController,
+                      index: 1,
+                      count: 2,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: sideSections,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Fades and slides a section in as part of the staged entrance. Mirrors
+/// the private `_Stagger` already used elsewhere in this app's Student
+/// screens (kept feature-local rather than shared).
+class _Stagger extends StatelessWidget {
+  const _Stagger({
+    required this.controller,
+    required this.index,
+    required this.count,
+    required this.child,
+  });
+
+  final AnimationController controller;
+  final int index;
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final start = count <= 1 ? 0.0 : index / count;
+    final end = count <= 1 ? 1.0 : ((index + 1.4) / count).clamp(start, 1.0);
+    final curved = CurvedAnimation(
+      parent: controller,
+      curve: Interval(start, end, curve: AppMotion.entrance),
+    );
+
+    return FadeTransition(
+      opacity: curved,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.03),
+          end: Offset.zero,
+        ).animate(curved),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// A real, working "Back to My Applications" affordance — falls back to a
+/// direct navigation (rather than assuming a pop always succeeds) when this
+/// screen was reached via a direct URL with no back-stack. Mirrors
+/// `StudentOpportunityDetailsScreen`'s own `_BackToDiscoverBar`.
+class _BackToApplicationsBar extends StatefulWidget {
+  const _BackToApplicationsBar();
+
+  @override
+  State<_BackToApplicationsBar> createState() => _BackToApplicationsBarState();
+}
+
+class _BackToApplicationsBarState extends State<_BackToApplicationsBar> {
+  bool _hovered = false;
+
+  void _goBack(BuildContext context) {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).maybePop();
+    } else {
+      context.go(AppRoutes.studentApplications);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: InkWell(
+        onTap: () => _goBack(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.screenHorizontal,
+            vertical: AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              AnimatedSlide(
+                duration: AppMotion.reduced(context, AppMotion.fast),
+                offset: _hovered ? const Offset(-0.15, 0) : Offset.zero,
+                child: Icon(
+                  Icons.arrow_back,
+                  size: 18,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xxs),
+              Flexible(
+                child: Text(
+                  'Back to My Applications',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The application-details hero — real opportunity title, organization,
+/// opportunity type, current status, and applied date. Same gradient
+/// identity as the Profile/Opportunity-Details heroes.
+class _ApplicationHero extends StatelessWidget {
+  const _ApplicationHero({
+    required this.application,
+    required this.isWide,
+    required this.entranceController,
+  });
+
+  final ApplicationModel application;
+  final bool isWide;
+  final AnimationController entranceController;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final opportunity = application.opportunity;
+    final organizationName = opportunity?.organizationProfile?.organizationName;
+    final horizontalPadding = isWide
+        ? AppSpacing.xl
+        : AppSpacing.screenHorizontal;
+    // UI Phase 4.3: title given more presence — still the strongest text
+    // in the hero — without growing the hero's own vertical footprint.
+    final titleSize = isWide ? 38.0 : 26.0;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.primary, AppColors.primaryDark],
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          AppSpacing.md,
+          horizontalPadding,
+          AppSpacing.lg,
+        ),
+        child: _Stagger(
+          controller: entranceController,
+          index: 0,
+          count: 2,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  shape: BoxShape.circle,
+                  boxShadow: AppShadows.card,
+                ),
+                child: AppAvatar(
+                  name: organizationName,
+                  size: isWide ? 64 : 52,
+                  fallbackIcon: Icons.apartment_outlined,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      opportunity?.title ?? 'Opportunity',
+                      style: textTheme.displaySmall?.copyWith(
+                        fontSize: titleSize,
+                        fontWeight: FontWeight.w800,
+                        height: 1.15,
+                        color: Colors.white,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (organizationName != null) ...[
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        organizationName,
+                        style: textTheme.titleSmall?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.9),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.sm,
+                      runSpacing: AppSpacing.xxs,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        AnimatedSwitcher(
+                          duration: AppMotion.reduced(
+                            context,
+                            AppMotion.normal,
+                          ),
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(opacity: animation, child: child),
+                          child: StatusChip(
+                            key: ValueKey(application.status),
+                            label:
+                                applicationStatusLabels[application.status] ??
+                                application.status,
+                            type: applicationStatusChipType(application.status),
+                          ),
+                        ),
+                        if (opportunity != null)
+                          _HeroMetaChip(
+                            label:
+                                opportunityTypeLabels[opportunity
+                                    .opportunityType] ??
+                                opportunity.opportunityType,
+                          ),
+                        if (application.appliedAt != null)
+                          _HeroMetaChip(
+                            icon: Icons.event_outlined,
+                            label:
+                                'Applied ${formatDate(application.appliedAt!)}',
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroMetaChip extends StatelessWidget {
+  const _HeroMetaChip({this.icon, required this.label});
+
+  final IconData? icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
+        borderRadius: AppRadius.pillRadius,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 14, color: Colors.white),
+            const SizedBox(width: 4),
+          ],
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The strongest visual component on this screen: a CURRENT-STAGE
+/// visualization (never a fabricated event history) of where this real
+/// application sits among [ApplicationPipelineStage.values]. The database
+/// only stores `application.status`, not a status-change log, so this is
+/// deliberately a "you are here" rail, not a timeline with dates — see
+/// this phase's own scope notes on why no per-stage timestamp is ever
+/// shown here. Terminal outcomes get a distinct end-cap (folded into
+/// [_CurrentStatusCallout]) rather than being squeezed into the five-stage
+/// rail as if they were just another stage.
+///
+/// Owns its own one-shot [AnimationController] (UI Phase 4.2) — separate
+/// from the page-level entrance controller — so the rail's own staged
+/// stage-by-stage reveal and current-stage settle-pulse play as their own
+/// visual moment, matching this phase's "rail draws in, stages reveal
+/// sequentially, current stage settles" requirement, without coupling this
+/// widget's animation timing to the rest of the page.
+class ApplicationProgressRail extends StatefulWidget {
+  const ApplicationProgressRail({super.key, required this.status});
+
+  final String status;
+
+  @override
+  State<ApplicationProgressRail> createState() =>
+      _ApplicationProgressRailState();
+}
+
+class _ApplicationProgressRailState extends State<ApplicationProgressRail>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    final reducedMotion = SchedulerBinding
+        .instance
+        .platformDispatcher
+        .accessibilityFeatures
+        .disableAnimations;
+    _controller = AnimationController(
+      vsync: this,
+      duration: reducedMotion
+          ? const Duration(milliseconds: 1)
+          : const Duration(milliseconds: 1100),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isTerminal = isTerminalApplicationStatus(widget.status);
+    final currentStage = pipelineStageForStatus(widget.status);
+    final currentIndex = currentStage == null
+        ? -1
+        : ApplicationPipelineStage.values.indexOf(currentStage);
+    final stageCount = ApplicationPipelineStage.values.length;
+
+    return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const SectionHeader(title: 'Application Progress'),
+          const SizedBox(height: AppSpacing.sm),
+          _CurrentStatusCallout(status: widget.status, controller: _controller),
+          if (!isTerminal) ...[
+            const SizedBox(height: AppSpacing.lg),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                // This is the INNER width available after the card's own
+                // padding — noticeably smaller than the device viewport.
+                // 300 keeps this app's own default ~420px-wide mobile
+                // surface (inner width ~356px after padding) on the
+                // horizontal rail, which five small dots comfortably fit,
+                // while a genuinely narrow phone (~320-375px outer, ~250-
+                // 300px inner) gets the compact vertical stepper this
+                // phase calls for.
+                final compact = constraints.maxWidth < 300;
+                return compact
+                    ? _VerticalStepper(
+                        currentIndex: currentIndex,
+                        controller: _controller,
+                        stageCount: stageCount,
+                      )
+                    : _HorizontalRail(
+                        currentIndex: currentIndex,
+                        controller: _controller,
+                        stageCount: stageCount,
+                      );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A prominent, immediately-scannable current-status callout — icon,
+/// strong colored label, and one truthful supporting sentence. Distinct
+/// from the rail below: this answers "what is my status right now",
+/// while the rail answers "where does that sit among the stages before
+/// it". Also the terminal-outcome branch (accepted/rejected/withdrawn),
+/// folded in here rather than duplicated in a second widget, since a
+/// terminal outcome *is* the current (and final) status.
+class _CurrentStatusCallout extends StatelessWidget {
+  const _CurrentStatusCallout({required this.status, required this.controller});
+
+  final String status;
+  final AnimationController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final isTerminal = isTerminalApplicationStatus(status);
+    final currentStage = pipelineStageForStatus(status);
+
+    final IconData icon;
+    final Color color;
+    final String label;
+    final String supporting;
+
+    if (isTerminal) {
+      (icon, color, label, supporting) = switch (status) {
+        'accepted' => (
+          Icons.check_circle_rounded,
+          AppColors.success,
+          'Accepted',
+          'This application was successful.',
+        ),
+        'withdrawn' => (
+          Icons.undo_rounded,
+          AppColors.textMuted,
+          'Withdrawn',
+          'You withdrew this application.',
+        ),
+        _ => (
+          Icons.cancel_rounded,
+          AppColors.error,
+          'Not Successful',
+          'This application did not proceed further.',
+        ),
+      };
+    } else {
+      icon = currentStage != null
+          ? applicationPipelineStageIcons[currentStage]!
+          : Icons.hourglass_top_rounded;
+      color = switch (applicationStatusChipType(status)) {
+        AppStatusType.success => AppColors.success,
+        AppStatusType.warning => AppColors.warning,
+        AppStatusType.error => AppColors.error,
+        _ => AppColors.primary,
+      };
+      label = applicationStatusLabels[status] ?? status;
+      supporting = 'This is the current stage of your application.';
+    }
+
+    final curved = CurvedAnimation(
+      parent: controller,
+      curve: const Interval(0, 0.45, curve: AppMotion.entrance),
+    );
+
+    return FadeTransition(
+      opacity: curved,
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 0.92, end: 1).animate(curved),
+        alignment: Alignment.centerLeft,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color.withValues(alpha: 0.14),
+                border: Border.all(color: color.withValues(alpha: 0.4)),
+              ),
+              child: Icon(icon, size: 22, color: color),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                    ),
+                  ),
+                  Text(
+                    supporting,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The desktop/tablet horizontal rail — dots (each with its own visible
+/// stage label underneath, UI Phase 4.3) reveal left-to-right in sequence,
+/// the current stage settles with a small one-shot scale overshoot at the
+/// end of its own reveal (never a permanent pulse).
+class _HorizontalRail extends StatelessWidget {
+  const _HorizontalRail({
+    required this.currentIndex,
+    required this.controller,
+    required this.stageCount,
+  });
+
+  final int currentIndex;
+  final AnimationController controller;
+  final int stageCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < stageCount; i++) ...[
+          if (i > 0)
+            // Given real flex share (not a cramped fixed slot) so the
+            // connector reads as a full line joining the stages rather
+            // than a short dash.
+            Expanded(
+              flex: 2,
+              child: Padding(
+                // Centers roughly on the dot regardless of stage (current
+                // dots are slightly larger) rather than on the taller
+                // dot+label column as a whole.
+                padding: const EdgeInsets.only(top: 19),
+                child: _RailConnector(
+                  filled: i <= currentIndex && currentIndex >= 0,
+                  controller: controller,
+                  index: i,
+                  stageCount: stageCount,
+                ),
+              ),
+            ),
+          Expanded(
+            flex: 3,
+            child: Semantics(
+              label: _stageSemanticLabel(
+                ApplicationPipelineStage.values[i],
+                isCurrent: i == currentIndex,
+                isCompleted: currentIndex >= 0 && i < currentIndex,
+              ),
+              child: Column(
+                children: [
+                  _RailStageDot(
+                    stage: ApplicationPipelineStage.values[i],
+                    isCurrent: i == currentIndex,
+                    isCompleted: currentIndex >= 0 && i < currentIndex,
+                    controller: controller,
+                    index: i,
+                    stageCount: stageCount,
+                  ),
+                  const SizedBox(height: AppSpacing.xxs),
+                  _RailStageLabel(
+                    stage: ApplicationPipelineStage.values[i],
+                    isCurrent: i == currentIndex,
+                    controller: controller,
+                    index: i,
+                    stageCount: stageCount,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// A screen-reader-friendly description of one stage's real state — "no
+/// color-only status" applies to accessibility too, not just sighted
+/// users.
+String _stageSemanticLabel(
+  ApplicationPipelineStage stage, {
+  required bool isCurrent,
+  required bool isCompleted,
+}) {
+  final name = applicationPipelineStageLabels[stage]!;
+  final state = isCurrent
+      ? 'current stage'
+      : isCompleted
+      ? 'completed'
+      : 'upcoming';
+  return '$name, $state';
+}
+
+/// The visible stage-name label under each desktop/tablet rail dot —
+/// reveals in sync with its own dot (same shared-controller Interval).
+/// Never the *only* way a stage is communicated (see [_RailStageDot]'s own
+/// color/icon/completed-check treatment) — this is what makes each stage
+/// "immediately understandable" rather than relying on an icon alone.
+class _RailStageLabel extends StatelessWidget {
+  const _RailStageLabel({
+    required this.stage,
+    required this.isCurrent,
+    required this.controller,
+    required this.index,
+    required this.stageCount,
+  });
+
+  final ApplicationPipelineStage stage;
+  final bool isCurrent;
+  final AnimationController controller;
+  final int index;
+  final int stageCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final start = 0.45 + (index / stageCount) * 0.4;
+    final end = (start + 0.35).clamp(start, 1.0);
+    final reveal = CurvedAnimation(
+      parent: controller,
+      curve: Interval(start, end, curve: AppMotion.entrance),
+    );
+
+    return FadeTransition(
+      opacity: reveal,
+      child: Text(
+        applicationPipelineStageLabels[stage]!,
+        textAlign: TextAlign.center,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600,
+          color: isCurrent ? AppColors.textPrimary : AppColors.textSecondary,
+        ),
+      ),
+    );
+  }
+}
+
+/// The mobile-appropriate compact vertical stepper — a horizontal rail
+/// squeezed into ~375px reads as cramped, illegible dots, so narrow
+/// widths get a stacked stage list instead (icon + label per row, a
+/// vertical connecting line between them).
+class _VerticalStepper extends StatelessWidget {
+  const _VerticalStepper({
+    required this.currentIndex,
+    required this.controller,
+    required this.stageCount,
+  });
+
+  final int currentIndex;
+  final AnimationController controller;
+  final int stageCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < stageCount; i++)
+          Semantics(
+            label: _stageSemanticLabel(
+              ApplicationPipelineStage.values[i],
+              isCurrent: i == currentIndex,
+              isCompleted: currentIndex >= 0 && i < currentIndex,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Column(
+                  children: [
+                    _RailStageDot(
+                      stage: ApplicationPipelineStage.values[i],
+                      isCurrent: i == currentIndex,
+                      isCompleted: currentIndex >= 0 && i < currentIndex,
+                      controller: controller,
+                      index: i,
+                      stageCount: stageCount,
+                      compact: true,
+                    ),
+                    if (i < stageCount - 1)
+                      SizedBox(
+                        width: 2,
+                        height: 28,
+                        child: _RailConnector(
+                          filled: i < currentIndex && currentIndex >= 0,
+                          controller: controller,
+                          index: i,
+                          stageCount: stageCount,
+                          vertical: true,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    applicationPipelineStageLabels[ApplicationPipelineStage
+                        .values[i]]!,
+                    style: textTheme.bodyMedium?.copyWith(
+                      fontWeight: i == currentIndex
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      color: i == currentIndex
+                          ? AppColors.textPrimary
+                          : AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _RailStageDot extends StatelessWidget {
+  const _RailStageDot({
+    required this.stage,
+    required this.isCurrent,
+    required this.isCompleted,
+    required this.controller,
+    required this.index,
+    required this.stageCount,
+    this.compact = false,
+  });
+
+  final ApplicationPipelineStage stage;
+  final bool isCurrent;
+  final bool isCompleted;
+  final AnimationController controller;
+  final int index;
+  final int stageCount;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final (background, foreground, border) = isCurrent
+        ? (AppColors.primary, Colors.white, AppColors.primary)
+        : isCompleted
+        ? (AppColors.primaryContainer, AppColors.primaryDark, AppColors.primary)
+        : (AppColors.surface, AppColors.textMuted, AppColors.border);
+
+    // Staggers each dot's own reveal across the rail's shared entrance
+    // window, then — for the current stage only — lets its scale overshoot
+    // slightly past 1.0 before settling, a one-shot "settle" cue rather
+    // than a looping pulse.
+    final start = 0.45 + (index / stageCount) * 0.4;
+    final end = (start + 0.35).clamp(start, 1.0);
+    final reveal = CurvedAnimation(
+      parent: controller,
+      curve: Interval(start, end, curve: AppMotion.entrance),
+    );
+    final scale = isCurrent
+        ? TweenSequence<double>([
+            TweenSequenceItem(tween: Tween(begin: 0.5, end: 1.15), weight: 70),
+            TweenSequenceItem(tween: Tween(begin: 1.15, end: 1.0), weight: 30),
+          ]).animate(reveal)
+        : Tween<double>(begin: 0.5, end: 1.0).animate(reveal);
+
+    final size = compact
+        ? (isCurrent ? 36.0 : 30.0)
+        : (isCurrent ? 40.0 : 32.0);
+
+    return FadeTransition(
+      opacity: reveal,
+      child: ScaleTransition(
+        scale: scale,
+        child: Tooltip(
+          message: applicationPipelineStageLabels[stage]!,
+          child: AnimatedContainer(
+            duration: AppMotion.reduced(context, AppMotion.normal),
+            curve: AppMotion.standard,
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: background,
+              border: Border.all(color: border, width: isCurrent ? 2 : 1),
+              boxShadow: isCurrent ? AppShadows.card : const [],
+            ),
+            child: Icon(
+              isCompleted ? Icons.check : applicationPipelineStageIcons[stage],
+              size: isCurrent ? 20 : 16,
+              color: foreground,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RailConnector extends StatelessWidget {
+  const _RailConnector({
+    required this.filled,
+    required this.controller,
+    required this.index,
+    required this.stageCount,
+    this.vertical = false,
+  });
+
+  final bool filled;
+  final AnimationController controller;
+  final int index;
+  final int stageCount;
+  final bool vertical;
+
+  @override
+  Widget build(BuildContext context) {
+    final start = 0.45 + (index / stageCount) * 0.4;
+    final reveal = CurvedAnimation(
+      parent: controller,
+      curve: Interval(
+        start,
+        (start + 0.3).clamp(start, 1.0),
+        curve: AppMotion.standard,
+      ),
+    );
+
+    return FadeTransition(
+      opacity: reveal,
+      child: AnimatedContainer(
+        duration: AppMotion.reduced(context, AppMotion.normal),
+        width: vertical ? 2 : null,
+        height: vertical ? null : 3,
+        margin: vertical
+            ? const EdgeInsets.symmetric(vertical: 2)
+            : const EdgeInsets.symmetric(horizontal: 2),
+        decoration: BoxDecoration(
+          color: filled ? AppColors.primary : AppColors.border,
+          borderRadius: BorderRadius.circular(vertical ? 1 : 1.5),
+        ),
+      ),
+    );
+  }
+}
+
+/// The compact real-data summary — folded into the normal content flow on
+/// mobile/tablet, a sticky side card on desktop. Never overloaded: exactly
+/// the fields section 23 of this phase asks for, plus one real quick
+/// action ("View Opportunity" — the only navigation this panel offers that
+/// isn't already reachable elsewhere on this same page; a Quiz action
+/// deliberately isn't duplicated here since `_StudentQuizDetails`'s own
+/// "Open Quiz" button already covers it in the main content, and this
+/// phase's own "do not overload the panel" guidance argues against a
+/// second identical action).
+class _SummaryPanel extends StatelessWidget {
+  const _SummaryPanel({required this.application});
+
+  final ApplicationModel application;
+
+  @override
+  Widget build(BuildContext context) {
+    final opportunity = application.opportunity;
+    final organizationName = opportunity?.organizationProfile?.organizationName;
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SectionHeader(title: 'Summary'),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Text(
-                  application.opportunity?.title ?? 'Opportunity',
-                  style: textTheme.headlineSmall,
+                  'Status',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
                 ),
               ),
-              const SizedBox(width: AppSpacing.xs),
               StatusChip(
+                compact: true,
                 label:
                     applicationStatusLabels[application.status] ??
                     application.status,
@@ -134,57 +1213,117 @@ class _StudentApplicationDetailsScreenState
               ),
             ],
           ),
-          if (organization != null) ...[
-            const SizedBox(height: AppSpacing.xxs),
-            Text(
-              organization.organizationName,
-              style: textTheme.titleSmall?.copyWith(
-                color: AppColors.textSecondary,
+          OpportunityDetailRow(
+            label: 'Applied',
+            value: application.appliedAt != null
+                ? formatDate(application.appliedAt!)
+                : 'Not specified',
+          ),
+          if (opportunity != null)
+            OpportunityDetailRow(
+              label: 'Opportunity',
+              value: opportunity.title,
+            ),
+          if (organizationName != null)
+            OpportunityDetailRow(
+              label: 'Organization',
+              value: organizationName,
+            ),
+          OpportunityDetailRow(label: 'CV', value: application.cv.title),
+          const SizedBox(height: AppSpacing.sm),
+          if (opportunity != null)
+            SecondaryButton(
+              label: 'View Opportunity',
+              icon: Icons.open_in_new_rounded,
+              onPressed: () => context.push(
+                AppRoutes.studentOpportunityDetails(application.opportunityId),
               ),
             ),
-          ],
-          if (provider.detailsErrorMessage != null) ...[
-            const SizedBox(height: AppSpacing.sm),
-            AppErrorView(
-              compact: true,
-              message: provider.detailsErrorMessage!,
-              onRetry: () => provider.loadApplicationDetails(
-                widget.applicationId,
-                forceRefresh: true,
-              ),
-            ),
-          ],
-          const SizedBox(height: AppSpacing.lg),
-          AppCard(
+        ],
+      ),
+    );
+  }
+}
+
+/// A truthful "What's Next?" panel — copy derived purely from
+/// `application.status`, never promising a recruiter action or response
+/// time this app cannot back up.
+class _WhatsNextPanel extends StatelessWidget {
+  const _WhatsNextPanel({required this.application});
+
+  final ApplicationModel application;
+
+  String get _message => switch (application.status) {
+    'pending' =>
+      'Your application has been submitted and is waiting to be reviewed.',
+    'reviewed' => 'Your application is currently under review.',
+    'shortlisted' =>
+      'You have been shortlisted. Watch for an assessment or interview.',
+    'in_assessment' => 'Complete your assessment to continue.',
+    'interview_scheduled' =>
+      'An interview has been scheduled for this application.',
+    'offer_sent' => 'You have received an offer. Review it below.',
+    'accepted' => 'You accepted this offer. Congratulations!',
+    'rejected' => 'This application is no longer active.',
+    'withdrawn' => 'You withdrew this application.',
+    _ => 'Check back for updates on this application.',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.primaryContainer.withValues(alpha: 0.5),
+        borderRadius: AppRadius.largeRadius,
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.arrow_forward_rounded,
+            color: AppColors.primaryDark,
+            size: 20,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const SectionHeader(title: 'Details'),
-                OpportunityDetailRow(label: 'CV', value: application.cv.title),
-                OpportunityDetailRow(
-                  label: 'Applied',
-                  value: application.appliedAt != null
-                      ? formatDate(application.appliedAt!)
-                      : 'Not specified',
+                Text(
+                  "What's Next?",
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
+                const SizedBox(height: 2),
+                Text(_message, style: Theme.of(context).textTheme.bodySmall),
               ],
             ),
           ),
-          if (coverLetter != null && coverLetter.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.md),
-            AppCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SectionHeader(title: 'Cover Letter'),
-                  Text(coverLetter, style: textTheme.bodyMedium),
-                ],
-              ),
-            ),
-          ],
-          _StudentAssessmentSection(application: application),
-          _StudentOfferSection(application: application),
-          const SizedBox(height: AppSpacing.xl),
+        ],
+      ),
+    );
+  }
+}
+
+class _DetailsSkeleton extends StatelessWidget {
+  const _DetailsSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const AppSkeleton(height: 120, borderRadius: AppRadius.largeRadius),
+          const SizedBox(height: AppSpacing.lg),
+          const AppSkeleton(height: 100, borderRadius: AppRadius.largeRadius),
+          const SizedBox(height: AppSpacing.md),
+          const AppCardSkeleton(),
         ],
       ),
     );
@@ -220,7 +1359,7 @@ class _StudentAssessmentSection extends StatelessWidget {
 
     if (provider.hasAssessmentFor(application.id)) {
       return Padding(
-        padding: const EdgeInsets.only(top: AppSpacing.md),
+        padding: const EdgeInsets.only(bottom: AppSpacing.md),
         child: _StudentAssessmentDetailsCard(
           assessment: provider.assessment!,
           applicationId: application.id,
@@ -236,7 +1375,7 @@ class _StudentAssessmentSection extends StatelessWidget {
         provider.isLoading && provider.loadedApplicationId == application.id;
     if (isLoadingThis) {
       return const Padding(
-        padding: EdgeInsets.only(top: AppSpacing.md),
+        padding: EdgeInsets.only(bottom: AppSpacing.md),
         child: AppLoading(compact: true),
       );
     }
@@ -246,7 +1385,7 @@ class _StudentAssessmentSection extends StatelessWidget {
         : null;
 
     return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.md),
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
       child: AppErrorView(
         compact: true,
         title: 'Assessment Not Found',
@@ -263,8 +1402,11 @@ class _StudentAssessmentSection extends StatelessWidget {
 }
 
 /// The read-only fields of an existing [AssessmentModel] the student is
-/// allowed to see. Branches on [AssessmentModel.type] so a future Quiz type
-/// only needs a new branch here, not a redesign of this section.
+/// allowed to see — a premium appointment-style summary (UI Phase 4.3),
+/// not a plain label/value table. Branches on [AssessmentModel.type] so a
+/// future type only needs a new branch here, not a redesign of this
+/// section; an unrecognized type falls back to the original generic
+/// Type/Status rows rather than guessing at a presentation for it.
 class _StudentAssessmentDetailsCard extends StatelessWidget {
   const _StudentAssessmentDetailsCard({
     required this.assessment,
@@ -277,38 +1419,239 @@ class _StudentAssessmentDetailsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final result = assessment.result;
+    final interview = assessment.interview;
+
+    final (headerIcon, headerTitle) = switch (assessment.type) {
+      'interview' => (
+        _interviewTypeIcon(interview?.interviewType),
+        interview != null
+            ? '${interviewTypeLabels[interview.interviewType] ?? interview.interviewType} Interview'
+            : 'Interview',
+      ),
+      'quiz' => (Icons.quiz_outlined, 'Quiz'),
+      _ => (null, null),
+    };
 
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SectionHeader(title: 'Assessment'),
-          OpportunityDetailRow(
-            label: 'Type',
-            value: assessmentTypeLabels[assessment.type] ?? assessment.type,
-          ),
-          OpportunityDetailRow(
-            label: 'Status',
-            value:
-                assessmentStatusLabels[assessment.status] ?? assessment.status,
-          ),
-          if (result != null)
+          const SizedBox(height: AppSpacing.xs),
+          if (headerIcon != null && headerTitle != null)
+            _AssessmentTypeHeader(
+              icon: headerIcon,
+              title: headerTitle,
+              statusLabel:
+                  assessmentStatusLabels[assessment.status] ??
+                  assessment.status,
+              statusType: assessmentStatusChipType(assessment.status),
+            )
+          else ...[
+            // Any other/unknown type: the original generic Type/Status
+            // rows — nothing to guess at a richer presentation for, and
+            // nothing to crash on.
+            OpportunityDetailRow(
+              label: 'Type',
+              value: assessmentTypeLabels[assessment.type] ?? assessment.type,
+            ),
+            OpportunityDetailRow(
+              label: 'Status',
+              value:
+                  assessmentStatusLabels[assessment.status] ??
+                  assessment.status,
+            ),
+          ],
+          if (result != null) ...[
+            const SizedBox(height: AppSpacing.xs),
             OpportunityDetailRow(
               label: 'Result',
               value: assessmentResultLabels[result] ?? result,
             ),
-          if (assessment.type == 'interview')
-            _StudentInterviewDetails(interview: assessment.interview)
-          else if (assessment.type == 'quiz')
+          ],
+          if (assessment.type == 'interview') ...[
+            const SizedBox(height: AppSpacing.md),
+            _StudentInterviewDetails(interview: interview),
+          ] else if (assessment.type == 'quiz') ...[
+            const SizedBox(height: AppSpacing.md),
             _StudentQuizDetails(
               assessment: assessment,
               applicationId: applicationId,
             ),
-          // Any other/unknown type: the Type/Status/Result rows above are
-          // the entire generic summary — nothing more to render, and
-          // nothing to crash on.
+          ],
         ],
       ),
+    );
+  }
+}
+
+/// A real, distinct icon per interview type (UI Phase 4.3) — purely
+/// presentational, never a different business rule per type.
+IconData _interviewTypeIcon(String? interviewType) => switch (interviewType) {
+  'online' => Icons.videocam_outlined,
+  'phone' => Icons.phone_outlined,
+  'onsite' => Icons.location_on_outlined,
+  _ => Icons.groups_outlined,
+};
+
+/// The card's premium identity header — icon + a combined type title
+/// ("Online Interview", "Phone Interview", "Quiz", ...) + the real
+/// Assessment status as a chip, so status is never communicated by color
+/// alone.
+class _AssessmentTypeHeader extends StatelessWidget {
+  const _AssessmentTypeHeader({
+    required this.icon,
+    required this.title,
+    required this.statusLabel,
+    required this.statusType,
+  });
+
+  final IconData icon;
+  final String title;
+  final String statusLabel;
+  final AppStatusType statusType;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 48,
+          height: 48,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppColors.primaryContainer,
+          ),
+          child: Icon(icon, size: 24, color: AppColors.primaryDark),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 2),
+              AnimatedSwitcher(
+                duration: AppMotion.reduced(context, AppMotion.normal),
+                transitionBuilder: (child, animation) =>
+                    FadeTransition(opacity: animation, child: child),
+                child: StatusChip(
+                  key: ValueKey(statusLabel),
+                  compact: true,
+                  label: statusLabel,
+                  type: statusType,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A compact icon + label + value tile — the shared building block for
+/// both the Interview (Date/Time/Duration/attendance-detail) and Quiz
+/// (Quiz Title/Passing Score/Time Limit/Questions) summaries, replacing
+/// the old plain label/value row throughout this section.
+class _AssessmentInfoTile extends StatelessWidget {
+  const _AssessmentInfoTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: AppRadius.mediumRadius,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: AppColors.primary),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: textTheme.labelSmall?.copyWith(
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  value,
+                  style: textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Arranges [_AssessmentInfoTile]s in a responsive grid (up to 3 columns
+/// on wide layouts, fewer on narrow ones) — reflows without overflow at
+/// any of this app's breakpoints, matching the pattern already
+/// established by `StudentProfileScreen`'s own academic-info tiles.
+class _AssessmentTileGrid extends StatelessWidget {
+  const _AssessmentTileGrid({required this.tiles});
+
+  final List<Widget> tiles;
+
+  @override
+  Widget build(BuildContext context) {
+    if (tiles.isEmpty) return const SizedBox.shrink();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 420
+            ? 3
+            : constraints.maxWidth >= 260
+            ? 2
+            : 1;
+        const spacing = AppSpacing.sm;
+        final tileWidth =
+            (constraints.maxWidth - spacing * (columns - 1)) / columns;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            for (final tile in tiles) SizedBox(width: tileWidth, child: tile),
+          ],
+        );
+      },
     );
   }
 }
@@ -334,60 +1677,134 @@ class _StudentInterviewDetails extends StatelessWidget {
     final meetingLink = cleanDisplayText(interview.meetingLink);
     final interviewerName = cleanDisplayText(interview.interviewerName);
     final notes = cleanDisplayText(interview.notes);
-    final isOnlineWithLink =
-        interview.interviewType == 'online' && meetingLink != null;
+    final isOnline = interview.interviewType == 'online';
+    final validMeetingUri = isOnline && meetingLink != null
+        ? _validHttpUri(meetingLink)
+        : null;
+
+    // Date/Time/Duration are genuinely optional — omitted entirely (not
+    // "Not specified") when absent, per this phase's own tile guidance.
+    final infoTiles = <Widget>[
+      if (interview.scheduledAt != null) ...[
+        _AssessmentInfoTile(
+          icon: Icons.calendar_today_outlined,
+          label: 'Date',
+          value: formatDate(interview.scheduledAt!),
+        ),
+        _AssessmentInfoTile(
+          icon: Icons.access_time_rounded,
+          label: 'Time',
+          value: formatTime(interview.scheduledAt!),
+        ),
+      ],
+      if (interview.durationMinutes != null)
+        _AssessmentInfoTile(
+          icon: Icons.timer_outlined,
+          label: 'Duration',
+          value: '${interview.durationMinutes} minutes',
+        ),
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: AppSpacing.xs),
-        OpportunityDetailRow(
-          label: 'Interview Type',
-          value:
-              interviewTypeLabels[interview.interviewType] ??
-              interview.interviewType,
-        ),
-        OpportunityDetailRow(
-          label: 'Scheduled Date',
-          value: interview.scheduledAt != null
-              ? formatDate(interview.scheduledAt!)
-              : 'Not specified',
-        ),
-        OpportunityDetailRow(
-          label: 'Scheduled Time',
-          value: interview.scheduledAt != null
-              ? formatTime(interview.scheduledAt!)
-              : 'Not specified',
-        ),
-        if (interview.durationMinutes != null)
-          OpportunityDetailRow(
-            label: 'Duration',
-            value: '${interview.durationMinutes} minutes',
-          ),
-        // Phase Final-QA-1: exactly one attendance-detail row, matching
-        // whichever field this interview's type actually needs — a
-        // real, tappable-looking meeting link keeps its own selectable
-        // row; phone/onsite (and a legacy interview missing its detail)
-        // fall back to a plain labeled row, "Not specified" if empty.
-        if (isOnlineWithLink) ...[
-          const SizedBox(height: AppSpacing.xxs),
-          _MeetingLinkRow(link: meetingLink),
-        ] else
-          OpportunityDetailRow(
+        if (infoTiles.isNotEmpty) ...[
+          _AssessmentTileGrid(tiles: infoTiles),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        // Exactly one attendance-detail element, matching whichever field
+        // this interview's real type needs (Phase Final-QA-1's own rule,
+        // preserved) — a real, launchable meeting link gets a prominent
+        // CTA; a missing/empty/invalid link never surfaces its raw value
+        // (which may be malformed legacy data), only a graceful
+        // placeholder — never fabricate a URL that isn't there.
+        if (isOnline)
+          validMeetingUri != null
+              ? _MeetingLinkCta(uri: validMeetingUri, rawLink: meetingLink!)
+              : const _MeetingLinkPlaceholder()
+        else
+          _AssessmentInfoTile(
+            icon: interview.interviewType == 'phone'
+                ? Icons.phone_outlined
+                : Icons.location_on_outlined,
             label: interviewContactDetailLabel(interview.interviewType),
             value: interviewContactDetailValue(interview) ?? 'Not specified',
           ),
-        if (interviewerName != null)
-          OpportunityDetailRow(
-            label: 'Interviewer Name',
-            value: interviewerName,
+        if (interviewerName != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Icon(
+                Icons.person_outline_rounded,
+                size: 18,
+                color: AppColors.textSecondary,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                'Interviewer',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Flexible(
+                child: Text(
+                  interviewerName,
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
-        OpportunityDetailRow(
-          label: 'Interview Status',
-          value: interviewStatusLabels[interview.status] ?? interview.status,
+        ],
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          children: [
+            Expanded(
+              // Deliberately not "Interview Status" — the assessment-level
+              // status chip already shown next to the header title above
+              // can read the same ("Scheduled") for most of this
+              // interview's life. This row reflects the interview's own
+              // distinct backend field (InterviewModel.status, e.g.
+              // completed/cancelled/rescheduled/no_show), which can diverge
+              // from the assessment status — the label makes that a
+              // separate fact instead of a visual duplicate.
+              child: Text(
+                'Attendance Status',
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            StatusChip(
+              compact: true,
+              label:
+                  interviewStatusLabels[interview.status] ?? interview.status,
+              type: switch (interview.status) {
+                'completed' => AppStatusType.success,
+                'cancelled' || 'no_show' => AppStatusType.neutral,
+                _ => AppStatusType.info,
+              },
+            ),
+          ],
         ),
         if (notes != null) ...[
-          const SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Notes',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
           Text(notes, style: Theme.of(context).textTheme.bodyMedium),
         ],
       ],
@@ -395,43 +1812,179 @@ class _StudentInterviewDetails extends StatelessWidget {
   }
 }
 
-/// A label/value row for the interview meeting link specifically — the
-/// value is [SelectableText] (copyable) rather than [OpportunityDetailRow]'s
-/// plain [Text], since a link is only useful if the student can copy it.
-/// Deliberately does not launch a browser or depend on `url_launcher` — see
-/// this phase's own scope notes on meeting-link handling.
-class _MeetingLinkRow extends StatelessWidget {
-  const _MeetingLinkRow({required this.link});
+/// Parses [link] into a launchable `http`/`https` [Uri], or `null` if it's
+/// malformed/legacy data that can't safely be opened — the caller falls
+/// back to a plain, non-clickable tile instead of crashing or offering a
+/// dead CTA. `Uri.tryParse` alone is too permissive (it happily parses
+/// almost any string), so scheme and host are checked explicitly.
+Uri? _validHttpUri(String link) {
+  final uri = Uri.tryParse(link);
+  if (uri == null) return null;
+  if (uri.scheme != 'http' && uri.scheme != 'https') return null;
+  if (uri.host.isEmpty) return null;
+  return uri;
+}
 
-  final String link;
+/// Shown instead of [_MeetingLinkCta] whenever an Online interview has no
+/// safely-launchable meeting link — missing, empty, or malformed. Never
+/// renders the raw field value (it may be garbage legacy data) and never
+/// invents a URL; just a calm, honest placeholder message.
+class _MeetingLinkPlaceholder extends StatelessWidget {
+  const _MeetingLinkPlaceholder();
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: AppRadius.mediumRadius,
+        border: Border.all(color: AppColors.border),
+      ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Icon(Icons.videocam_outlined, size: 18, color: AppColors.textMuted),
+          const SizedBox(width: AppSpacing.xs),
           Expanded(
             child: Text(
-              'Meeting Link',
-              style: textTheme.bodyMedium?.copyWith(
+              'Meeting link will appear here once provided.',
+              style: textTheme.bodySmall?.copyWith(
                 color: AppColors.textSecondary,
+                fontStyle: FontStyle.italic,
               ),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: SelectableText(
-              link,
-              textAlign: TextAlign.end,
-              style: textTheme.bodyMedium,
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A real, working "Open Meeting Link" action for Online interviews —
+/// launches [uri] via `url_launcher` (UI Phase 4.3; no other URL-launch
+/// capability existed anywhere in this app before this phase). The raw
+/// link stays visible underneath as small, selectable/copyable text — the
+/// CTA is the primary interaction, never a naked URL, but the real value
+/// is never hidden either.
+class _MeetingLinkCta extends StatefulWidget {
+  const _MeetingLinkCta({required this.uri, required this.rawLink});
+
+  final Uri uri;
+  final String rawLink;
+
+  @override
+  State<_MeetingLinkCta> createState() => _MeetingLinkCtaState();
+}
+
+class _MeetingLinkCtaState extends State<_MeetingLinkCta> {
+  bool _hovered = false;
+  bool _launching = false;
+
+  Future<void> _open() async {
+    setState(() => _launching = true);
+    var launched = false;
+    try {
+      launched = await launchUrl(
+        widget.uri,
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      launched = false;
+    }
+    if (!mounted) return;
+    setState(() => _launching = false);
+    if (!launched) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open the meeting link.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Meeting Link',
+          style: textTheme.labelSmall?.copyWith(
+            color: AppColors.textMuted,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xxs),
+        MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: Semantics(
+            button: true,
+            label: 'Open Meeting Link',
+            child: InkWell(
+              onTap: _launching ? null : _open,
+              borderRadius: AppRadius.mediumRadius,
+              child: AnimatedContainer(
+                duration: AppMotion.reduced(context, AppMotion.fast),
+                curve: AppMotion.standard,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppColors.primary, AppColors.primaryDark],
+                  ),
+                  borderRadius: AppRadius.mediumRadius,
+                  boxShadow: _hovered ? AppShadows.card : const [],
+                ),
+                transform: Matrix4.translationValues(0, _hovered ? -1 : 0, 0),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.videocam_outlined,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    const Expanded(
+                      child: Text(
+                        'Open Meeting Link',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (_launching)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    else
+                      const Icon(
+                        Icons.north_east_rounded,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xxs),
+        SelectableText(
+          widget.rawLink,
+          style: textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+        ),
+      ],
     );
   }
 }
@@ -496,21 +2049,31 @@ class _StudentQuizDetails extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: AppSpacing.xs),
-        OpportunityDetailRow(label: 'Quiz Title', value: quiz.title),
-        OpportunityDetailRow(
-          label: 'Passing Score',
-          value: '${quiz.passingScore}%',
-        ),
-        OpportunityDetailRow(
-          label: 'Time Limit',
-          value: quiz.timeLimitMinutes != null
-              ? '${quiz.timeLimitMinutes} minutes'
-              : 'No time limit',
-        ),
-        OpportunityDetailRow(
-          label: 'Questions',
-          value: '${quiz.questions.length}',
+        _AssessmentTileGrid(
+          tiles: [
+            _AssessmentInfoTile(
+              icon: Icons.quiz_outlined,
+              label: 'Quiz Title',
+              value: quiz.title,
+            ),
+            _AssessmentInfoTile(
+              icon: Icons.flag_outlined,
+              label: 'Passing Score',
+              value: '${quiz.passingScore}%',
+            ),
+            _AssessmentInfoTile(
+              icon: Icons.timer_outlined,
+              label: 'Time Limit',
+              value: quiz.timeLimitMinutes != null
+                  ? '${quiz.timeLimitMinutes} minutes'
+                  : 'No time limit',
+            ),
+            _AssessmentInfoTile(
+              icon: Icons.checklist_outlined,
+              label: 'Questions',
+              value: '${quiz.questions.length}',
+            ),
+          ],
         ),
         const SizedBox(height: AppSpacing.sm),
         PrimaryButton(label: 'Open Quiz', onPressed: () => _openQuiz(context)),

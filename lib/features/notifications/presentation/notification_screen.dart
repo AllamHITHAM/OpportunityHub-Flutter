@@ -94,13 +94,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
       appBar: AppBar(
         title: const Text('Notifications'),
         actions: [
+          const ThemeToggleButton(),
           if (provider.hasUnread)
             TextButton(
               onPressed: provider.isMarkingAll
                   ? null
                   : () => _markAllAsRead(provider),
               child: provider.isMarkingAll
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
@@ -191,7 +192,7 @@ class _NotificationCard extends StatelessWidget {
               child: Container(
                 width: 8,
                 height: 8,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: AppColors.primary,
                   shape: BoxShape.circle,
                 ),

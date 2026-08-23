@@ -34,6 +34,7 @@ import 'package:opportunityhub_flutter/providers/student_applications_provider.d
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_opportunities_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
@@ -237,6 +238,7 @@ Future<void> _pumpAsRole(
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
         ),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -308,6 +310,7 @@ void main() {
           ChangeNotifierProvider<StudentApplicationsProvider>.value(
             value: applicationsProvider,
           ),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,

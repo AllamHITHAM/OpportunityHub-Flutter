@@ -53,4 +53,35 @@ class StudentProfileRepository {
       throw apiClient.handleError(error);
     }
   }
+
+  /// Updates the student's existing profile with `PUT /api/student/profile`
+  /// — same allow-listed fields and same canonical response shape as
+  /// [createProfile]. Every field is sent on every call (the Edit Profile
+  /// form always submits its full current state), so an optional field left
+  /// blank is sent as `null` and genuinely clears it, matching what the
+  /// user sees on screen.
+  Future<StudentProfileModel> updateProfile({
+    required String university,
+    required String major,
+    required int graduationYear,
+    String? phone,
+    String? bio,
+  }) async {
+    try {
+      final response = await apiClient.dio.put(
+        '/student/profile',
+        data: {
+          'university': university,
+          'major': major,
+          'graduation_year': graduationYear,
+          'phone': phone,
+          'bio': bio,
+        },
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return StudentProfileModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
 }

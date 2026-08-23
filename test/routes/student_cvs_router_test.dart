@@ -27,6 +27,7 @@ import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
@@ -184,6 +185,7 @@ Future<void> _pumpAsRole(
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
         ),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -241,6 +243,7 @@ void main() {
             value: organizationProfileProvider,
           ),
           ChangeNotifierProvider<StudentCvProvider>.value(value: cvProvider),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,
@@ -303,7 +306,10 @@ void main() {
         studentProfile: _completeProfile,
       );
 
-      expect(find.text('My CVs'), findsOneWidget);
+      // "My CVs" now legitimately appears twice — the AppBar title and the
+      // premium screen's own page header (UI Phase 6) — not a duplicate-
+      // rendering bug.
+      expect(find.text('My CVs'), findsWidgets);
       expect(tester.takeException(), isNull);
     },
   );
@@ -319,7 +325,8 @@ void main() {
     );
 
     // Settling completed without a pumpAndSettle timeout (which throws if
-    // frames never stop scheduling, e.g. from a redirect loop).
-    expect(find.text('My CVs'), findsOneWidget);
+    // frames never stop scheduling, e.g. from a redirect loop). "My CVs"
+    // appears twice — see this file's own note above.
+    expect(find.text('My CVs'), findsWidgets);
   });
 }

@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
+import 'package:opportunityhub_flutter/core/utils/cv_file_open_result.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/picked_cv_file.dart';
@@ -185,20 +186,49 @@ PickedCvFile _file({String filename = 'resume.pdf'}) {
   );
 }
 
+/// A fake platform CV-file action (View or Download) — real success means
+/// the real `cv_file_opener` implementation was actually invoked with the
+/// fetched bytes, never assumed just because the repository call
+/// succeeded. Configurable to simulate the platform reporting a real
+/// failure (e.g. a popup blocked, or "not supported on this platform").
+class _FakeCvFileAction {
+  _FakeCvFileAction();
+
+  CvFileOpenResult result = const CvFileOpenResult(success: true);
+  Duration delay = Duration.zero;
+  int callCount = 0;
+  Uint8List? lastBytes;
+  String? lastFileName;
+
+  Future<CvFileOpenResult> call(Uint8List bytes, String fileName) async {
+    callCount++;
+    lastBytes = bytes;
+    lastFileName = fileName;
+    if (delay > Duration.zero) await Future<void>.delayed(delay);
+    return result;
+  }
+}
+
 void main() {
   late AuthProvider authProvider;
   late _FakeCvRepository repository;
   late _FakeStudentSkillRepository studentSkillRepository;
+  late _FakeCvFileAction fakeViewCvFile;
+  late _FakeCvFileAction fakeDownloadCvFile;
   late StudentCvProvider provider;
 
   setUp(() {
     authProvider = AuthProvider(authRepository: _FakeAuthRepository());
     repository = _FakeCvRepository();
     studentSkillRepository = _FakeStudentSkillRepository();
+    fakeViewCvFile = _FakeCvFileAction();
+    fakeDownloadCvFile = _FakeCvFileAction();
     provider = StudentCvProvider(
       repository: repository,
       studentSkillRepository: studentSkillRepository,
       authProvider: authProvider,
+      viewCvFile: fakeViewCvFile.call,
+      downloadCvFile: fakeDownloadCvFile.call,
     );
   });
 
@@ -521,78 +551,173 @@ void main() {
     expect(repository.lastCreateFile, same(file));
   });
 
-  test('downloadCv success returns the raw bytes', () async {
-    final bytes = Uint8List.fromList([1, 2, 3, 4]);
-    repository.downloadResult = bytes;
+  group('viewCv (UI Phase 6.3)', () {
+    test('success fetches real bytes and invokes the real platform opener', () async {
+      final bytes = Uint8List.fromList([1, 2, 3, 4]);
+      repository.downloadResult = bytes;
 
-    final result = await provider.downloadCv(1);
+      final success = await provider.viewCv(1, 'My CV');
 
-    expect(result, bytes);
-    expect(provider.isDownloading(1), isFalse);
-    expect(provider.downloadErrorMessage, isNull);
-  });
+      expect(success, isTrue);
+      expect(fakeViewCvFile.callCount, 1);
+      expect(fakeViewCvFile.lastBytes, bytes);
+      expect(fakeViewCvFile.lastFileName, 'My CV.pdf');
+      expect(fakeDownloadCvFile.callCount, 0);
+      expect(provider.isViewingCv(1), isFalse);
+      expect(provider.viewErrorMessage, isNull);
+    });
 
-  test(
-    'downloadCv failure exposes the backend message and returns null',
-    () async {
-      repository.downloadError = ApiException(
-        'CV file not found',
-        statusCode: 404,
+    test('never claims success merely because bytes were fetched', () async {
+      // The repository call succeeds, but the real platform opener
+      // reports it could not actually open the file (e.g. a blocked
+      // popup) — this must never be reported as success.
+      fakeViewCvFile.result = const CvFileOpenResult(
+        success: false,
+        errorMessage: "Couldn't open the CV — your browser may have blocked the new tab.",
       );
 
-      final result = await provider.downloadCv(1);
+      final success = await provider.viewCv(1, 'My CV');
 
-      expect(result, isNull);
-      expect(provider.downloadErrorMessage, 'CV file not found');
-    },
-  );
+      expect(success, isFalse);
+      expect(
+        provider.viewErrorMessage,
+        "Couldn't open the CV — your browser may have blocked the new tab.",
+      );
+    });
 
-  test('downloadCv unexpected failure exposes a safe message', () async {
-    repository.downloadRuntimeError = TypeError();
+    test('a backend fetch failure exposes the backend message', () async {
+      repository.downloadError = ApiException('CV file not found', statusCode: 404);
 
-    final result = await provider.downloadCv(1);
+      final success = await provider.viewCv(1, 'My CV');
 
-    expect(result, isNull);
-    expect(provider.downloadErrorMessage, isNotNull);
-    expect(provider.downloadErrorMessage, isNot(contains('TypeError')));
-  });
+      expect(success, isFalse);
+      expect(provider.viewErrorMessage, 'CV file not found');
+      expect(fakeViewCvFile.callCount, 0);
+    });
 
-  test('isDownloading is true only during an in-flight download', () async {
-    repository.downloadDelay = const Duration(milliseconds: 50);
+    test('an unexpected failure exposes a safe message', () async {
+      repository.downloadRuntimeError = TypeError();
 
-    expect(provider.isDownloading(1), isFalse);
-    final future = provider.downloadCv(1);
-    expect(provider.isDownloading(1), isTrue);
+      final success = await provider.viewCv(1, 'My CV');
 
-    await future;
-    expect(provider.isDownloading(1), isFalse);
-  });
+      expect(success, isFalse);
+      expect(provider.viewErrorMessage, isNotNull);
+      expect(provider.viewErrorMessage, isNot(contains('TypeError')));
+    });
 
-  test(
-    'a duplicate downloadCv for the same CV while in flight is blocked',
-    () async {
+    test('isViewingCv is true only during an in-flight view', () async {
       repository.downloadDelay = const Duration(milliseconds: 50);
 
-      final first = provider.downloadCv(1);
-      final second = provider.downloadCv(1);
+      expect(provider.isViewingCv(1), isFalse);
+      final future = provider.viewCv(1, 'My CV');
+      expect(provider.isViewingCv(1), isTrue);
+
+      await future;
+      expect(provider.isViewingCv(1), isFalse);
+    });
+
+    test('a duplicate view for the same CV while in flight is blocked', () async {
+      repository.downloadDelay = const Duration(milliseconds: 50);
+
+      final first = provider.viewCv(1, 'My CV');
+      final second = provider.viewCv(1, 'My CV');
 
       final results = await Future.wait([first, second]);
 
       expect(repository.downloadCallCount, 1);
-      expect(results.where((r) => r != null).length, 1);
-      expect(results.where((r) => r == null).length, 1);
-    },
-  );
+      expect(results.where((r) => r).length, 1);
+      expect(results.where((r) => !r).length, 1);
+    });
 
-  test('reset also clears download state', () async {
-    repository.downloadError = ApiException('CV file not found');
-    await provider.downloadCv(1);
-    expect(provider.downloadErrorMessage, isNotNull);
+    test('reset also clears view state', () async {
+      repository.downloadError = ApiException('CV file not found');
+      await provider.viewCv(1, 'My CV');
+      expect(provider.viewErrorMessage, isNotNull);
 
-    await authProvider.logout();
+      await authProvider.logout();
 
-    expect(provider.downloadErrorMessage, isNull);
-    expect(provider.isDownloading(1), isFalse);
+      expect(provider.viewErrorMessage, isNull);
+      expect(provider.isViewingCv(1), isFalse);
+    });
+  });
+
+  group('downloadCvFile (UI Phase 6.3)', () {
+    test(
+      'success fetches real bytes and invokes the real platform opener, distinct from viewCv',
+      () async {
+        final bytes = Uint8List.fromList([1, 2, 3, 4]);
+        repository.downloadResult = bytes;
+
+        final success = await provider.downloadCvFile(1, 'My CV');
+
+        expect(success, isTrue);
+        expect(fakeDownloadCvFile.callCount, 1);
+        expect(fakeDownloadCvFile.lastBytes, bytes);
+        expect(fakeDownloadCvFile.lastFileName, 'My CV.pdf');
+        expect(fakeViewCvFile.callCount, 0);
+        expect(provider.isDownloading(1), isFalse);
+        expect(provider.downloadErrorMessage, isNull);
+      },
+    );
+
+    test('never claims success merely because bytes were fetched', () async {
+      fakeDownloadCvFile.result = const CvFileOpenResult(
+        success: false,
+        errorMessage: "Couldn't download the CV.",
+      );
+
+      final success = await provider.downloadCvFile(1, 'My CV');
+
+      expect(success, isFalse);
+      expect(provider.downloadErrorMessage, "Couldn't download the CV.");
+    });
+
+    test('a backend fetch failure exposes the backend message', () async {
+      repository.downloadError = ApiException('CV file not found', statusCode: 404);
+
+      final success = await provider.downloadCvFile(1, 'My CV');
+
+      expect(success, isFalse);
+      expect(provider.downloadErrorMessage, 'CV file not found');
+    });
+
+    test('isDownloading is true only during an in-flight download', () async {
+      repository.downloadDelay = const Duration(milliseconds: 50);
+
+      expect(provider.isDownloading(1), isFalse);
+      final future = provider.downloadCvFile(1, 'My CV');
+      expect(provider.isDownloading(1), isTrue);
+
+      await future;
+      expect(provider.isDownloading(1), isFalse);
+    });
+
+    test(
+      'a duplicate download for the same CV while in flight is blocked',
+      () async {
+        repository.downloadDelay = const Duration(milliseconds: 50);
+
+        final first = provider.downloadCvFile(1, 'My CV');
+        final second = provider.downloadCvFile(1, 'My CV');
+
+        final results = await Future.wait([first, second]);
+
+        expect(repository.downloadCallCount, 1);
+        expect(results.where((r) => r).length, 1);
+        expect(results.where((r) => !r).length, 1);
+      },
+    );
+
+    test('reset also clears download state', () async {
+      repository.downloadError = ApiException('CV file not found');
+      await provider.downloadCvFile(1, 'My CV');
+      expect(provider.downloadErrorMessage, isNotNull);
+
+      await authProvider.logout();
+
+      expect(provider.downloadErrorMessage, isNull);
+      expect(provider.isDownloading(1), isFalse);
+    });
   });
 
   // -----------------------------------------------------------------

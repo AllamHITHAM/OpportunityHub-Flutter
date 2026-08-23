@@ -1,12 +1,17 @@
 import 'package:flutter/foundation.dart';
 
 import '../core/api/api_client.dart';
+import '../core/utils/cv_file_open_result.dart';
+import '../core/utils/cv_file_opener.dart' as file_opener;
 import '../features/cv/data/cv_repository.dart';
 import '../features/cv/data/picked_cv_file.dart';
 import '../features/skills/data/student_skill_repository.dart';
 import '../models/cv_model.dart';
 import '../models/cv_skill_suggestion_model.dart';
 import 'auth_provider.dart';
+
+typedef CvFileAction =
+    Future<CvFileOpenResult> Function(Uint8List bytes, String fileName);
 
 /// Holds the authenticated student's CV list and exposes create/delete/
 /// set-default actions to the UI.
@@ -19,11 +24,21 @@ class StudentCvProvider extends ChangeNotifier {
     required this.repository,
     required this.studentSkillRepository,
     required this._authProvider,
-  }) {
+    CvFileAction? viewCvFile,
+    CvFileAction? downloadCvFile,
+  }) : _viewCvFile = viewCvFile ?? file_opener.viewCvFile,
+       _downloadCvFile = downloadCvFile ?? file_opener.downloadCvFile {
     _authProvider.addListener(_handleAuthChanged);
   }
 
   final CvRepository repository;
+
+  /// The real platform action for View/Download — injectable so tests can
+  /// exercise the full orchestration (fetch bytes → hand off → real
+  /// success/failure) without a real browser. Defaults to the real,
+  /// platform-resolved implementation (`cv_file_opener.dart`).
+  final CvFileAction _viewCvFile;
+  final CvFileAction _downloadCvFile;
 
   /// Used only by [addSelectedSkills] to accept AI suggestions through
   /// the existing Student Skill endpoint -- extraction itself never
@@ -136,37 +151,107 @@ class StudentCvProvider extends ChangeNotifier {
     return error.message;
   }
 
-  /// Application IDs currently in flight -- CV IDs, actually -- guards
-  /// against a duplicate "View CV" tap for the same CV, exactly like
-  /// [_busyIds] does for delete/set-default.
+  // -----------------------------------------------------------------
+  // View / Download CV (Phase 8A-6.3)
+  // -----------------------------------------------------------------
+  //
+  // Root cause fixed here: "View CV" previously only ever fetched the
+  // authenticated PDF bytes into memory and reported success on that
+  // alone — nothing was ever done with the bytes, so no tab opened and
+  // nothing appeared in Chrome Downloads. View and Download are now two
+  // real, separate actions; both still fetch bytes through the exact
+  // same secure `CvRepository.downloadCv` endpoint, then hand off to the
+  // platform-resolved opener (`cv_file_opener.dart`) — real success means
+  // the viewer/tab or the browser download was actually triggered, per
+  // [CvFileOpenResult], never merely that bytes arrived.
+
+  final Set<int> _viewingIds = {};
+  String? viewErrorMessage;
+
+  bool isViewingCv(int cvId) => _viewingIds.contains(cvId);
+
+  /// Opens [cvId]'s PDF for viewing. A duplicate call for the same CV
+  /// while one is already in flight is ignored.
+  Future<bool> viewCv(int cvId, String title) =>
+      _openFile(cvId, title, _viewingIds, _viewCvFile, (msg) => viewErrorMessage = msg);
+
   final Set<int> _downloadingIds = {};
   String? downloadErrorMessage;
 
   bool isDownloading(int cvId) => _downloadingIds.contains(cvId);
 
-  /// Downloads the raw PDF bytes for [cvId] via the secure backend
-  /// endpoint. Returns `null` on failure (see [downloadErrorMessage]) — a
-  /// duplicate call for the same CV while one is already in flight is
-  /// ignored, returning `null` immediately without a second request.
-  Future<Uint8List?> downloadCv(int cvId) async {
-    if (_downloadingIds.contains(cvId)) return null;
+  /// Triggers a real browser download of [cvId]'s PDF. A duplicate call
+  /// for the same CV while one is already in flight is ignored.
+  Future<bool> downloadCvFile(int cvId, String title) => _openFile(
+    cvId,
+    title,
+    _downloadingIds,
+    _downloadCvFile,
+    (msg) => downloadErrorMessage = msg,
+  );
 
-    _downloadingIds.add(cvId);
-    downloadErrorMessage = null;
+  Future<bool> _openFile(
+    int cvId,
+    String title,
+    Set<int> inFlightIds,
+    CvFileAction action,
+    void Function(String?) setError,
+  ) async {
+    if (inFlightIds.contains(cvId)) return false;
+
+    inFlightIds.add(cvId);
+    setError(null);
     notifyListeners();
 
-    Uint8List? bytes;
+    var success = false;
     try {
-      bytes = await repository.downloadCv(cvId);
+      final bytes = await repository.downloadCv(cvId);
+      final result = await action(bytes, '$title.pdf');
+      success = result.success;
+      if (!success) {
+        setError(result.errorMessage ?? 'Something went wrong. Please try again.');
+      }
     } on ApiException catch (error) {
-      downloadErrorMessage = error.message;
+      setError(error.message);
     } catch (_) {
-      downloadErrorMessage = 'Something went wrong. Please try again.';
+      setError('Something went wrong. Please try again.');
     } finally {
-      _downloadingIds.remove(cvId);
+      inFlightIds.remove(cvId);
       notifyListeners();
     }
-    return bytes;
+    return success;
+  }
+
+  /// The rename dialog's own inline error — kept separate from
+  /// [actionErrorMessage] (delete/set-default's SnackBar-shown error) so a
+  /// rename failure shows inline in the still-open dialog, exactly where
+  /// the student is looking, instead of behind it in a SnackBar.
+  String? renameErrorMessage;
+
+  /// Renames [id] to [title] via the real backend endpoint (Phase 8A-6.2)
+  /// — metadata only, the PDF file is never touched. Shares [_busyIds]
+  /// with delete/set-default, so a rename can't race a conflicting action
+  /// on the same CV. Only ever confirmed by the backend before the local
+  /// list reflects the new title — no optimistic update.
+  Future<bool> renameCv(int id, String title) async {
+    if (_busyIds.contains(id)) return false;
+
+    _busyIds.add(id);
+    renameErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      final updated = await repository.updateTitle(cvId: id, title: title);
+      cvs = [for (final cv in cvs) if (cv.id == id) updated else cv];
+      success = true;
+    } on ApiException catch (error) {
+      renameErrorMessage = error.message;
+    } finally {
+      _busyIds.remove(id);
+      notifyListeners();
+    }
+    return success;
   }
 
   Future<bool> deleteCv(int id) async {
@@ -320,7 +405,10 @@ class StudentCvProvider extends ChangeNotifier {
     formErrorMessage = null;
     _busyIds.clear();
     actionErrorMessage = null;
+    renameErrorMessage = null;
     _pendingListFetch = null;
+    _viewingIds.clear();
+    viewErrorMessage = null;
     _downloadingIds.clear();
     downloadErrorMessage = null;
     isExtracting = false;

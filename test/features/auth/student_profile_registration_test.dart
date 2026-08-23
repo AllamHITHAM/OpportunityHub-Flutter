@@ -12,22 +12,40 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
+import 'package:opportunityhub_flutter/core/api/paginated_result.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
+import 'package:opportunityhub_flutter/core/widgets/theme_toggle_button.dart';
+import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
+import 'package:opportunityhub_flutter/features/education_verification/data/education_verification_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
+import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
+import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
+import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/cv_model.dart';
+import 'package:opportunityhub_flutter/models/education_verification_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
+import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
+import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_education_verification_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_opportunities_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_skill_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 
 /// A fake repository that never touches secure storage or the network.
 ///
@@ -51,6 +69,9 @@ class _FakeAuthRepository extends AuthRepository {
 
   @override
   Future<UserModel> getCurrentUser() async => currentUser!;
+
+  @override
+  Future<void> logout() async {}
 
   @override
   Future<UserModel> registerStudent({
@@ -145,6 +166,67 @@ class _FakeNotificationRepository extends NotificationRepository {
   Future<List<NotificationModel>> getNotifications() async => [];
 }
 
+/// Fake repositories below are unused by this file's tests, but
+/// StudentHomeScreen now reads these 5 providers unconditionally in
+/// initState, and a successful Step 2 submission navigates there.
+class _FakeApplicationRepository extends ApplicationRepository {
+  _FakeApplicationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<ApplicationModel>> getStudentApplications() async => [];
+}
+
+class _FakeOpportunityRepository extends OpportunityRepository {
+  _FakeOpportunityRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<PaginatedResult<OpportunityModel>> getPublicOpportunities({
+    String? opportunityType,
+    String? employmentType,
+    String? workMode,
+    String? experienceLevel,
+    String? location,
+    String? fieldOfStudy,
+    String? keyword,
+    int page = 1,
+    int perPage = 15,
+  }) async {
+    return const PaginatedResult(items: [], currentPage: 1, lastPage: 1, total: 0);
+  }
+}
+
+class _FakeCvRepository extends CvRepository {
+  _FakeCvRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<CvModel>> getStudentCvs() async => [];
+}
+
+class _FakeStudentSkillRepository extends StudentSkillRepository {
+  _FakeStudentSkillRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<StudentSkillModel>> getStudentSkills() async => [];
+}
+
+class _FakeEducationVerificationRepository
+    extends EducationVerificationRepository {
+  _FakeEducationVerificationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<EducationVerificationModel> getStatus() async =>
+      const EducationVerificationModel(
+        institutionName: null,
+        degreeOrProgram: null,
+        status: 'not_submitted',
+      );
+}
+
 Widget _buildApp(
   AuthProvider authProvider,
   StudentProfileProvider studentProfileProvider,
@@ -166,10 +248,49 @@ Widget _buildApp(
           authProvider: authProvider,
         ),
       ),
+      ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
+      ChangeNotifierProvider<StudentApplicationsProvider>(
+        create: (_) => StudentApplicationsProvider(
+          repository: _FakeApplicationRepository(),
+          authProvider: authProvider,
+        ),
+      ),
+      ChangeNotifierProvider<StudentOpportunitiesProvider>(
+        create: (_) => StudentOpportunitiesProvider(
+          repository: _FakeOpportunityRepository(),
+          authProvider: authProvider,
+        ),
+      ),
+      ChangeNotifierProvider<StudentCvProvider>(
+        create: (_) => StudentCvProvider(
+          repository: _FakeCvRepository(),
+          studentSkillRepository: _FakeStudentSkillRepository(),
+          authProvider: authProvider,
+        ),
+      ),
+      ChangeNotifierProvider<StudentSkillProvider>(
+        create: (_) => StudentSkillProvider(
+          repository: _FakeStudentSkillRepository(),
+          authProvider: authProvider,
+        ),
+      ),
+      ChangeNotifierProvider<StudentEducationVerificationProvider>(
+        create: (_) => StudentEducationVerificationProvider(
+          repository: _FakeEducationVerificationRepository(),
+          authProvider: authProvider,
+        ),
+      ),
     ],
-    child: MaterialApp.router(
-      theme: AppTheme.lightTheme,
-      routerConfig: appRouter.router,
+    child: Builder(
+      builder: (context) {
+        final mode = context.watch<ThemeProvider>().mode;
+        return MaterialApp.router(
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: mode,
+          routerConfig: appRouter.router,
+        );
+      },
     ),
   );
 }
@@ -380,6 +501,78 @@ void main() {
   );
 
   testWidgets(
+    'Step 2 shows a Leave-setup exit action that opens a confirmation dialog '
+    'with the exact required copy',
+    (tester) async {
+      final (authProvider, _, _) = await _pumpToStep2(tester);
+
+      await _tapVisible(tester, find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Leave setup?'), findsOneWidget);
+      expect(
+        find.text(
+          'Your account has been created, but your profile setup is not '
+          'complete.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Continue Setup'), findsOneWidget);
+      expect(find.text('Sign Out'), findsOneWidget);
+
+      // Does not imply the account/data will be deleted -- it will not be.
+      expect(find.textContaining('delete'), findsNothing);
+      expect(find.textContaining('Delete'), findsNothing);
+      expect(find.textContaining('lost'), findsNothing);
+      expect(find.textContaining('permanently'), findsNothing);
+
+      expect(authProvider.isAuthenticated, isTrue);
+    },
+  );
+
+  testWidgets(
+    'Continue Setup dismisses the dialog and keeps the student on Step 2, still signed in',
+    (tester) async {
+      final (authProvider, _, _) = await _pumpToStep2(tester);
+
+      await _tapVisible(tester, find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+
+      await _tapVisible(tester, find.text('Continue Setup'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Leave setup?'), findsNothing);
+      expect(find.text('Complete Your Student Profile'), findsOneWidget);
+      expect(authProvider.isAuthenticated, isTrue);
+    },
+  );
+
+  testWidgets(
+    'Sign Out from the dialog signs the student out and returns to Login, '
+    'with no redirect loop and no data silently discarded',
+    (tester) async {
+      final (authProvider, _, repository) = await _pumpToStep2(tester);
+
+      await _tapVisible(tester, find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+
+      await _tapVisible(tester, find.text('Sign Out'));
+      // pumpAndSettle completing (rather than timing out) is itself proof
+      // there is no redirect loop between the now-unauthenticated state
+      // and the protected Step 2 route.
+      await tester.pumpAndSettle();
+
+      expect(authProvider.isAuthenticated, isFalse);
+      expect(find.text('Complete Your Student Profile'), findsNothing);
+      expect(find.widgetWithText(ElevatedButton, 'Login'), findsOneWidget);
+      // Nothing about signing out calls the profile-creation endpoint --
+      // the account and its (still-incomplete) profile state are untouched.
+      expect(repository.createProfileCallCount, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'A returning authenticated student can open Step 2 directly (cold start), no extra required',
     (tester) async {
       await _pumpDirectlyToStep2AsAuthenticatedStudent(tester);
@@ -441,7 +634,7 @@ void main() {
         ),
       );
 
-      expect(find.text('Role: Student'), findsOneWidget);
+      expect(find.text("Discover Opportunities"), findsOneWidget);
       expect(find.text('Complete Your Student Profile'), findsNothing);
     },
   );
@@ -521,7 +714,7 @@ void main() {
       await _tapVisible(tester, finishButton);
       await tester.pumpAndSettle();
 
-      expect(find.text('Role: Student'), findsOneWidget);
+      expect(find.text("Discover Opportunities"), findsOneWidget);
       expect(
         find.text(
           'Student account and profile API integration will be added in the next phase.',
@@ -675,7 +868,7 @@ void main() {
 
       expect(repository.createProfileCallCount, 2);
       expect(authRepository.registerStudentCallCount, 1);
-      expect(find.text('Role: Student'), findsOneWidget);
+      expect(find.text("Discover Opportunities"), findsOneWidget);
     },
   );
 
@@ -705,7 +898,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(repository.getProfileCallCount, greaterThanOrEqualTo(2));
-      expect(find.text('Role: Student'), findsOneWidget);
+      expect(find.text("Discover Opportunities"), findsOneWidget);
     },
   );
 
@@ -726,7 +919,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Complete Your Student Profile'), findsOneWidget);
-      expect(find.text('Role: Student'), findsNothing);
+      expect(find.text("Discover Opportunities"), findsNothing);
     },
   );
 
@@ -738,4 +931,40 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Complete Your Student Profile'), findsOneWidget);
   });
+
+  testWidgets(
+    'The theme toggle is reachable from Step 2 and switches the resolved theme',
+    (tester) async {
+      await _pumpToStep2(tester);
+
+      expect(find.byType(ThemeToggleButton), findsOneWidget);
+      expect(
+        Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+        Brightness.light,
+      );
+
+      await tester.tap(find.byType(ThemeToggleButton));
+      await tester.pumpAndSettle();
+
+      expect(
+        Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+        Brightness.dark,
+      );
+    },
+  );
+
+  testWidgets(
+    'Reduced motion renders Step 2 immediately, without waiting through '
+    'the staggered entrance',
+    (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+
+      await _pumpToStep2(tester);
+
+      expect(find.text('Complete Your Student Profile'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

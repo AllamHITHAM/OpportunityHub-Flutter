@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/widgets/theme_toggle_button.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/notification_provider.dart';
 import '../../../routes/app_routes.dart';
@@ -35,7 +36,7 @@ class _OrganizationHomeScreenState extends State<OrganizationHomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Organization'),
-        actions: const [NotificationBellAction()],
+        actions: const [ThemeToggleButton(), NotificationBellAction()],
       ),
       body: Center(
         child: SingleChildScrollView(

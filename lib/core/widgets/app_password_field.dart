@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_motion.dart';
 import 'app_text_field.dart';
 
 /// A password input field with a show/hide visibility toggle.
@@ -51,8 +52,14 @@ class _AppPasswordFieldState extends State<AppPasswordField> {
       autofillHints: widget.autofillHints,
       obscureText: _obscure,
       suffixIcon: IconButton(
-        icon: Icon(
-          _obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+        icon: AnimatedSwitcher(
+          duration: AppMotion.reduced(context, AppMotion.fast),
+          transitionBuilder: (child, animation) =>
+              FadeTransition(opacity: animation, child: child),
+          child: Icon(
+            _obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            key: ValueKey(_obscure),
+          ),
         ),
         tooltip: _obscure ? 'Show password' : 'Hide password',
         onPressed: widget.enabled ? _toggleObscure : null,

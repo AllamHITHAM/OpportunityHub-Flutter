@@ -31,6 +31,10 @@ class StudentProfileProvider extends ChangeNotifier {
   bool hasChecked = false;
   bool _checkSucceeded = false;
 
+  bool isSubmitting = false;
+  String? submitErrorMessage;
+  Map<String, List<String>> fieldErrors = {};
+
   /// The in-flight [checkProfileStatus] call, if any.
   ///
   /// This provider is one of the router's `refreshListenable`s, and
@@ -139,8 +143,57 @@ class StudentProfileProvider extends ChangeNotifier {
     return success;
   }
 
+  /// Updates the student's already-existing profile via `PUT
+  /// /api/student/profile`. Returns `true` only once the backend has
+  /// confirmed the write — [profile] becomes that canonical response, never
+  /// an optimistic guess at what was submitted. A duplicate submission
+  /// while one is already in flight is ignored (returns `false`
+  /// immediately, no second repository call), mirroring
+  /// `StudentCvProvider`'s busy-guard convention.
+  Future<bool> updateProfile({
+    required String university,
+    required String major,
+    required int graduationYear,
+    String? phone,
+    String? bio,
+  }) async {
+    if (isSubmitting) return false;
+
+    isSubmitting = true;
+    submitErrorMessage = null;
+    fieldErrors = {};
+    notifyListeners();
+
+    var success = false;
+    try {
+      profile = await repository.updateProfile(
+        university: university,
+        major: major,
+        graduationYear: graduationYear,
+        phone: phone,
+        bio: bio,
+      );
+      success = true;
+    } on ApiException catch (error) {
+      submitErrorMessage = error.message;
+      fieldErrors = error.errors ?? {};
+    } catch (_) {
+      submitErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isSubmitting = false;
+      notifyListeners();
+    }
+    return success;
+  }
+
   void clearError() {
     errorMessage = null;
+    notifyListeners();
+  }
+
+  void clearSubmitError() {
+    submitErrorMessage = null;
+    fieldErrors = {};
     notifyListeners();
   }
 

@@ -45,7 +45,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin Dashboard'),
-        actions: const [NotificationBellAction()],
+        actions: const [ThemeToggleButton(), NotificationBellAction()],
       ),
       body: SafeArea(child: _buildBody(provider, authProvider)),
     );

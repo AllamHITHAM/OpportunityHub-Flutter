@@ -40,6 +40,8 @@ import '../features/opportunities/presentation/student_opportunity_details_scree
 import '../features/notifications/presentation/notification_screen.dart';
 import '../features/organization/presentation/organization_home_screen.dart';
 import '../features/student/presentation/student_home_screen.dart';
+import '../features/student/presentation/student_profile_edit_screen.dart';
+import '../features/student/presentation/student_profile_screen.dart';
 import '../providers/auth_provider.dart';
 import '../providers/organization_profile_provider.dart';
 import '../providers/student_profile_provider.dart';
@@ -160,6 +162,12 @@ const _organizationCandidatesPathPrefix = AppRoutes.organizationCandidates;
 /// the other feature areas above, even though this one currently has no
 /// dynamic `:id` sub-routes.
 const _studentInvitationsPathPrefix = AppRoutes.studentInvitations;
+
+/// UI Phase 1.2 — the minimal Student Profile shell exposing account-level
+/// destinations. A protected feature area, not onboarding. Matched by
+/// prefix for consistency with the other feature areas above, even though
+/// this one currently has no dynamic `:id` sub-routes.
+const _studentProfilePathPrefix = AppRoutes.studentProfile;
 
 /// Defines the app's navigation routes and redirects based on
 /// [AuthProvider], [StudentProfileProvider], and [OrganizationProfileProvider].
@@ -367,6 +375,14 @@ class AppRouter {
           path: AppRoutes.studentEducationVerification,
           builder: (_, _) => const StudentEducationVerificationScreen(),
         ),
+        GoRoute(
+          path: AppRoutes.studentProfile,
+          builder: (_, _) => const StudentProfileScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.studentProfileEdit,
+          builder: (_, _) => const StudentProfileEditScreen(),
+        ),
       ],
     );
   }
@@ -504,6 +520,13 @@ class AppRouter {
     // not onboarding, but still off-limits to every other role.
     if (role != 'student' &&
         currentPath.startsWith(_studentInvitationsPathPrefix)) {
+      return homePath;
+    }
+
+    // The Student Profile shell (UI Phase 1.2) is a student-only feature
+    // area — not onboarding, but still off-limits to every other role.
+    if (role != 'student' &&
+        currentPath.startsWith(_studentProfilePathPrefix)) {
       return homePath;
     }
 

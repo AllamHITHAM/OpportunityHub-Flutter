@@ -18,6 +18,7 @@ import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 
 /// A fake repository that always reports "no saved token", so tests never
@@ -71,6 +72,7 @@ Widget _buildApp(AuthProvider authProvider) {
       ChangeNotifierProvider<OrganizationProfileProvider>.value(
         value: organizationProfileProvider,
       ),
+      ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
     ],
     child: MaterialApp.router(
       theme: AppTheme.lightTheme,

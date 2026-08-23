@@ -3,12 +3,10 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_motion.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/widgets/app_card.dart';
-import '../../../core/widgets/app_error_view.dart';
-import '../../../core/widgets/app_text_field.dart';
-import '../../../core/widgets/primary_button.dart';
-import '../../../core/widgets/section_header.dart';
+import '../../../core/widgets/app_widgets.dart';
+import '../../../providers/auth_provider.dart';
 import '../../../providers/student_profile_provider.dart';
 import '../../../routes/app_routes.dart';
 import 'registration_step_progress.dart';
@@ -91,6 +89,42 @@ class _StudentProfileRegistrationScreenState
     context.go(AppRoutes.studentHome);
   }
 
+  /// The only safe way out of this screen (UI Phase 1.4). There is
+  /// deliberately no "Back to Step 1" — the account already exists, Step 1
+  /// can't be resubmitted, and `AppRouter` would immediately bounce an
+  /// authenticated-but-incomplete student straight back here anyway (see
+  /// `_redirectForStudent`'s `profileIncomplete` fallthrough), making a
+  /// fake Back path pointless. Signing out is the one real exit: it does
+  /// not delete the account or its data, and logging back in correctly
+  /// resumes here via that same router logic.
+  Future<void> _confirmSignOut() async {
+    final authProvider = context.read<AuthProvider>();
+    final shouldSignOut = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Leave setup?'),
+        content: const Text(
+          'Your account has been created, but your profile setup is not '
+          'complete.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Continue Setup'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldSignOut == true) {
+      await authProvider.logout();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final profileProvider = context.watch<StudentProfileProvider>();
@@ -98,117 +132,138 @@ class _StudentProfileRegistrationScreenState
     final isLoading = profileProvider.isLoading;
 
     return Scaffold(
-      // No back action: this screen is reached with `context.go` (nothing
-      // to pop to), and there's nowhere safe to send an already
-      // authenticated student back to — Step 1 is off-limits once signed
-      // in.
-      appBar: AppBar(),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.screenHorizontal,
-            vertical: AppSpacing.screenVertical,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 600),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Complete Your Student Profile',
-                      textAlign: TextAlign.center,
-                      style: textTheme.displaySmall,
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      'Tell us about your education so we can personalise '
-                      'opportunities for you.',
-                      textAlign: TextAlign.center,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    const RegistrationStepProgress(
-                      progress: 1,
-                      stepText: 'Step 2 of 2',
-                      label: 'Student Information',
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
-                    AppCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const SectionHeader(title: 'Student Information'),
-                          const SizedBox(height: AppSpacing.xs),
-                          AppTextField(
-                            controller: _universityController,
-                            label: 'University',
-                            hint: 'University name',
-                            prefixIcon: Icons.school_outlined,
-                            textInputAction: TextInputAction.next,
-                            enabled: !isLoading,
-                            validator: _validateUniversity,
+      appBar: AppBar(
+        leading: IconButton(
+          onPressed: _confirmSignOut,
+          icon: const Icon(Icons.close),
+          tooltip: 'Leave setup',
+        ),
+        actions: const [ThemeToggleButton()],
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: AuthAnimatedBackground()),
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.screenHorizontal,
+                vertical: AppSpacing.screenVertical,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Form(
+                    key: _formKey,
+                    child: AuthEntrance(
+                      children: [
+                        Text(
+                          'Complete Your Student Profile',
+                          textAlign: TextAlign.center,
+                          style: textTheme.displaySmall,
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Tell us about your education so we can personalise '
+                          'opportunities for you.',
+                          textAlign: TextAlign.center,
+                          style: textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
                           ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppTextField(
-                            controller: _majorController,
-                            label: 'Major',
-                            hint: 'e.g. Computer Science',
-                            prefixIcon: Icons.menu_book_outlined,
-                            textInputAction: TextInputAction.done,
-                            enabled: !isLoading,
-                            validator: _validateMajor,
-                            onFieldSubmitted: (_) => _finish(profileProvider),
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          DropdownButtonFormField<int>(
-                            initialValue: _graduationYear,
-                            decoration: const InputDecoration(
-                              labelText: 'Expected Graduation Year',
-                            ),
-                            items: [
-                              for (final year in _graduationYearOptions())
-                                DropdownMenuItem(
-                                  value: year,
-                                  child: Text('$year'),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        const RegistrationStepProgress(
+                          progress: 1,
+                          stepText: 'Step 2 of 2',
+                          label: 'Student Information',
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                        AppCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const SectionHeader(title: 'Student Information'),
+                              const SizedBox(height: AppSpacing.xs),
+                              AppTextField(
+                                controller: _universityController,
+                                label: 'University',
+                                hint: 'University name',
+                                prefixIcon: Icons.school_outlined,
+                                textInputAction: TextInputAction.next,
+                                enabled: !isLoading,
+                                validator: _validateUniversity,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppTextField(
+                                controller: _majorController,
+                                label: 'Major',
+                                hint: 'e.g. Computer Science',
+                                prefixIcon: Icons.menu_book_outlined,
+                                textInputAction: TextInputAction.done,
+                                enabled: !isLoading,
+                                validator: _validateMajor,
+                                onFieldSubmitted: (_) =>
+                                    _finish(profileProvider),
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              DropdownButtonFormField<int>(
+                                initialValue: _graduationYear,
+                                decoration: const InputDecoration(
+                                  labelText: 'Expected Graduation Year',
                                 ),
+                                items: [
+                                  for (final year in _graduationYearOptions())
+                                    DropdownMenuItem(
+                                      value: year,
+                                      child: Text('$year'),
+                                    ),
+                                ],
+                                onChanged: isLoading
+                                    ? null
+                                    : (value) {
+                                        setState(() => _graduationYear = value);
+                                      },
+                                validator: _validateGraduationYear,
+                              ),
+                              AnimatedSwitcher(
+                                duration: AppMotion.reduced(
+                                  context,
+                                  AppMotion.fast,
+                                ),
+                                child: profileProvider.errorMessage == null
+                                    ? const SizedBox(width: double.infinity)
+                                    : Padding(
+                                        key: ValueKey(
+                                          profileProvider.errorMessage,
+                                        ),
+                                        padding: const EdgeInsets.only(
+                                          top: AppSpacing.xs,
+                                        ),
+                                        child: AppErrorView(
+                                          title: 'Something Went Wrong',
+                                          message:
+                                              profileProvider.errorMessage!,
+                                          compact: true,
+                                        ),
+                                      ),
+                              ),
+                              const SizedBox(height: AppSpacing.lg),
+                              PrimaryButton(
+                                label: 'Finish',
+                                isLoading: isLoading,
+                                onPressed: () => _finish(profileProvider),
+                              ),
                             ],
-                            onChanged: isLoading
-                                ? null
-                                : (value) {
-                                    setState(() => _graduationYear = value);
-                                  },
-                            validator: _validateGraduationYear,
                           ),
-                          if (profileProvider.errorMessage != null) ...[
-                            const SizedBox(height: AppSpacing.xs),
-                            AppErrorView(
-                              title: 'Something Went Wrong',
-                              message: profileProvider.errorMessage!,
-                              compact: true,
-                            ),
-                          ],
-                          const SizedBox(height: AppSpacing.lg),
-                          PrimaryButton(
-                            label: 'Finish',
-                            isLoading: isLoading,
-                            onPressed: () => _finish(profileProvider),
-                          ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                      ],
                     ),
-                    const SizedBox(height: AppSpacing.xl),
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

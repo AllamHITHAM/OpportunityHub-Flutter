@@ -3,13 +3,17 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_motion.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_error_view.dart';
 import '../../../core/widgets/app_password_field.dart';
 import '../../../core/widgets/app_text_field.dart';
+import '../../../core/widgets/auth_animated_background.dart';
+import '../../../core/widgets/auth_entrance.dart';
 import '../../../core/widgets/primary_button.dart';
 import '../../../core/widgets/section_header.dart';
+import '../../../core/widgets/theme_toggle_button.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../routes/app_routes.dart';
 import 'registration_step_progress.dart';
@@ -138,128 +142,152 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
       // This screen is reached with `context.go` (see `_continue`), which
       // leaves nothing to pop — so the back arrow needs an explicit
       // target instead of relying on Navigator.canPop.
-      appBar: AppBar(leading: BackButton(onPressed: _goToAccountTypeSelection)),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.screenHorizontal,
-            vertical: AppSpacing.screenVertical,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 600),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Create Student Account',
-                      textAlign: TextAlign.center,
-                      style: textTheme.displaySmall,
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      'Enter your account information to get started.',
-                      textAlign: TextAlign.center,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    const RegistrationStepProgress(
-                      progress: 0.5,
-                      stepText: 'Step 1 of 2',
-                      label: 'Account Information',
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
-                    AppCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const SectionHeader(title: 'Account Information'),
-                          const SizedBox(height: AppSpacing.xs),
-                          AppTextField(
-                            controller: _nameController,
-                            label: 'Full Name',
-                            hint: 'Jane Doe',
-                            prefixIcon: Icons.person_outline,
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.name],
-                            enabled: !isLoading,
-                            validator: _validateFullName,
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppTextField(
-                            controller: _emailController,
-                            label: 'Email',
-                            hint: 'you@example.com',
-                            prefixIcon: Icons.mail_outline,
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.email],
-                            enabled: !isLoading,
-                            validator: _validateEmail,
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppPasswordField(
-                            controller: _passwordController,
-                            label: 'Password',
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.newPassword],
-                            enabled: !isLoading,
-                            validator: _validatePassword,
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppPasswordField(
-                            controller: _confirmPasswordController,
-                            label: 'Confirm Password',
-                            textInputAction: TextInputAction.done,
-                            autofillHints: const [AutofillHints.newPassword],
-                            enabled: !isLoading,
-                            validator: _validateConfirmPassword,
-                            onFieldSubmitted: (_) => _continue(authProvider),
-                          ),
-                          if (authProvider.errorMessage != null) ...[
-                            const SizedBox(height: AppSpacing.xs),
-                            AppErrorView(
-                              title: 'Registration Failed',
-                              message: authProvider.errorMessage!,
-                              compact: true,
-                            ),
-                          ],
-                          const SizedBox(height: AppSpacing.sm),
-                          PrimaryButton(
-                            label: 'Continue',
-                            isLoading: isLoading,
-                            onPressed: () => _continue(authProvider),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+      appBar: AppBar(
+        leading: BackButton(onPressed: _goToAccountTypeSelection),
+        actions: const [ThemeToggleButton()],
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: AuthAnimatedBackground()),
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.screenHorizontal,
+                vertical: AppSpacing.screenVertical,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Form(
+                    key: _formKey,
+                    child: AuthEntrance(
                       children: [
                         Text(
-                          'Already have an account?',
-                          style: textTheme.bodyMedium,
+                          'Create Student Account',
+                          textAlign: TextAlign.center,
+                          style: textTheme.displaySmall,
                         ),
-                        TextButton(
-                          onPressed: _goToLogin,
-                          child: const Text('Sign In'),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Enter your account information to get started.',
+                          textAlign: TextAlign.center,
+                          style: textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
                         ),
+                        const SizedBox(height: AppSpacing.md),
+                        const RegistrationStepProgress(
+                          progress: 0.5,
+                          stepText: 'Step 1 of 2',
+                          label: 'Account Information',
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                        AppCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const SectionHeader(title: 'Account Information'),
+                              const SizedBox(height: AppSpacing.xs),
+                              AppTextField(
+                                controller: _nameController,
+                                label: 'Full Name',
+                                hint: 'Jane Doe',
+                                prefixIcon: Icons.person_outline,
+                                textInputAction: TextInputAction.next,
+                                autofillHints: const [AutofillHints.name],
+                                enabled: !isLoading,
+                                validator: _validateFullName,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppTextField(
+                                controller: _emailController,
+                                label: 'Email',
+                                hint: 'you@example.com',
+                                prefixIcon: Icons.mail_outline,
+                                keyboardType: TextInputType.emailAddress,
+                                textInputAction: TextInputAction.next,
+                                autofillHints: const [AutofillHints.email],
+                                enabled: !isLoading,
+                                validator: _validateEmail,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppPasswordField(
+                                controller: _passwordController,
+                                label: 'Password',
+                                textInputAction: TextInputAction.next,
+                                autofillHints: const [
+                                  AutofillHints.newPassword,
+                                ],
+                                enabled: !isLoading,
+                                validator: _validatePassword,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppPasswordField(
+                                controller: _confirmPasswordController,
+                                label: 'Confirm Password',
+                                textInputAction: TextInputAction.done,
+                                autofillHints: const [
+                                  AutofillHints.newPassword,
+                                ],
+                                enabled: !isLoading,
+                                validator: _validateConfirmPassword,
+                                onFieldSubmitted: (_) =>
+                                    _continue(authProvider),
+                              ),
+                              AnimatedSwitcher(
+                                duration: AppMotion.reduced(
+                                  context,
+                                  AppMotion.fast,
+                                ),
+                                child: authProvider.errorMessage == null
+                                    ? const SizedBox(width: double.infinity)
+                                    : Padding(
+                                        key: ValueKey(
+                                          authProvider.errorMessage,
+                                        ),
+                                        padding: const EdgeInsets.only(
+                                          top: AppSpacing.xs,
+                                        ),
+                                        child: AppErrorView(
+                                          title: 'Registration Failed',
+                                          message: authProvider.errorMessage!,
+                                          compact: true,
+                                        ),
+                                      ),
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                              PrimaryButton(
+                                label: 'Continue',
+                                isLoading: isLoading,
+                                onPressed: () => _continue(authProvider),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              'Already have an account?',
+                              style: textTheme.bodyMedium,
+                            ),
+                            TextButton(
+                              onPressed: _goToLogin,
+                              child: const Text('Sign In'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
                       ],
                     ),
-                    const SizedBox(height: AppSpacing.xl),
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

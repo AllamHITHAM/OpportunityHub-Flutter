@@ -30,6 +30,7 @@ import 'package:opportunityhub_flutter/models/quiz_attempt_model.dart';
 import 'package:opportunityhub_flutter/models/quiz_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_quiz_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository()
@@ -200,6 +201,7 @@ Future<StudentQuizProvider> _pumpScreen(
       providers: [
         ChangeNotifierProvider<StudentQuizProvider>.value(value: quizProvider),
         Provider<AssessmentRepository>.value(value: repository),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
@@ -245,6 +247,7 @@ void main() {
             value: quizProvider,
           ),
           Provider<AssessmentRepository>.value(value: repository),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,
@@ -705,6 +708,7 @@ void main() {
             value: quizProvider,
           ),
           Provider<AssessmentRepository>.value(value: repository),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,

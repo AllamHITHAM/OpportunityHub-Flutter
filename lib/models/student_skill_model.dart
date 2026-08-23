@@ -13,6 +13,7 @@ class StudentSkillModel {
     required this.id,
     required this.skillId,
     required this.skillName,
+    this.category,
     required this.level,
     this.yearsOfExperience,
     required this.source,
@@ -21,6 +22,12 @@ class StudentSkillModel {
   final int id;
   final int skillId;
   final String skillName;
+
+  /// The catalog `Skill`'s own discipline label (e.g. "Civil Engineering",
+  /// "Computer Science") -- a real, Admin-set/seeded column
+  /// (`BaselineSkillSeeder`), not a client-invented taxonomy. Nullable: an
+  /// Admin-created or suggestion-approved `Skill` may not have one set.
+  final String? category;
 
   /// One of: beginner, intermediate, advanced, expert.
   final String level;
@@ -42,6 +49,7 @@ class StudentSkillModel {
       id: json['id'] as int,
       skillId: skillJson['id'] as int,
       skillName: skillJson['name'] as String,
+      category: skillJson['category'] as String?,
       level: json['level'] as String,
       yearsOfExperience: _parseDecimal(json['years_of_experience']),
       source: json['source'] as String? ?? 'manual',

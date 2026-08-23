@@ -9,8 +9,10 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
+import 'package:opportunityhub_flutter/core/storage/theme_preference_storage.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
+import 'package:opportunityhub_flutter/core/widgets/theme_toggle_button.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
@@ -20,8 +22,21 @@ import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
+
+class _FakeThemePreferenceStorage extends ThemePreferenceStorage {
+  ThemeMode? saved;
+
+  @override
+  Future<void> saveThemeMode(ThemeMode mode) async {
+    saved = mode;
+  }
+
+  @override
+  Future<ThemeMode> readThemeMode() async => saved ?? ThemeMode.system;
+}
 
 /// A fake repository that never touches secure storage or the network.
 ///
@@ -104,14 +119,24 @@ Widget _buildApp(
       ChangeNotifierProvider<OrganizationProfileProvider>.value(
         value: organizationProfileProvider,
       ),
+      ChangeNotifierProvider<ThemeProvider>.value(
+        value: ThemeProvider(storage: _FakeThemePreferenceStorage()),
+      ),
     ],
-    child: MaterialApp.router(
-      theme: AppTheme.lightTheme,
-      routerConfig: AppRouter(
-        authProvider,
-        studentProfileProvider,
-        organizationProfileProvider,
-      ).router,
+    child: Builder(
+      builder: (context) {
+        final mode = context.watch<ThemeProvider>().mode;
+        return MaterialApp.router(
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: mode,
+          routerConfig: AppRouter(
+            authProvider,
+            studentProfileProvider,
+            organizationProfileProvider,
+          ).router,
+        );
+      },
     ),
   );
 }
@@ -421,4 +446,41 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Create Student Account'), findsOneWidget);
   });
+
+  testWidgets(
+    'The theme toggle is reachable from Student Registration Step 1 and '
+    'switches the resolved theme',
+    (tester) async {
+      await _pumpToStep1(tester);
+
+      expect(find.byType(ThemeToggleButton), findsOneWidget);
+      expect(
+        Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+        Brightness.light,
+      );
+
+      await tester.tap(find.byType(ThemeToggleButton));
+      await tester.pumpAndSettle();
+
+      expect(
+        Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+        Brightness.dark,
+      );
+    },
+  );
+
+  testWidgets(
+    'Reduced motion renders Step 1 immediately, without waiting through '
+    'the staggered entrance',
+    (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+
+      await _pumpToStep1(tester);
+
+      expect(find.text('Create Student Account'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

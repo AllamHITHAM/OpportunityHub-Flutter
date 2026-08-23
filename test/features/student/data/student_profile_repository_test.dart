@@ -305,4 +305,147 @@ void main() {
       await expectLater(repository.getProfile(), throwsA(isA<ApiException>()));
     });
   });
+
+  group('updateProfile', () {
+    test('sends a PUT with university, major, graduation_year, phone, bio', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {
+            'id': 1,
+            'university': 'New University',
+            'major': 'Computer Science',
+            'graduation_year': 2028,
+            'phone': '0791234567',
+            'bio': 'Updated bio.',
+          },
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.updateProfile(
+        university: 'New University',
+        major: 'Computer Science',
+        graduationYear: 2028,
+        phone: '0791234567',
+        bio: 'Updated bio.',
+      );
+
+      expect(adapter.lastRequest?.method, 'PUT');
+      expect(adapter.lastRequest?.path, '/student/profile');
+      final sentBody = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(sentBody['university'], 'New University');
+      expect(sentBody['major'], 'Computer Science');
+      expect(sentBody['graduation_year'], 2028);
+      expect(sentBody['phone'], '0791234567');
+      expect(sentBody['bio'], 'Updated bio.');
+    });
+
+    test('never sends name, email, password, or gpa', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {
+            'id': 1,
+            'university': 'New University',
+            'major': 'Computer Science',
+            'graduation_year': 2028,
+          },
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.updateProfile(
+        university: 'New University',
+        major: 'Computer Science',
+        graduationYear: 2028,
+      );
+
+      final sentBody = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(sentBody.containsKey('name'), isFalse);
+      expect(sentBody.containsKey('email'), isFalse);
+      expect(sentBody.containsKey('password'), isFalse);
+      expect(sentBody.containsKey('gpa'), isFalse);
+    });
+
+    test('parses the canonical updated profile on success', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {
+            'id': 42,
+            'university': 'New University',
+            'major': 'Computer Science',
+            'graduation_year': 2028,
+            'phone': '0791234567',
+            'bio': 'Updated bio.',
+          },
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final profile = await repository.updateProfile(
+        university: 'New University',
+        major: 'Computer Science',
+        graduationYear: 2028,
+        phone: '0791234567',
+        bio: 'Updated bio.',
+      );
+
+      expect(profile.id, 42);
+      expect(profile.university, 'New University');
+      expect(profile.phone, '0791234567');
+      expect(profile.bio, 'Updated bio.');
+    });
+
+    test('throws with the backend field errors on 422 validation', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'message': 'The given data was invalid.',
+          'errors': {
+            'graduation_year': ['The graduation year field must be between 1950 and 2100.'],
+          },
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.updateProfile(
+          university: 'New University',
+          major: 'Computer Science',
+          graduationYear: 1800,
+        ),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.errors?['graduation_year'],
+            'errors[graduation_year]',
+            isNotNull,
+          ),
+        ),
+      );
+    });
+
+    test('throws on 404 when the profile does not exist yet', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Student profile not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.updateProfile(
+          university: 'New University',
+          major: 'Computer Science',
+          graduationYear: 2028,
+        ),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.message,
+            'message',
+            'Student profile not found',
+          ),
+        ),
+      );
+    });
+  });
 }

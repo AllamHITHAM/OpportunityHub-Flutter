@@ -50,9 +50,10 @@ import 'providers/student_opportunities_provider.dart';
 import 'providers/student_profile_provider.dart';
 import 'providers/student_skill_provider.dart';
 import 'providers/student_quiz_provider.dart';
+import 'providers/theme_provider.dart';
 import 'routes/app_router.dart';
 
-void main() {
+void main() async {
   // Without this, Flutter Web defaults to hash-based URLs (e.g.
   // `#/reset-password?...`). A plain path link -- like the one the
   // password-reset email sends (`/reset-password?token=...&email=...`) --
@@ -62,16 +63,27 @@ void main() {
   // logic ever runs. `usePathUrlStrategy()` is a no-op on non-web
   // platforms.
   usePathUrlStrategy();
-  runApp(const MyApp());
+
+  // Awaited before the very first frame (UI Phase 1.3) so the correct
+  // light/dark theme is already known when the app first paints -- never
+  // a flash from one theme to another.
+  WidgetsFlutterBinding.ensureInitialized();
+  final themeProvider = ThemeProvider();
+  await themeProvider.initialize();
+
+  runApp(MyApp(themeProvider: themeProvider));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({required this.themeProvider, super.key});
+
+  final ThemeProvider themeProvider;
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider<ThemeProvider>.value(value: themeProvider),
         Provider<TokenStorageService>(create: (_) => TokenStorageService()),
         ProxyProvider<TokenStorageService, ApiClient>(
           update: (_, tokenStorageService, _) =>
@@ -385,10 +397,14 @@ class _AppRootState extends State<_AppRoot> {
 
   @override
   Widget build(BuildContext context) {
+    final themeMode = context.watch<ThemeProvider>().mode;
+
     return MaterialApp.router(
       title: 'OpportunityHub',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: themeMode,
       routerConfig: _appRouter.router,
     );
   }

@@ -71,6 +71,57 @@ String formatSalaryRange(OpportunityModel opportunity) {
   return (min ?? max)!.toStringAsFixed(0);
 }
 
+/// How many eligible majors to name before collapsing the rest into a
+/// "+N" suffix, so a long list never overflows its container.
+const _maxNamedMajors = 2;
+
+/// A short, honest summary of who an opportunity is open to — prefers the
+/// explicit [OpportunityModel.eligibleMajors] list (Phase 8B-3.2) and
+/// falls back to the legacy single [OpportunityModel.fieldOfStudy] only
+/// when no explicit majors are set, mirroring the fallback documented on
+/// the model itself. Returns `null` (render nothing) when neither is
+/// present, rather than a fabricated "Open to all majors". Shared between
+/// [OpportunityCard] and the student details screen rather than duplicated.
+String? eligibilityLabel(OpportunityModel opportunity) {
+  final majors = opportunity.eligibleMajors;
+  if (majors.isNotEmpty) {
+    final named = majors.take(_maxNamedMajors).join(', ');
+    final remaining = majors.length - _maxNamedMajors;
+    return remaining > 0 ? '$named, +$remaining more' : named;
+  }
+  if (opportunity.fieldOfStudy != null &&
+      opportunity.fieldOfStudy!.trim().isNotEmpty) {
+    return opportunity.fieldOfStudy;
+  }
+  return null;
+}
+
+/// How urgent an opportunity's application deadline is, purely a function
+/// of real data (`applicationDeadline` vs. the current time) — never a
+/// fabricated countdown.
+enum DeadlineUrgency {
+  /// No deadline set at all.
+  none,
+
+  /// The deadline has already passed.
+  passed,
+
+  /// 3 days or fewer remain.
+  soon,
+
+  /// More than 3 days remain.
+  normal,
+}
+
+DeadlineUrgency deadlineUrgencyFor(DateTime? deadline, {DateTime? now}) {
+  if (deadline == null) return DeadlineUrgency.none;
+  final reference = now ?? DateTime.now();
+  final daysLeft = deadline.difference(reference).inHours / 24;
+  if (daysLeft < 0) return DeadlineUrgency.passed;
+  if (daysLeft <= 3) return DeadlineUrgency.soon;
+  return DeadlineUrgency.normal;
+}
+
 /// A label/value row used on the opportunity details "Details" card —
 /// shared between the organization and student details screens rather than
 /// duplicated.

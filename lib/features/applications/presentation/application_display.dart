@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 import '../../../core/widgets/status_chip.dart';
 
 /// User-facing labels for every documented `application.status` value.
@@ -39,6 +41,59 @@ AppStatusType applicationStatusChipType(String status) {
     default:
       return AppStatusType.warning;
   }
+}
+
+/// The five real, non-terminal stages `application.status` can sit at
+/// before an outcome is reached — UI Phase 4's shared vocabulary for both
+/// the Applications list's pipeline overview and Application Details'
+/// progress rail. `interview_scheduled` (legacy) folds into [assessment]:
+/// it predates the current `in_assessment`/dedicated-Assessment model but
+/// means the same thing an application is actively being assessed.
+enum ApplicationPipelineStage { applied, review, shortlisted, assessment, offer }
+
+const applicationPipelineStageLabels = {
+  ApplicationPipelineStage.applied: 'Applied',
+  ApplicationPipelineStage.review: 'Review',
+  ApplicationPipelineStage.shortlisted: 'Shortlisted',
+  ApplicationPipelineStage.assessment: 'Assessment',
+  ApplicationPipelineStage.offer: 'Offer',
+};
+
+const applicationPipelineStageIcons = {
+  ApplicationPipelineStage.applied: Icons.send_outlined,
+  ApplicationPipelineStage.review: Icons.visibility_outlined,
+  ApplicationPipelineStage.shortlisted: Icons.star_outline_rounded,
+  ApplicationPipelineStage.assessment: Icons.quiz_outlined,
+  ApplicationPipelineStage.offer: Icons.card_giftcard_outlined,
+};
+
+/// The pipeline stage [status] currently sits at, or `null` for a terminal
+/// outcome (`accepted`/`rejected`/`withdrawn`) or any unrecognized value —
+/// an outcome is never itself a "stage" (see [isTerminalApplicationStatus]).
+ApplicationPipelineStage? pipelineStageForStatus(String status) {
+  switch (status) {
+    case 'pending':
+      return ApplicationPipelineStage.applied;
+    case 'reviewed':
+      return ApplicationPipelineStage.review;
+    case 'shortlisted':
+      return ApplicationPipelineStage.shortlisted;
+    case 'in_assessment':
+    case 'interview_scheduled':
+      return ApplicationPipelineStage.assessment;
+    case 'offer_sent':
+      return ApplicationPipelineStage.offer;
+    default:
+      return null;
+  }
+}
+
+/// Whether [status] is a final outcome rather than an active recruitment
+/// stage — `accepted`, `rejected`, or `withdrawn`. Deliberately distinct
+/// from "[pipelineStageForStatus] returns null", since an unrecognized
+/// future status would also return null without being a known outcome.
+bool isTerminalApplicationStatus(String status) {
+  return status == 'accepted' || status == 'rejected' || status == 'withdrawn';
 }
 
 /// Normalizes a piece of applicant/profile display text: `null`, empty,

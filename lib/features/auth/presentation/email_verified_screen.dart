@@ -3,7 +3,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/app_animated_status_icon.dart';
+import '../../../core/widgets/auth_animated_background.dart';
+import '../../../core/widgets/auth_entrance.dart';
 import '../../../core/widgets/primary_button.dart';
+import '../../../core/widgets/theme_toggle_button.dart';
 import '../../../routes/app_routes.dart';
 
 /// The landing spot the backend's signed email-verification link
@@ -25,52 +29,61 @@ class EmailVerifiedScreen extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Email Verification')),
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.screenHorizontal,
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isSuccess
-                        ? Icons.check_circle_outline_rounded
-                        : Icons.error_outline_rounded,
-                    size: 56,
-                    color: isSuccess ? AppColors.success : AppColors.error,
+      appBar: AppBar(
+        title: const Text('Email Verification'),
+        actions: const [ThemeToggleButton()],
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: AuthAnimatedBackground()),
+          SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.screenHorizontal,
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  child: AuthEntrance(
+                    children: [
+                      AppAnimatedStatusIcon(
+                        icon: isSuccess
+                            ? Icons.check_circle_outline_rounded
+                            : Icons.error_outline_rounded,
+                        color: isSuccess ? AppColors.success : AppColors.error,
+                        backgroundColor: isSuccess
+                            ? AppColors.successBackground
+                            : AppColors.errorBackground,
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      Text(
+                        isSuccess ? 'Email Verified' : 'Verification Failed',
+                        textAlign: TextAlign.center,
+                        style: textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        isSuccess
+                            ? 'Your email address has been verified successfully.'
+                            : 'This verification link is invalid or has expired. '
+                                  'You can request a new one from your account.',
+                        textAlign: TextAlign.center,
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      PrimaryButton(
+                        label: 'Go to Login',
+                        onPressed: () => context.go(AppRoutes.login),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  Text(
-                    isSuccess ? 'Email Verified' : 'Verification Failed',
-                    textAlign: TextAlign.center,
-                    style: textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    isSuccess
-                        ? 'Your email address has been verified successfully.'
-                        : 'This verification link is invalid or has expired. '
-                              'You can request a new one from your account.',
-                    textAlign: TextAlign.center,
-                    style: textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  PrimaryButton(
-                    label: 'Go to Login',
-                    onPressed: () => context.go(AppRoutes.login),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

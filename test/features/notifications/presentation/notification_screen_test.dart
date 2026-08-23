@@ -14,6 +14,7 @@ import 'package:opportunityhub_flutter/features/notifications/presentation/notif
 import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
 class _FakeAuthRepository extends AuthRepository {
@@ -137,8 +138,11 @@ Future<NotificationProvider> _pumpScreen(
   );
 
   await tester.pumpWidget(
-    ChangeNotifierProvider<NotificationProvider>.value(
-      value: provider,
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<NotificationProvider>.value(value: provider),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
+      ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,
         routerConfig: router,
@@ -178,8 +182,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      ChangeNotifierProvider<NotificationProvider>.value(
-        value: provider,
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<NotificationProvider>.value(value: provider),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
+        ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,
           routerConfig: router,

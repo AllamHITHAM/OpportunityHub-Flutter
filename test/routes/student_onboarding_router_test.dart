@@ -8,25 +8,42 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
+import 'package:opportunityhub_flutter/core/api/paginated_result.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
+import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
+import 'package:opportunityhub_flutter/features/education_verification/data/education_verification_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
+import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
+import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
+import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/cv_model.dart';
+import 'package:opportunityhub_flutter/models/education_verification_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
+import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
+import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_education_verification_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_opportunities_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
+import 'package:opportunityhub_flutter/providers/student_skill_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_router.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository({this.savedToken, this.currentUser})
@@ -43,6 +60,9 @@ class _FakeAuthRepository extends AuthRepository {
 
   @override
   Future<UserModel> getCurrentUser() async => currentUser!;
+
+  @override
+  Future<void> logout() async {}
 }
 
 class _FakeStudentProfileRepository extends StudentProfileRepository {
@@ -95,6 +115,64 @@ class _FakeNotificationRepository extends NotificationRepository {
 
   @override
   Future<List<NotificationModel>> getNotifications() async => [];
+}
+
+class _FakeApplicationRepository extends ApplicationRepository {
+  _FakeApplicationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<ApplicationModel>> getStudentApplications() async => [];
+}
+
+class _FakeOpportunityRepository extends OpportunityRepository {
+  _FakeOpportunityRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<PaginatedResult<OpportunityModel>> getPublicOpportunities({
+    String? opportunityType,
+    String? employmentType,
+    String? workMode,
+    String? experienceLevel,
+    String? location,
+    String? fieldOfStudy,
+    String? keyword,
+    int page = 1,
+    int perPage = 15,
+  }) async {
+    return const PaginatedResult(items: [], currentPage: 1, lastPage: 1, total: 0);
+  }
+}
+
+class _FakeCvRepository extends CvRepository {
+  _FakeCvRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<CvModel>> getStudentCvs() async => [];
+}
+
+class _FakeStudentSkillRepository extends StudentSkillRepository {
+  _FakeStudentSkillRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<StudentSkillModel>> getStudentSkills() async => [];
+}
+
+class _FakeEducationVerificationRepository
+    extends EducationVerificationRepository {
+  _FakeEducationVerificationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<EducationVerificationModel> getStatus() async =>
+      const EducationVerificationModel(
+        institutionName: null,
+        degreeOrProgram: null,
+        status: 'not_submitted',
+      );
 }
 
 void _setViewSize(WidgetTester tester, Size size) {
@@ -169,6 +247,31 @@ _pumpAsRole(
     repository: _FakeNotificationRepository(),
     authProvider: authProvider,
   );
+  // See the AdminDashboardProvider/NotificationProvider comments above —
+  // the same reasoning applies: StudentHomeScreen now reads these 5
+  // providers unconditionally in initState.
+  final studentApplicationsProvider = StudentApplicationsProvider(
+    repository: _FakeApplicationRepository(),
+    authProvider: authProvider,
+  );
+  final studentOpportunitiesProvider = StudentOpportunitiesProvider(
+    repository: _FakeOpportunityRepository(),
+    authProvider: authProvider,
+  );
+  final studentCvProvider = StudentCvProvider(
+    repository: _FakeCvRepository(),
+    studentSkillRepository: _FakeStudentSkillRepository(),
+    authProvider: authProvider,
+  );
+  final studentSkillProvider = StudentSkillProvider(
+    repository: _FakeStudentSkillRepository(),
+    authProvider: authProvider,
+  );
+  final studentEducationVerificationProvider =
+      StudentEducationVerificationProvider(
+        repository: _FakeEducationVerificationRepository(),
+        authProvider: authProvider,
+      );
   final appRouter = AppRouter(
     authProvider,
     studentProfileProvider,
@@ -190,6 +293,22 @@ _pumpAsRole(
         ),
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
+        ),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
+        ChangeNotifierProvider<StudentApplicationsProvider>.value(
+          value: studentApplicationsProvider,
+        ),
+        ChangeNotifierProvider<StudentOpportunitiesProvider>.value(
+          value: studentOpportunitiesProvider,
+        ),
+        ChangeNotifierProvider<StudentCvProvider>.value(
+          value: studentCvProvider,
+        ),
+        ChangeNotifierProvider<StudentSkillProvider>.value(
+          value: studentSkillProvider,
+        ),
+        ChangeNotifierProvider<StudentEducationVerificationProvider>.value(
+          value: studentEducationVerificationProvider,
         ),
       ],
       child: MaterialApp.router(
@@ -276,7 +395,7 @@ void main() {
         ),
       );
 
-      expect(find.text('Role: Student'), findsOneWidget);
+      expect(find.text("Discover Opportunities"), findsOneWidget);
       expect(find.text('Create Student Account'), findsNothing);
     },
   );
@@ -292,7 +411,7 @@ void main() {
       );
 
       expect(find.text('Complete Your Student Profile'), findsOneWidget);
-      expect(find.text('Role: Student'), findsNothing);
+      expect(find.text("Discover Opportunities"), findsNothing);
     },
   );
 
@@ -316,7 +435,7 @@ void main() {
     );
 
     expect(find.text('Create Company Account'), findsNothing);
-    expect(find.text('Role: Student'), findsOneWidget);
+    expect(find.text("Discover Opportunities"), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -420,6 +539,31 @@ void main() {
   );
 
   testWidgets(
+    'Sign Out from the organization setup fallback signs out and returns '
+    'to Login with no redirect loop',
+    (tester) async {
+      final (authProvider, _, _, _) = await _pumpAsRole(
+        tester,
+        role: 'organization',
+        initialPath: AppRoutes.organizationProfileRegistration,
+        existingOrganizationProfile: null,
+      );
+
+      await tester.ensureVisible(find.text('Sign Out'));
+      await tester.tap(find.text('Sign Out'));
+      // pumpAndSettle completing (rather than timing out) is itself proof
+      // there is no redirect loop between the now-unauthenticated state
+      // and the protected setup route.
+      await tester.pumpAndSettle();
+
+      expect(authProvider.isAuthenticated, isFalse);
+      expect(find.text('Company Profile Setup Incomplete'), findsNothing);
+      expect(find.widgetWithText(ElevatedButton, 'Login'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'An unauthenticated visitor to the organization profile setup screen is redirected safely',
     (tester) async {
       _setViewSize(tester, const Size(420, 1400));
@@ -448,6 +592,7 @@ void main() {
             ChangeNotifierProvider<OrganizationProfileProvider>.value(
               value: organizationProfileProvider,
             ),
+            ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
           ],
           child: MaterialApp.router(
             theme: AppTheme.lightTheme,

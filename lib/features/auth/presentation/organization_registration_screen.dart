@@ -3,13 +3,9 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_motion.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/widgets/app_card.dart';
-import '../../../core/widgets/app_error_view.dart';
-import '../../../core/widgets/app_password_field.dart';
-import '../../../core/widgets/app_text_field.dart';
-import '../../../core/widgets/primary_button.dart';
-import '../../../core/widgets/section_header.dart';
+import '../../../core/widgets/app_widgets.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../routes/app_routes.dart';
 import 'registration_step_progress.dart';
@@ -71,6 +67,12 @@ class _OrganizationRegistrationScreenState
   /// concern — never reflected in the route, so there's nothing to carry
   /// across a navigation boundary.
   int _step = 0;
+
+  /// +1 when moving Account -> Company, -1 moving back. Drives which side
+  /// the step-transition slide enters/exits from — read once per
+  /// `setState` by the `AnimatedSwitcher` in [build], never mutated mid
+  /// transition.
+  int _stepDirection = 1;
 
   @override
   void dispose() {
@@ -135,7 +137,22 @@ class _OrganizationRegistrationScreenState
     final isValid = _accountFormKey.currentState?.validate() ?? false;
     if (!isValid) return;
 
-    setState(() => _step = 1);
+    setState(() {
+      _stepDirection = 1;
+      _step = 1;
+    });
+  }
+
+  /// Safe: nothing is submitted to the backend until "Finish" on the
+  /// Company step, so no account exists yet to invalidate, and every
+  /// field already entered on the Account step stays intact (its
+  /// controllers are never cleared) — this is purely local UI state
+  /// (UI Phase 1.4).
+  void _backToAccountStep() {
+    setState(() {
+      _stepDirection = -1;
+      _step = 0;
+    });
   }
 
   Future<void> _finish(AuthProvider authProvider) async {
@@ -183,8 +200,9 @@ class _OrganizationRegistrationScreenState
   @override
   Widget build(BuildContext context) {
     final authProvider = context.watch<AuthProvider>();
-    return _step == 0
+    final currentStep = _step == 0
         ? _AccountStep(
+            key: const ValueKey(0),
             formKey: _accountFormKey,
             nameController: _nameController,
             emailController: _emailController,
@@ -201,6 +219,7 @@ class _OrganizationRegistrationScreenState
             onSignIn: _goToLogin,
           )
         : _CompanyStep(
+            key: const ValueKey(1),
             formKey: _companyFormKey,
             organizationNameController: _organizationNameController,
             organizationType: _organizationType,
@@ -214,14 +233,48 @@ class _OrganizationRegistrationScreenState
             errorMessage: authProvider.errorMessage,
             validateOrganizationName: _validateOrganizationName,
             validateOrganizationType: _validateOrganizationType,
+            onBack: _backToAccountStep,
             onFinish: () => _finish(authProvider),
           );
+
+    // A directional slide+fade between the two steps -- which side each
+    // one enters/exits from depends on `_stepDirection`, not just which
+    // child is "new" vs "old" (the default `AnimatedSwitcher` recipe only
+    // gives every child the same transition). Comparing `child.key` to the
+    // step actually being switched *to* is what tells the same shared
+    // `transitionBuilder` apart for the incoming vs. outgoing widget.
+    //
+    // Both `_AccountStep`/`_CompanyStep` are stateless -- every controller
+    // they read lives on this State object, not inside them -- so swapping
+    // which one is mounted here never recreates or discards a controller.
+    return AnimatedSwitcher(
+      duration: AppMotion.reduced(context, AppMotion.normal),
+      switchInCurve: AppMotion.entrance,
+      switchOutCurve: AppMotion.standard,
+      transitionBuilder: (child, animation) {
+        final isIncoming = child.key == ValueKey(_step);
+        final sign = isIncoming ? _stepDirection : -_stepDirection;
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: Offset(0.06 * sign, 0),
+            end: Offset.zero,
+          ).animate(animation),
+          child: FadeTransition(opacity: animation, child: child),
+        );
+      },
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        alignment: Alignment.topCenter,
+        children: [...previousChildren, ?currentChild],
+      ),
+      child: currentStep,
+    );
   }
 }
 
 /// Step 1 of 2: account information (name, email, password).
 class _AccountStep extends StatelessWidget {
   const _AccountStep({
+    super.key,
     required this.formKey,
     required this.nameController,
     required this.emailController,
@@ -261,127 +314,148 @@ class _AccountStep extends StatelessWidget {
       // Reached with `context.go` (see AccountTypeSelectionScreen), which
       // leaves nothing to pop — so the back arrow needs an explicit target
       // instead of relying on Navigator.canPop.
-      appBar: AppBar(leading: BackButton(onPressed: onBack)),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.screenHorizontal,
-            vertical: AppSpacing.screenVertical,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 600),
-              child: Form(
-                key: formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Create Company Account',
-                      textAlign: TextAlign.center,
-                      style: textTheme.displaySmall,
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      'Enter your account information to get started.',
-                      textAlign: TextAlign.center,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    const RegistrationStepProgress(
-                      progress: 0.5,
-                      stepText: 'Step 1 of 2',
-                      label: 'Account Information',
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
-                    AppCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const SectionHeader(title: 'Account Information'),
-                          const SizedBox(height: AppSpacing.xs),
-                          AppTextField(
-                            controller: nameController,
-                            label: 'Full Name',
-                            hint: 'Jane Doe',
-                            prefixIcon: Icons.person_outline,
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.name],
-                            enabled: !isLoading,
-                            validator: validateFullName,
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppTextField(
-                            controller: emailController,
-                            label: 'Email',
-                            hint: 'you@example.com',
-                            prefixIcon: Icons.mail_outline,
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.email],
-                            enabled: !isLoading,
-                            validator: validateEmail,
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppPasswordField(
-                            controller: passwordController,
-                            label: 'Password',
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.newPassword],
-                            enabled: !isLoading,
-                            validator: validatePassword,
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppPasswordField(
-                            controller: confirmPasswordController,
-                            label: 'Confirm Password',
-                            textInputAction: TextInputAction.done,
-                            autofillHints: const [AutofillHints.newPassword],
-                            enabled: !isLoading,
-                            validator: validateConfirmPassword,
-                            onFieldSubmitted: (_) => onContinue(),
-                          ),
-                          if (errorMessage != null) ...[
-                            const SizedBox(height: AppSpacing.xs),
-                            AppErrorView(
-                              title: 'Registration Failed',
-                              message: errorMessage!,
-                              compact: true,
-                            ),
-                          ],
-                          const SizedBox(height: AppSpacing.sm),
-                          PrimaryButton(
-                            label: 'Continue',
-                            onPressed: onContinue,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+      appBar: AppBar(
+        leading: BackButton(onPressed: onBack),
+        actions: const [ThemeToggleButton()],
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: AuthAnimatedBackground()),
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.screenHorizontal,
+                vertical: AppSpacing.screenVertical,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Form(
+                    key: formKey,
+                    child: AuthEntrance(
                       children: [
                         Text(
-                          'Already have an account?',
-                          style: textTheme.bodyMedium,
+                          'Create Company Account',
+                          textAlign: TextAlign.center,
+                          style: textTheme.displaySmall,
                         ),
-                        TextButton(
-                          onPressed: onSignIn,
-                          child: const Text('Sign In'),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Enter your account information to get started.',
+                          textAlign: TextAlign.center,
+                          style: textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
                         ),
+                        const SizedBox(height: AppSpacing.md),
+                        const RegistrationStepProgress(
+                          progress: 0.5,
+                          stepText: 'Step 1 of 2',
+                          label: 'Account Information',
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                        AppCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const SectionHeader(title: 'Account Information'),
+                              const SizedBox(height: AppSpacing.xs),
+                              AppTextField(
+                                controller: nameController,
+                                label: 'Full Name',
+                                hint: 'Jane Doe',
+                                prefixIcon: Icons.person_outline,
+                                textInputAction: TextInputAction.next,
+                                autofillHints: const [AutofillHints.name],
+                                enabled: !isLoading,
+                                validator: validateFullName,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppTextField(
+                                controller: emailController,
+                                label: 'Email',
+                                hint: 'you@example.com',
+                                prefixIcon: Icons.mail_outline,
+                                keyboardType: TextInputType.emailAddress,
+                                textInputAction: TextInputAction.next,
+                                autofillHints: const [AutofillHints.email],
+                                enabled: !isLoading,
+                                validator: validateEmail,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppPasswordField(
+                                controller: passwordController,
+                                label: 'Password',
+                                textInputAction: TextInputAction.next,
+                                autofillHints: const [
+                                  AutofillHints.newPassword,
+                                ],
+                                enabled: !isLoading,
+                                validator: validatePassword,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppPasswordField(
+                                controller: confirmPasswordController,
+                                label: 'Confirm Password',
+                                textInputAction: TextInputAction.done,
+                                autofillHints: const [
+                                  AutofillHints.newPassword,
+                                ],
+                                enabled: !isLoading,
+                                validator: validateConfirmPassword,
+                                onFieldSubmitted: (_) => onContinue(),
+                              ),
+                              AnimatedSwitcher(
+                                duration: AppMotion.reduced(
+                                  context,
+                                  AppMotion.fast,
+                                ),
+                                child: errorMessage == null
+                                    ? const SizedBox(width: double.infinity)
+                                    : Padding(
+                                        key: ValueKey(errorMessage),
+                                        padding: const EdgeInsets.only(
+                                          top: AppSpacing.xs,
+                                        ),
+                                        child: AppErrorView(
+                                          title: 'Registration Failed',
+                                          message: errorMessage!,
+                                          compact: true,
+                                        ),
+                                      ),
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                              PrimaryButton(
+                                label: 'Continue',
+                                onPressed: onContinue,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              'Already have an account?',
+                              style: textTheme.bodyMedium,
+                            ),
+                            TextButton(
+                              onPressed: onSignIn,
+                              child: const Text('Sign In'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
                       ],
                     ),
-                    const SizedBox(height: AppSpacing.xl),
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -391,6 +465,7 @@ class _AccountStep extends StatelessWidget {
 /// account fields as a single `POST /register/organization` call.
 class _CompanyStep extends StatelessWidget {
   const _CompanyStep({
+    super.key,
     required this.formKey,
     required this.organizationNameController,
     required this.organizationType,
@@ -403,6 +478,7 @@ class _CompanyStep extends StatelessWidget {
     required this.errorMessage,
     required this.validateOrganizationName,
     required this.validateOrganizationType,
+    required this.onBack,
     required this.onFinish,
   });
 
@@ -418,6 +494,7 @@ class _CompanyStep extends StatelessWidget {
   final String? errorMessage;
   final FormFieldValidator<String> validateOrganizationName;
   final FormFieldValidator<String> validateOrganizationType;
+  final VoidCallback onBack;
   final VoidCallback onFinish;
 
   @override
@@ -425,153 +502,169 @@ class _CompanyStep extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      // No back action: going back to Step 1 from here would suggest an
-      // account already exists to return to, but nothing is submitted
-      // until Finish — and there's nowhere safe to send an already
-      // authenticated organization back to once it does.
-      appBar: AppBar(),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.screenHorizontal,
-            vertical: AppSpacing.screenVertical,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 600),
-              child: Form(
-                key: formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Complete Your Company Profile',
-                      textAlign: TextAlign.center,
-                      style: textTheme.displaySmall,
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      'Tell us about your company so we can personalise '
-                      'opportunities for you.',
-                      textAlign: TextAlign.center,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    const RegistrationStepProgress(
-                      progress: 1,
-                      stepText: 'Step 2 of 2',
-                      label: 'Company Information',
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
-                    AppCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const SectionHeader(title: 'Company Information'),
-                          const SizedBox(height: AppSpacing.xs),
-                          AppTextField(
-                            controller: organizationNameController,
-                            label: 'Company Name',
-                            hint: 'Acme Corp',
-                            prefixIcon: Icons.business_outlined,
-                            textInputAction: TextInputAction.next,
-                            enabled: !isLoading,
-                            validator: validateOrganizationName,
+      // Back here just returns to Step 1's local page (`_step = 0`) —
+      // safe, since nothing is submitted to the backend until Finish, so
+      // no account exists yet to invalidate (UI Phase 1.4).
+      appBar: AppBar(
+        leading: BackButton(onPressed: isLoading ? null : onBack),
+        actions: const [ThemeToggleButton()],
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: AuthAnimatedBackground()),
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.screenHorizontal,
+                vertical: AppSpacing.screenVertical,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Form(
+                    key: formKey,
+                    child: AuthEntrance(
+                      children: [
+                        Text(
+                          'Complete Your Company Profile',
+                          textAlign: TextAlign.center,
+                          style: textTheme.displaySmall,
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Tell us about your company so we can personalise '
+                          'opportunities for you.',
+                          textAlign: TextAlign.center,
+                          style: textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
                           ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          DropdownButtonFormField<String>(
-                            initialValue: organizationType,
-                            // Without this, the button sizes itself around
-                            // its widest item ("Training Center") rather
-                            // than the available width, overflowing on
-                            // narrow screens instead of ellipsizing.
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Company Type',
-                            ),
-                            items: [
-                              for (final entry
-                                  in _organizationTypeLabels.entries)
-                                DropdownMenuItem(
-                                  value: entry.key,
-                                  child: Text(
-                                    entry.value,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        const RegistrationStepProgress(
+                          progress: 1,
+                          stepText: 'Step 2 of 2',
+                          label: 'Company Information',
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                        AppCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const SectionHeader(title: 'Company Information'),
+                              const SizedBox(height: AppSpacing.xs),
+                              AppTextField(
+                                controller: organizationNameController,
+                                label: 'Company Name',
+                                hint: 'Acme Corp',
+                                prefixIcon: Icons.business_outlined,
+                                textInputAction: TextInputAction.next,
+                                enabled: !isLoading,
+                                validator: validateOrganizationName,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              DropdownButtonFormField<String>(
+                                initialValue: organizationType,
+                                // Without this, the button sizes itself around
+                                // its widest item ("Training Center") rather
+                                // than the available width, overflowing on
+                                // narrow screens instead of ellipsizing.
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Company Type',
                                 ),
+                                items: [
+                                  for (final entry
+                                      in _organizationTypeLabels.entries)
+                                    DropdownMenuItem(
+                                      value: entry.key,
+                                      child: Text(
+                                        entry.value,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                ],
+                                onChanged: isLoading
+                                    ? null
+                                    : onOrganizationTypeChanged,
+                                validator: validateOrganizationType,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppTextField(
+                                controller: industryController,
+                                label: 'Industry (optional)',
+                                hint: 'e.g. Software',
+                                prefixIcon: Icons.factory_outlined,
+                                textInputAction: TextInputAction.next,
+                                enabled: !isLoading,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppTextField(
+                                controller: websiteController,
+                                label: 'Website (optional)',
+                                hint: 'https://example.com',
+                                prefixIcon: Icons.link,
+                                keyboardType: TextInputType.url,
+                                textInputAction: TextInputAction.next,
+                                enabled: !isLoading,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppTextField(
+                                controller: phoneController,
+                                label: 'Phone (optional)',
+                                hint: '+1 555 123 4567',
+                                prefixIcon: Icons.phone_outlined,
+                                keyboardType: TextInputType.phone,
+                                textInputAction: TextInputAction.next,
+                                enabled: !isLoading,
+                              ),
+                              const SizedBox(height: AppSpacing.inputSpacing),
+                              AppTextField(
+                                controller: descriptionController,
+                                label: 'Description (optional)',
+                                hint: 'What does your company do?',
+                                prefixIcon: Icons.notes_outlined,
+                                textInputAction: TextInputAction.done,
+                                enabled: !isLoading,
+                                maxLines: 3,
+                                onFieldSubmitted: (_) => onFinish(),
+                              ),
+                              AnimatedSwitcher(
+                                duration: AppMotion.reduced(
+                                  context,
+                                  AppMotion.fast,
+                                ),
+                                child: errorMessage == null
+                                    ? const SizedBox(width: double.infinity)
+                                    : Padding(
+                                        key: ValueKey(errorMessage),
+                                        padding: const EdgeInsets.only(
+                                          top: AppSpacing.xs,
+                                        ),
+                                        child: AppErrorView(
+                                          title: 'Something Went Wrong',
+                                          message: errorMessage!,
+                                          compact: true,
+                                        ),
+                                      ),
+                              ),
+                              const SizedBox(height: AppSpacing.lg),
+                              PrimaryButton(
+                                label: 'Finish',
+                                isLoading: isLoading,
+                                onPressed: onFinish,
+                              ),
                             ],
-                            onChanged: isLoading
-                                ? null
-                                : onOrganizationTypeChanged,
-                            validator: validateOrganizationType,
                           ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppTextField(
-                            controller: industryController,
-                            label: 'Industry (optional)',
-                            hint: 'e.g. Software',
-                            prefixIcon: Icons.factory_outlined,
-                            textInputAction: TextInputAction.next,
-                            enabled: !isLoading,
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppTextField(
-                            controller: websiteController,
-                            label: 'Website (optional)',
-                            hint: 'https://example.com',
-                            prefixIcon: Icons.link,
-                            keyboardType: TextInputType.url,
-                            textInputAction: TextInputAction.next,
-                            enabled: !isLoading,
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppTextField(
-                            controller: phoneController,
-                            label: 'Phone (optional)',
-                            hint: '+1 555 123 4567',
-                            prefixIcon: Icons.phone_outlined,
-                            keyboardType: TextInputType.phone,
-                            textInputAction: TextInputAction.next,
-                            enabled: !isLoading,
-                          ),
-                          const SizedBox(height: AppSpacing.inputSpacing),
-                          AppTextField(
-                            controller: descriptionController,
-                            label: 'Description (optional)',
-                            hint: 'What does your company do?',
-                            prefixIcon: Icons.notes_outlined,
-                            textInputAction: TextInputAction.done,
-                            enabled: !isLoading,
-                            maxLines: 3,
-                            onFieldSubmitted: (_) => onFinish(),
-                          ),
-                          if (errorMessage != null) ...[
-                            const SizedBox(height: AppSpacing.xs),
-                            AppErrorView(
-                              title: 'Something Went Wrong',
-                              message: errorMessage!,
-                              compact: true,
-                            ),
-                          ],
-                          const SizedBox(height: AppSpacing.lg),
-                          PrimaryButton(
-                            label: 'Finish',
-                            isLoading: isLoading,
-                            onPressed: onFinish,
-                          ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                      ],
                     ),
-                    const SizedBox(height: AppSpacing.xl),
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

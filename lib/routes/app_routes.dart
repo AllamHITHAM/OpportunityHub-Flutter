@@ -176,4 +176,18 @@ class AppRoutes {
   /// Student-only received invitations (Phase 8B-3, Flow B) — see
   /// `AppRouter` for the role gating applied to it.
   static const String studentInvitations = '/student/invitations';
+
+  /// UI Phase 1.2 — a minimal presentation shell exposing the account-level
+  /// destinations (My CVs, My Skills, Education Verification, Logout) that
+  /// used to live directly on Student Home/Explore, plus the avatar's
+  /// navigation target in the top bar. Not a full Student Profile redesign
+  /// — that follows in a later phase. See `AppRouter` for the role gating
+  /// applied to it.
+  static const String studentProfile = '$studentHome/profile';
+
+  /// UI Phase 3.1 — the real Student Profile edit form (university, major,
+  /// graduation year, phone, bio). Nested under [studentProfile] so it's
+  /// covered by that same route's existing student-only role guard in
+  /// `AppRouter`, matching how [studentSkills] shares [studentCvs]'s guard.
+  static const String studentProfileEdit = '$studentProfile/edit';
 }

@@ -7,13 +7,27 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
+import 'package:opportunityhub_flutter/core/storage/theme_preference_storage.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/core/widgets/primary_button.dart';
 import 'package:opportunityhub_flutter/features/auth/presentation/forgot_password_screen.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
+
+class _FakeThemePreferenceStorage extends ThemePreferenceStorage {
+  ThemeMode? saved;
+
+  @override
+  Future<void> saveThemeMode(ThemeMode mode) async {
+    saved = mode;
+  }
+
+  @override
+  Future<ThemeMode> readThemeMode() async => saved ?? ThemeMode.system;
+}
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository()
@@ -62,6 +76,9 @@ Future<AuthProvider> _pumpScreen(
     MultiProvider(
       providers: [
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+        ChangeNotifierProvider<ThemeProvider>.value(
+          value: ThemeProvider(storage: _FakeThemePreferenceStorage()),
+        ),
       ],
       child: MaterialApp.router(
         theme: AppTheme.lightTheme,

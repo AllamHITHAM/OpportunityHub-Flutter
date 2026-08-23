@@ -33,24 +33,26 @@ class DangerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      height: height ?? _defaultHeight,
-      child: OutlinedButton(
-        onPressed: isLoading ? () {} : onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.error,
-          disabledForegroundColor: AppColors.disabledText,
-          side: const BorderSide(color: AppColors.error),
-          shape: const RoundedRectangleBorder(
-            borderRadius: AppRadius.mediumRadius,
+    return ButtonInteractionSurface(
+      child: SizedBox(
+        width: width,
+        height: height ?? _defaultHeight,
+        child: OutlinedButton(
+          onPressed: isLoading ? () {} : onPressed,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.error,
+            disabledForegroundColor: AppColors.disabledText,
+            side: BorderSide(color: AppColors.error),
+            shape: const RoundedRectangleBorder(
+              borderRadius: AppRadius.mediumRadius,
+            ),
           ),
-        ),
-        child: AppButtonContent(
-          label: label,
-          icon: icon,
-          isLoading: isLoading,
-          spinnerColor: AppColors.error,
+          child: AppButtonContent(
+            label: label,
+            icon: icon,
+            isLoading: isLoading,
+            spinnerColor: AppColors.error,
+          ),
         ),
       ),
     );

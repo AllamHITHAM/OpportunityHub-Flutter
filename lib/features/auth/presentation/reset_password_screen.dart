@@ -3,10 +3,15 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_motion.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/app_animated_status_icon.dart';
 import '../../../core/widgets/app_error_view.dart';
 import '../../../core/widgets/app_password_field.dart';
+import '../../../core/widgets/auth_animated_background.dart';
+import '../../../core/widgets/auth_entrance.dart';
 import '../../../core/widgets/primary_button.dart';
+import '../../../core/widgets/theme_toggle_button.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../routes/app_routes.dart';
 
@@ -77,93 +82,141 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         token != null && token.isNotEmpty && email != null && email.isNotEmpty;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Reset Password')),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.screenHorizontal,
-                vertical: AppSpacing.screenVertical,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 480),
-                    child: !hasValidLink
-                        ? const _InvalidLinkMessage()
-                        : authProvider.resetPasswordSucceeded
-                        ? const _SuccessMessage()
-                        : Form(
-                            key: _formKey,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  'Set a New Password',
-                                  textAlign: TextAlign.center,
-                                  style: textTheme.headlineSmall,
-                                ),
-                                const SizedBox(height: AppSpacing.xs),
-                                Text(
-                                  email,
-                                  textAlign: TextAlign.center,
-                                  style: textTheme.bodyMedium?.copyWith(
-                                    color: AppColors.textSecondary,
-                                  ),
-                                ),
-                                const SizedBox(height: AppSpacing.lg),
-                                AppPasswordField(
-                                  controller: _passwordController,
-                                  label: 'New Password',
-                                  textInputAction: TextInputAction.next,
-                                  enabled: !isLoading,
-                                  validator: _validatePassword,
-                                ),
-                                const SizedBox(height: AppSpacing.inputSpacing),
-                                AppPasswordField(
-                                  controller: _confirmPasswordController,
-                                  label: 'Confirm Password',
-                                  textInputAction: TextInputAction.done,
-                                  enabled: !isLoading,
-                                  validator: _validateConfirmPassword,
-                                  onFieldSubmitted: (_) =>
-                                      _submit(authProvider),
-                                ),
-                                if (authProvider.resetPasswordErrorMessage !=
-                                    null) ...[
-                                  const SizedBox(height: AppSpacing.xs),
-                                  AppErrorView(
-                                    title: 'Something Went Wrong',
-                                    message:
-                                        authProvider.resetPasswordErrorMessage!,
-                                    compact: true,
-                                  ),
-                                ],
-                                const SizedBox(height: AppSpacing.lg),
-                                PrimaryButton(
-                                  label: 'Reset Password',
-                                  isLoading: isLoading,
-                                  onPressed: () => _submit(authProvider),
-                                ),
-                              ],
-                            ),
-                          ),
+      appBar: AppBar(
+        title: const Text('Reset Password'),
+        actions: const [ThemeToggleButton()],
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: AuthAnimatedBackground()),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.screenHorizontal,
+                    vertical: AppSpacing.screenVertical,
                   ),
-                ),
-              ),
-            );
-          },
-        ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
+                    ),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 480),
+                        child: AnimatedSwitcher(
+                          duration: AppMotion.reduced(
+                            context,
+                            AppMotion.normal,
+                          ),
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(
+                                opacity: animation,
+                                child: ScaleTransition(
+                                  scale: Tween<double>(
+                                    begin: 0.97,
+                                    end: 1.0,
+                                  ).animate(animation),
+                                  child: child,
+                                ),
+                              ),
+                          child: !hasValidLink
+                              ? const _InvalidLinkMessage(
+                                  key: ValueKey('invalid'),
+                                )
+                              : authProvider.resetPasswordSucceeded
+                              ? const _SuccessMessage(key: ValueKey('success'))
+                              : Form(
+                                  key: _formKey,
+                                  child: AuthEntrance(
+                                    key: const ValueKey('form'),
+                                    children: [
+                                      Text(
+                                        'Set a New Password',
+                                        textAlign: TextAlign.center,
+                                        style: textTheme.headlineSmall,
+                                      ),
+                                      const SizedBox(height: AppSpacing.xs),
+                                      Text(
+                                        email,
+                                        textAlign: TextAlign.center,
+                                        style: textTheme.bodyMedium?.copyWith(
+                                          color: AppColors.textSecondary,
+                                        ),
+                                      ),
+                                      const SizedBox(height: AppSpacing.lg),
+                                      AppPasswordField(
+                                        controller: _passwordController,
+                                        label: 'New Password',
+                                        textInputAction: TextInputAction.next,
+                                        enabled: !isLoading,
+                                        validator: _validatePassword,
+                                      ),
+                                      const SizedBox(
+                                        height: AppSpacing.inputSpacing,
+                                      ),
+                                      AppPasswordField(
+                                        controller: _confirmPasswordController,
+                                        label: 'Confirm Password',
+                                        textInputAction: TextInputAction.done,
+                                        enabled: !isLoading,
+                                        validator: _validateConfirmPassword,
+                                        onFieldSubmitted: (_) =>
+                                            _submit(authProvider),
+                                      ),
+                                      AnimatedSwitcher(
+                                        duration: AppMotion.reduced(
+                                          context,
+                                          AppMotion.fast,
+                                        ),
+                                        child:
+                                            authProvider
+                                                    .resetPasswordErrorMessage ==
+                                                null
+                                            ? const SizedBox(
+                                                width: double.infinity,
+                                              )
+                                            : Padding(
+                                                key: ValueKey(
+                                                  authProvider
+                                                      .resetPasswordErrorMessage,
+                                                ),
+                                                padding: const EdgeInsets.only(
+                                                  top: AppSpacing.xs,
+                                                ),
+                                                child: AppErrorView(
+                                                  title: 'Something Went Wrong',
+                                                  message: authProvider
+                                                      .resetPasswordErrorMessage!,
+                                                  compact: true,
+                                                ),
+                                              ),
+                                      ),
+                                      const SizedBox(height: AppSpacing.lg),
+                                      PrimaryButton(
+                                        label: 'Reset Password',
+                                        isLoading: isLoading,
+                                        onPressed: () => _submit(authProvider),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _InvalidLinkMessage extends StatelessWidget {
-  const _InvalidLinkMessage();
+  const _InvalidLinkMessage({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -172,10 +225,10 @@ class _InvalidLinkMessage extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(
-          Icons.error_outline_rounded,
-          size: 56,
+        AppAnimatedStatusIcon(
+          icon: Icons.error_outline_rounded,
           color: AppColors.error,
+          backgroundColor: AppColors.errorBackground,
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
@@ -201,7 +254,7 @@ class _InvalidLinkMessage extends StatelessWidget {
 }
 
 class _SuccessMessage extends StatelessWidget {
-  const _SuccessMessage();
+  const _SuccessMessage({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -210,10 +263,10 @@ class _SuccessMessage extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(
-          Icons.check_circle_outline_rounded,
-          size: 56,
+        AppAnimatedStatusIcon(
+          icon: Icons.check_circle_outline_rounded,
           color: AppColors.success,
+          backgroundColor: AppColors.successBackground,
         ),
         const SizedBox(height: AppSpacing.md),
         Text(

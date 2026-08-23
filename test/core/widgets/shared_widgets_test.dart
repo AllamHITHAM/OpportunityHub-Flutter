@@ -4,16 +4,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/core/widgets/app_avatar.dart';
 import 'package:opportunityhub_flutter/core/widgets/app_confirmation_dialog.dart';
 import 'package:opportunityhub_flutter/core/widgets/app_empty_view.dart';
 import 'package:opportunityhub_flutter/core/widgets/app_password_field.dart';
 import 'package:opportunityhub_flutter/core/widgets/app_search_field.dart';
+import 'package:opportunityhub_flutter/core/widgets/organization_avatar.dart';
 import 'package:opportunityhub_flutter/core/widgets/primary_button.dart';
 import 'package:opportunityhub_flutter/core/widgets/status_chip.dart';
 
 Future<void> _pumpApp(WidgetTester tester, Widget child) {
   return tester.pumpWidget(MaterialApp(home: Scaffold(body: child)));
+}
+
+Future<void> _pumpDarkApp(WidgetTester tester, Widget child) {
+  return tester.pumpWidget(
+    MaterialApp(theme: AppTheme.darkTheme, home: Scaffold(body: child)),
+  );
 }
 
 void main() {
@@ -164,6 +172,94 @@ void main() {
 
       expect(find.byIcon(Icons.person_outline), findsOneWidget);
       expect(find.byType(Text), findsNothing);
+    });
+  });
+
+  group('organizationInitials (UI Phase 5.1)', () {
+    test('a single-word name yields its first two characters', () {
+      expect(organizationInitials('ABOMOHAMAD'), 'AB');
+      expect(organizationInitials('Globex'), 'GL');
+    });
+
+    test('a multi-word name yields the first letter of the first two words', () {
+      expect(organizationInitials('ABC Technology'), 'AT');
+      expect(organizationInitials('Acme Global Technologies Inc'), 'AG');
+    });
+
+    test('a one-character name yields that one character', () {
+      expect(organizationInitials('X'), 'X');
+    });
+
+    test('a blank or missing name yields no initials, never "null" or "?"', () {
+      expect(organizationInitials(null), '');
+      expect(organizationInitials(''), '');
+      expect(organizationInitials('   '), '');
+    });
+
+    test('is deterministic and always uppercase', () {
+      expect(organizationInitials('acme corp'), 'AC');
+      expect(organizationInitials('acme corp'), organizationInitials('acme corp'));
+    });
+  });
+
+  group('OrganizationAvatar (UI Phase 5.1)', () {
+    testWidgets('renders two real initials for a single-word organization name, not one', (
+      tester,
+    ) async {
+      await _pumpApp(tester, const OrganizationAvatar(name: 'ABOMOHAMAD'));
+
+      expect(find.text('AB'), findsOneWidget);
+      expect(find.text('A'), findsNothing);
+    });
+
+    testWidgets('renders two initials for a multi-word organization name', (
+      tester,
+    ) async {
+      await _pumpApp(tester, const OrganizationAvatar(name: 'Hiring Co'));
+
+      expect(find.text('HC'), findsOneWidget);
+    });
+
+    testWidgets('falls back to a neutral building icon for a blank name', (
+      tester,
+    ) async {
+      await _pumpApp(tester, const OrganizationAvatar(name: '   '));
+
+      expect(find.byIcon(Icons.apartment_rounded), findsOneWidget);
+      expect(find.byType(Text), findsNothing);
+    });
+
+    testWidgets('renders at the requested size with no overflow', (
+      tester,
+    ) async {
+      await _pumpApp(
+        tester,
+        const OrganizationAvatar(name: 'A Very Long Organization Name Ltd', size: 52),
+      );
+
+      final size = tester.getSize(find.byType(OrganizationAvatar));
+      expect(size.width, 52);
+      expect(size.height, 52);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('renders safely in Dark Mode', (tester) async {
+      await _pumpDarkApp(tester, const OrganizationAvatar(name: 'Hiring Co'));
+
+      expect(find.text('HC'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('an emphasized (hovered) mark still renders the same initials', (
+      tester,
+    ) async {
+      await _pumpApp(
+        tester,
+        const OrganizationAvatar(name: 'Hiring Co', emphasized: true),
+      );
+
+      expect(find.text('HC'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 

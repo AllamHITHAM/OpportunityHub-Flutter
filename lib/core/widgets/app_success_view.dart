@@ -44,7 +44,7 @@ class AppSuccessView extends StatelessWidget {
             Container(
               width: iconBoxSize,
               height: iconBoxSize,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: AppColors.successBackground,
                 shape: BoxShape.circle,
               ),

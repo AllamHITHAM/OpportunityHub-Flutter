@@ -10,18 +10,19 @@ String normalizeMajor(String value) {
 }
 
 /// Client-side mirror of `OpportunityEligibilityService::isStudentEligible()`
-/// (Phase 8B-3.2), used only for the Invite flow's UX (disabling an
-/// ineligible Opportunity before the organization even tries to select
-/// it) -- **never the actual authority**. The backend re-checks this same
-/// rule server-side and is what actually blocks an ineligible invitation;
-/// this exists purely to avoid a round trip for an outcome the UI can
-/// already predict.
-bool isCandidateEligibleForOpportunity(
-  CandidateModel candidate,
+/// (Phase 8B-3.2) -- **never the actual authority**. The backend re-checks
+/// this same rule server-side and is what actually blocks an ineligible
+/// invitation/application; this exists purely so the UI can predict an
+/// outcome it already knows without a round trip. Takes a bare [major]
+/// string rather than a specific model so both the organization's Invite
+/// flow ([isCandidateEligibleForOpportunity], via [CandidateModel.major])
+/// and the student's own Opportunity Details screen (via
+/// `StudentProfileModel.major`) share this one rule instead of each
+/// re-implementing it.
+bool isMajorEligibleForOpportunity(
+  String? major,
   OpportunityModel opportunity,
 ) {
-  final major = candidate.major;
-
   if (opportunity.eligibleMajors.isNotEmpty) {
     if (major == null || major.trim().isEmpty) return false;
     final normalizedMajor = normalizeMajor(major);
@@ -37,4 +38,15 @@ bool isCandidateEligibleForOpportunity(
   }
 
   return true;
+}
+
+/// Used only for the Invite flow's UX (disabling an ineligible Opportunity
+/// before the organization even tries to select it) -- see
+/// [isMajorEligibleForOpportunity] for the shared rule and the same
+/// "never the actual authority" caveat.
+bool isCandidateEligibleForOpportunity(
+  CandidateModel candidate,
+  OpportunityModel opportunity,
+) {
+  return isMajorEligibleForOpportunity(candidate.major, opportunity);
 }

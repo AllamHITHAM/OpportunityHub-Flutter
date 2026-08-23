@@ -46,7 +46,7 @@ class EmailVerificationBanner extends StatelessWidget {
     return AppCard(
       child: Row(
         children: [
-          const Icon(Icons.mail_outline_rounded, color: AppColors.warning),
+          Icon(Icons.mail_outline_rounded, color: AppColors.warning),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text('Email not verified', style: textTheme.bodyMedium),

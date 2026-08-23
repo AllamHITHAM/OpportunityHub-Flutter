@@ -1,5 +1,6 @@
-// Widget tests for StudentSkillsScreen, in isolation with a small GoRouter.
-// Mirrors admin_skills_screen_test.dart's structure and conventions.
+// Widget tests for the premium StudentSkillsScreen (UI Phase 7), in
+// isolation with a small GoRouter and a fake repository. Mirrors
+// student_cv_screen_test.dart's own conventions.
 
 import 'dart:async';
 
@@ -18,6 +19,8 @@ import 'package:opportunityhub_flutter/features/skills/presentation/student_skil
 import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_skill_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
+import 'package:opportunityhub_flutter/routes/app_routes.dart';
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository()
@@ -34,14 +37,18 @@ StudentSkillModel _skill({
   int id = 1,
   int skillId = 10,
   String skillName = 'AutoCAD',
+  String? category,
   String level = 'advanced',
+  double? yearsOfExperience,
   String source = 'manual',
 }) {
   return StudentSkillModel(
     id: id,
     skillId: skillId,
     skillName: skillName,
+    category: category,
     level: level,
+    yearsOfExperience: yearsOfExperience,
     source: source,
   );
 }
@@ -83,6 +90,7 @@ Future<StudentSkillProvider> _pumpScreen(
   WidgetTester tester, {
   required StudentSkillRepository repository,
   Size size = const Size(420, 1400),
+  ThemeData? theme,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -96,11 +104,15 @@ Future<StudentSkillProvider> _pumpScreen(
   );
 
   final router = GoRouter(
-    initialLocation: '/student/cvs/skills',
+    initialLocation: AppRoutes.studentSkills,
     routes: [
       GoRoute(
-        path: '/student/cvs/skills',
+        path: AppRoutes.studentSkills,
         builder: (_, _) => const StudentSkillsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.studentCvs,
+        builder: (_, _) => const Scaffold(body: Text('CV_PLACEHOLDER')),
       ),
     ],
   );
@@ -112,9 +124,11 @@ Future<StudentSkillProvider> _pumpScreen(
         ChangeNotifierProvider<StudentSkillProvider>.value(
           value: skillProvider,
         ),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
       ],
       child: MaterialApp.router(
-        theme: AppTheme.lightTheme,
+        theme: theme ?? AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
         routerConfig: router,
       ),
     ),
@@ -125,7 +139,7 @@ Future<StudentSkillProvider> _pumpScreen(
 }
 
 void main() {
-  testWidgets('Loading state renders while skills are in flight', (
+  testWidgets('Loading state renders a skeleton while skills are in flight', (
     tester,
   ) async {
     final repository = _FakeStudentSkillRepository()
@@ -143,10 +157,10 @@ void main() {
       authProvider: authProvider,
     );
     final router = GoRouter(
-      initialLocation: '/student/cvs/skills',
+      initialLocation: AppRoutes.studentSkills,
       routes: [
         GoRoute(
-          path: '/student/cvs/skills',
+          path: AppRoutes.studentSkills,
           builder: (_, _) => const StudentSkillsScreen(),
         ),
       ],
@@ -159,6 +173,7 @@ void main() {
           ChangeNotifierProvider<StudentSkillProvider>.value(
             value: skillProvider,
           ),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,
@@ -171,6 +186,7 @@ void main() {
 
     expect(skillProvider.isLoading, isTrue);
     expect(find.text('AutoCAD'), findsNothing);
+    expect(find.byType(AppSkeletonList), findsOneWidget);
 
     await tester.pumpAndSettle();
   });
@@ -199,58 +215,424 @@ void main() {
     },
   );
 
-  testWidgets('Empty state shows AppEmptyView', (tester) async {
-    final repository = _FakeStudentSkillRepository()..loadResult = [];
+  testWidgets(
+    'Empty state shows a premium first-use state with a real Analyze My CV CTA',
+    (tester) async {
+      final repository = _FakeStudentSkillRepository()..loadResult = [];
 
-    await _pumpScreen(tester, repository: repository);
+      await _pumpScreen(tester, repository: repository);
 
-    expect(find.text('No Skills Yet'), findsOneWidget);
-  });
+      expect(find.text('Build Your Skill Profile'), findsOneWidget);
+      expect(find.text('Analyze My CV'), findsWidgets);
+    },
+  );
 
-  testWidgets('A CV-supported skill shows the CV-supported label', (
+  testWidgets(
+    'The empty state Analyze My CV action navigates to the real CV route',
+    (tester) async {
+      final repository = _FakeStudentSkillRepository()..loadResult = [];
+
+      await _pumpScreen(tester, repository: repository);
+
+      await tester.tap(find.text('Analyze My CV').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('CV_PLACEHOLDER'), findsOneWidget);
+    },
+  );
+
+  testWidgets('the app-bar My CVs action navigates to the real CV route', (
     tester,
   ) async {
     final repository = _FakeStudentSkillRepository()
-      ..loadResult = [_skill(id: 1, skillName: 'AutoCAD', source: 'cv_ai')];
+      ..loadResult = [_skill()];
 
     await _pumpScreen(tester, repository: repository);
 
-    expect(find.text('AutoCAD'), findsOneWidget);
-    expect(find.text('CV-supported'), findsOneWidget);
-    expect(find.text('Self-declared'), findsNothing);
-    expect(find.textContaining('Verified'), findsNothing);
+    await tester.tap(find.byTooltip('My CVs'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('CV_PLACEHOLDER'), findsOneWidget);
   });
 
-  testWidgets('A manually-added skill shows the Self-declared label', (
-    tester,
-  ) async {
+  testWidgets('the app-bar theme toggle is reachable', (tester) async {
     final repository = _FakeStudentSkillRepository()
-      ..loadResult = [
-        _skill(id: 1, skillName: 'Primavera P6', source: 'manual'),
-      ];
+      ..loadResult = [_skill()];
 
     await _pumpScreen(tester, repository: repository);
 
-    expect(find.text('Primavera P6'), findsOneWidget);
-    expect(find.text('Self-declared'), findsOneWidget);
-    expect(find.text('CV-supported'), findsNothing);
+    expect(find.byType(ThemeToggleButton), findsOneWidget);
   });
 
-  testWidgets('Both evidence labels render together for a mixed list', (
-    tester,
-  ) async {
-    final repository = _FakeStudentSkillRepository()
-      ..loadResult = [
-        _skill(id: 1, skillId: 10, skillName: 'AutoCAD', source: 'cv_ai'),
-        _skill(id: 2, skillId: 11, skillName: 'Primavera P6', source: 'manual'),
-      ];
+  group('Skill presentation', () {
+    testWidgets('A CV-supported skill shows the CV-supported label, never "Verified"', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'AutoCAD', source: 'cv_ai')];
 
-    await _pumpScreen(tester, repository: repository);
+      await _pumpScreen(tester, repository: repository);
 
-    expect(find.text('AutoCAD'), findsOneWidget);
-    expect(find.text('CV-supported'), findsOneWidget);
-    expect(find.text('Primavera P6'), findsOneWidget);
-    expect(find.text('Self-declared'), findsOneWidget);
+      expect(find.text('AutoCAD'), findsOneWidget);
+      expect(find.text('CV-supported'), findsOneWidget);
+      expect(find.text('Self-declared'), findsNothing);
+      expect(find.textContaining('Verified'), findsNothing);
+    });
+
+    testWidgets('A manually-added skill shows the Self-declared label', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillName: 'Primavera P6', source: 'manual'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.text('Primavera P6'), findsOneWidget);
+      expect(find.text('Self-declared'), findsOneWidget);
+      expect(find.text('CV-supported'), findsNothing);
+    });
+
+    testWidgets('Both evidence labels render together for a mixed list', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 10, skillName: 'AutoCAD', source: 'cv_ai'),
+          _skill(id: 2, skillId: 11, skillName: 'Primavera P6', source: 'manual'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+      expect(find.text('CV-supported'), findsOneWidget);
+      expect(find.text('Primavera P6'), findsOneWidget);
+      expect(find.text('Self-declared'), findsOneWidget);
+    });
+
+    testWidgets(
+      'UI Phase 7.1: the manual/CV-supported distinction is not color-only '
+      '-- a CV-supported card carries its own AI icon a manual card never '
+      'shows',
+      (tester) async {
+        final repository = _FakeStudentSkillRepository()
+          ..loadResult = [
+            _skill(id: 1, skillId: 10, skillName: 'AutoCAD', source: 'cv_ai'),
+            _skill(id: 2, skillId: 11, skillName: 'Primavera P6', source: 'manual'),
+          ];
+
+        await _pumpScreen(tester, repository: repository);
+
+        final cvCard = find.ancestor(
+          of: find.text('AutoCAD'),
+          matching: find.byType(AppCard),
+        );
+        final manualCard = find.ancestor(
+          of: find.text('Primavera P6'),
+          matching: find.byType(AppCard),
+        );
+
+        // Within the cv_ai skill's own card: the small name-row accent icon
+        // plus the evidence badge's own icon. Zero auto_awesome within the
+        // manual card -- the difference is never carried by color alone.
+        expect(
+          find.descendant(of: cvCard, matching: find.byIcon(Icons.auto_awesome)),
+          findsNWidgets(2),
+        );
+        expect(
+          find.descendant(of: manualCard, matching: find.byIcon(Icons.auto_awesome)),
+          findsNothing,
+        );
+        expect(
+          find.descendant(
+            of: manualCard,
+            matching: find.byIcon(Icons.edit_note_rounded),
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'UI Phase 7.1: AI purple only decorates the CV-supported card, never '
+      'the manual one',
+      (tester) async {
+        final repository = _FakeStudentSkillRepository()
+          ..loadResult = [
+            _skill(id: 1, skillId: 10, skillName: 'AutoCAD', source: 'cv_ai'),
+            _skill(id: 2, skillId: 11, skillName: 'Primavera P6', source: 'manual'),
+          ];
+
+        await _pumpScreen(tester, repository: repository);
+
+        final cvCard = tester.widget<AppCard>(
+          find.ancestor(
+            of: find.text('AutoCAD'),
+            matching: find.byType(AppCard),
+          ),
+        );
+        final manualCard = tester.widget<AppCard>(
+          find.ancestor(
+            of: find.text('Primavera P6'),
+            matching: find.byType(AppCard),
+          ),
+        );
+
+        expect(cvCard.borderColor, isNotNull);
+        expect(manualCard.borderColor, isNull);
+      },
+    );
+
+    testWidgets('each real level renders its own properly-cased label', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 1, skillName: 'Skill Beginner', level: 'beginner'),
+          _skill(id: 2, skillId: 2, skillName: 'Skill Intermediate', level: 'intermediate'),
+          _skill(id: 3, skillId: 3, skillName: 'Skill Advanced', level: 'advanced'),
+          _skill(id: 4, skillId: 4, skillName: 'Skill Expert', level: 'expert'),
+        ];
+
+      await _pumpScreen(tester, repository: repository, size: const Size(420, 2400));
+
+      // Each level's own filter chip renders the identical label text, so
+      // two widgets (the filter chip plus this skill's own level pill) is
+      // the real, expected count -- not an accidental collision.
+      expect(find.text('Beginner'), findsNWidgets(2));
+      expect(find.text('Intermediate'), findsNWidgets(2));
+      expect(find.text('Advanced'), findsNWidgets(2));
+      expect(find.text('Expert'), findsNWidgets(2));
+    });
+
+    testWidgets('a real catalog category is shown when present', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillName: 'AutoCAD', category: 'Civil Engineering'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.text('Civil Engineering'), findsOneWidget);
+    });
+
+    testWidgets('no category text renders when the catalog skill has none', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'AutoCAD', category: null)];
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('real years of experience is shown only when present', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillName: 'AutoCAD', yearsOfExperience: 3.5),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.textContaining('3.5 yrs experience'), findsOneWidget);
+    });
+
+    testWidgets('a very long skill name does not overflow', (tester) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(
+            id: 1,
+            skillName: 'A Very Long Skill Name That Might Wrap Or Overflow The Card',
+          ),
+        ];
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(320, 700),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('Skills Summary', () {
+    testWidgets('shows real, locally-derived Total, CV-Supported, and Self-Declared counts', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 1, skillName: 'AutoCAD', source: 'cv_ai'),
+          _skill(id: 2, skillId: 2, skillName: 'Python', source: 'cv_ai'),
+          _skill(id: 3, skillId: 3, skillName: 'Excel', source: 'manual'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.text('Skills Summary'), findsOneWidget);
+      expect(find.text('Total Skills'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
+      // "CV-Supported"/"Self-Declared" are also the real filter chip
+      // labels just below the summary, so two matches (summary row +
+      // filter chip) is the real, expected count.
+      expect(find.text('CV-Supported'), findsNWidgets(2));
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text('Self-Declared'), findsNWidgets(2));
+      expect(find.text('1'), findsOneWidget);
+    });
+
+    testWidgets('never fabricates a profile score or percentile', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1)];
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.textContaining('%'), findsNothing);
+      expect(find.textContaining('score'), findsNothing);
+      expect(find.textContaining('percentile'), findsNothing);
+    });
+  });
+
+  group('Search', () {
+    testWidgets('filters the visible skills by real skill name', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 1, skillName: 'AutoCAD'),
+          _skill(id: 2, skillId: 2, skillName: 'Python'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      await tester.enterText(find.byType(TextFormField), 'auto');
+      await tester.pumpAndSettle();
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+      expect(find.text('Python'), findsNothing);
+    });
+
+    testWidgets('shows a polished no-match state with Clear Search & Filters', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'AutoCAD')];
+
+      await _pumpScreen(tester, repository: repository);
+
+      await tester.enterText(find.byType(TextFormField), 'nonexistent skill');
+      await tester.pumpAndSettle();
+
+      expect(find.text('No Matching Skills'), findsOneWidget);
+      expect(find.text('Clear Search & Filters'), findsOneWidget);
+
+      await tester.tap(find.text('Clear Search & Filters'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+    });
+  });
+
+  group('Filters', () {
+    testWidgets('the CV-Supported filter shows only cv_ai skills', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 1, skillName: 'AutoCAD', source: 'cv_ai'),
+          _skill(id: 2, skillId: 2, skillName: 'Excel', source: 'manual'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      await tester.tap(find.byKey(const Key('skill-filter-source-cv_ai')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+      expect(find.text('Excel'), findsNothing);
+    });
+
+    testWidgets('the Self-Declared filter shows only manual skills', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 1, skillName: 'AutoCAD', source: 'cv_ai'),
+          _skill(id: 2, skillId: 2, skillName: 'Excel', source: 'manual'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      await tester.tap(find.byKey(const Key('skill-filter-source-manual')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('AutoCAD'), findsNothing);
+      expect(find.text('Excel'), findsOneWidget);
+    });
+
+    testWidgets('the All filter restores every skill', (tester) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 1, skillName: 'AutoCAD', source: 'cv_ai'),
+          _skill(id: 2, skillId: 2, skillName: 'Excel', source: 'manual'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      await tester.tap(find.byKey(const Key('skill-filter-source-manual')));
+      await tester.pumpAndSettle();
+      expect(find.text('AutoCAD'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('skill-filter-source-all')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+      expect(find.text('Excel'), findsOneWidget);
+    });
+
+    testWidgets('a level filter shows only skills at that real level', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 1, skillName: 'AutoCAD', level: 'expert'),
+          _skill(id: 2, skillId: 2, skillName: 'Excel', level: 'beginner'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      await tester.tap(find.byKey(const Key('skill-filter-level-expert')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+      expect(find.text('Excel'), findsNothing);
+    });
+
+    testWidgets('search and filters compose together', (tester) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 1, skillName: 'AutoCAD', source: 'cv_ai'),
+          _skill(id: 2, skillId: 2, skillName: 'AutoDesk Fusion', source: 'manual'),
+        ];
+
+      await _pumpScreen(tester, repository: repository);
+
+      await tester.enterText(find.byType(TextFormField), 'auto');
+      await tester.tap(find.byKey(const Key('skill-filter-source-cv_ai')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+      expect(find.text('AutoDesk Fusion'), findsNothing);
+    });
   });
 
   testWidgets('Pull-to-refresh calls the provider and reloads the list', (
@@ -266,21 +648,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.getStudentSkillsCallCount, 2);
-  });
-
-  testWidgets('No overflow at a narrow 320-wide viewport', (tester) async {
-    final repository = _FakeStudentSkillRepository()
-      ..loadResult = [
-        _skill(skillName: 'A Very Long Skill Name That Might Wrap Or Overflow'),
-      ];
-
-    await _pumpScreen(
-      tester,
-      repository: repository,
-      size: const Size(320, 700),
-    );
-
-    expect(tester.takeException(), isNull);
   });
 
   group('Remove skill', () {
@@ -442,5 +809,91 @@ void main() {
         expect(find.text('AutoCAD'), findsNothing);
       },
     );
+  });
+
+  group('Responsive layout', () {
+    testWidgets('Does not overflow at a narrow 320x900 viewport', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [
+          _skill(id: 1, skillId: 1, skillName: 'AutoCAD'),
+          _skill(id: 2, skillId: 2, skillName: 'Excel'),
+        ];
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(320, 1400),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Does not overflow at a tablet viewport', (tester) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'AutoCAD')];
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(900, 1000),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'Does not overflow at a wide desktop viewport and uses a 2-column grid',
+      (tester) async {
+        final repository = _FakeStudentSkillRepository()
+          ..loadResult = [
+            _skill(id: 1, skillId: 1, skillName: 'AutoCAD'),
+            _skill(id: 2, skillId: 2, skillName: 'Excel'),
+          ];
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          size: const Size(1440, 1000),
+        );
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('AutoCAD'), findsOneWidget);
+        expect(find.text('Excel'), findsOneWidget);
+        expect(find.byKey(const ValueKey('skills-grid-desktop')), findsOneWidget);
+      },
+    );
+  });
+
+  testWidgets('honors reduced motion without throwing', (tester) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+
+    final repository = _FakeStudentSkillRepository()
+      ..loadResult = [_skill(id: 1, skillName: 'AutoCAD')];
+    await _pumpScreen(tester, repository: repository);
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('AutoCAD'), findsOneWidget);
+  });
+
+  testWidgets('renders correctly in Dark Mode', (tester) async {
+    final repository = _FakeStudentSkillRepository()
+      ..loadResult = [
+        _skill(id: 1, skillName: 'AutoCAD', source: 'cv_ai'),
+        _skill(id: 2, skillId: 2, skillName: 'Excel', source: 'manual'),
+      ];
+
+    await _pumpScreen(
+      tester,
+      repository: repository,
+      theme: AppTheme.darkTheme,
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('AutoCAD'), findsOneWidget);
+    expect(find.text('Excel'), findsOneWidget);
   });
 }

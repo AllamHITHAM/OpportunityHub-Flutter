@@ -43,7 +43,7 @@ class AppErrorView extends StatelessWidget {
             Container(
               width: iconBoxSize,
               height: iconBoxSize,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: AppColors.errorBackground,
                 shape: BoxShape.circle,
               ),

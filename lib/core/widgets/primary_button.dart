@@ -31,19 +31,21 @@ class PrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      height: height ?? _defaultHeight,
-      child: ElevatedButton(
-        // A no-op (instead of null) keeps the button's normal enabled
-        // appearance while loading, rather than flashing into its
-        // disabled style, while still swallowing taps.
-        onPressed: isLoading ? () {} : onPressed,
-        child: AppButtonContent(
-          label: label,
-          icon: icon,
-          isLoading: isLoading,
-          spinnerColor: AppColors.onPrimary,
+    return ButtonInteractionSurface(
+      child: SizedBox(
+        width: width,
+        height: height ?? _defaultHeight,
+        child: ElevatedButton(
+          // A no-op (instead of null) keeps the button's normal enabled
+          // appearance while loading, rather than flashing into its
+          // disabled style, while still swallowing taps.
+          onPressed: isLoading ? () {} : onPressed,
+          child: AppButtonContent(
+            label: label,
+            icon: icon,
+            isLoading: isLoading,
+            spinnerColor: AppColors.onPrimary,
+          ),
         ),
       ),
     );

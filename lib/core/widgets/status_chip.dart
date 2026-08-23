@@ -18,29 +18,25 @@ class _StatusColors {
   final Color foreground;
 }
 
-const Map<AppStatusType, _StatusColors> _statusColors = {
-  AppStatusType.neutral: _StatusColors(
-    AppColors.surfaceVariant,
-    AppColors.textSecondary,
-  ),
-  AppStatusType.info: _StatusColors(AppColors.infoBackground, AppColors.info),
-  AppStatusType.success: _StatusColors(
-    AppColors.successBackground,
-    AppColors.success,
-  ),
-  AppStatusType.warning: _StatusColors(
-    AppColors.warningBackground,
-    AppColors.warning,
-  ),
-  AppStatusType.error: _StatusColors(
-    AppColors.errorBackground,
-    AppColors.error,
-  ),
-  AppStatusType.primary: _StatusColors(
-    AppColors.primaryContainer,
-    AppColors.primaryDark,
-  ),
-};
+/// Resolved fresh on every call (never cached in a `const`/`final` map) so
+/// it always reflects the current light/dark theme — see [AppColors]'s own
+/// doc comment on why its fields are plain getters rather than constants.
+_StatusColors _statusColorsFor(AppStatusType type) {
+  switch (type) {
+    case AppStatusType.neutral:
+      return _StatusColors(AppColors.surfaceVariant, AppColors.textSecondary);
+    case AppStatusType.info:
+      return _StatusColors(AppColors.infoBackground, AppColors.info);
+    case AppStatusType.success:
+      return _StatusColors(AppColors.successBackground, AppColors.success);
+    case AppStatusType.warning:
+      return _StatusColors(AppColors.warningBackground, AppColors.warning);
+    case AppStatusType.error:
+      return _StatusColors(AppColors.errorBackground, AppColors.error);
+    case AppStatusType.primary:
+      return _StatusColors(AppColors.primaryContainer, AppColors.primaryDark);
+  }
+}
 
 /// A small, rounded label communicating a status — e.g. "Submitted",
 /// "Under Review", "Shortlisted", "Interview", "Offer", "Rejected",
@@ -62,7 +58,7 @@ class StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = _statusColors[type]!;
+    final colors = _statusColorsFor(type);
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -80,12 +76,20 @@ class StatusChip extends StatelessWidget {
             Icon(icon, size: compact ? 12 : 14, color: colors.foreground),
             SizedBox(width: compact ? 4 : AppSpacing.xxs),
           ],
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: compact ? 11 : 12,
-              fontWeight: FontWeight.w600,
-              color: colors.foreground,
+          // Flexible+ellipsis is purely defensive: it never changes how an
+          // already-short label renders (the common case everywhere this
+          // is used today), but keeps a longer label from ever overflowing
+          // when a narrow viewport constrains the chip's available width
+          // (e.g. inside a `Wrap`).
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: compact ? 11 : 12,
+                fontWeight: FontWeight.w600,
+                color: colors.foreground,
+              ),
             ),
           ),
         ],
