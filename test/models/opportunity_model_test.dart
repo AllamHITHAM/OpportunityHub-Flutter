@@ -59,13 +59,33 @@ void main() {
       expect(opportunity.eligibleMajors, isEmpty);
     });
 
-    test('field_of_study is preserved alongside eligible_majors', () {
+    // Opportunity Academic Matching Cleanup: `field_of_study` is
+    // deprecated/legacy and no longer modeled on `OpportunityModel` at
+    // all -- a response that still includes it (a historical Opportunity)
+    // must parse without error, the key is simply ignored.
+    test('a response that still includes field_of_study parses safely', () {
       final opportunity = OpportunityModel.fromJson(
         _json(eligibleMajors: ['Computer Science']),
       );
 
-      expect(opportunity.fieldOfStudy, 'Computer Science');
       expect(opportunity.eligibleMajors, ['Computer Science']);
+    });
+
+    test('parses the canonical location_id (Phase O8.2)', () {
+      final json = _json()
+        ..['location_id'] = 5
+        ..['location'] = 'Nablus';
+
+      final opportunity = OpportunityModel.fromJson(json);
+
+      expect(opportunity.locationId, 5);
+      expect(opportunity.location, 'Nablus');
+    });
+
+    test('a missing location_id (legacy response) parses to null', () {
+      final opportunity = OpportunityModel.fromJson(_json());
+
+      expect(opportunity.locationId, isNull);
     });
   });
 }

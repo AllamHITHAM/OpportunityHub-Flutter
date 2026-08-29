@@ -10,6 +10,8 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
+import 'package:opportunityhub_flutter/models/opportunity_skill_model.dart';
+import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_opportunities_provider.dart';
 
@@ -65,10 +67,12 @@ class _FakeOpportunityRepository extends OpportunityRepository {
   OpportunityModel? createResult;
   ApiException? createError;
   int createCallCount = 0;
+  Map<int, bool>? lastCreateSkills;
 
   OpportunityModel? updateResult;
   ApiException? updateError;
   int updateCallCount = 0;
+  Map<int, bool>? lastUpdateSkills;
 
   ApiException? deleteError;
   int deleteCallCount = 0;
@@ -97,15 +101,18 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     required String experienceLevel,
     String? educationLevel,
     String? fieldOfStudy,
-    String? location,
+    int? locationId,
     double? salaryMin,
     double? salaryMax,
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
     List<String>? eligibleMajors,
+    Map<int, bool>? skills,
+    String? recruitmentProcess,
   }) async {
     createCallCount++;
+    lastCreateSkills = skills;
     if (createError != null) throw createError!;
     return createResult!;
   }
@@ -121,15 +128,18 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     required String experienceLevel,
     String? educationLevel,
     String? fieldOfStudy,
-    String? location,
+    int? locationId,
     double? salaryMin,
     double? salaryMax,
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
     List<String>? eligibleMajors,
+    Map<int, bool>? skills,
+    String? recruitmentProcess,
   }) async {
     updateCallCount++;
+    lastUpdateSkills = skills;
     if (updateError != null) throw updateError!;
     return updateResult!;
   }
@@ -138,6 +148,30 @@ class _FakeOpportunityRepository extends OpportunityRepository {
   Future<void> deleteOpportunity(int id) async {
     deleteCallCount++;
     if (deleteError != null) throw deleteError!;
+  }
+
+  List<SkillModel> skillCatalog = [];
+  ApiException? catalogError;
+  int getSkillCatalogCallCount = 0;
+
+  Map<int, bool>? lastSkillsSync;
+  ApiException? syncSkillsError;
+
+  @override
+  Future<List<SkillModel>> getSkillCatalog() async {
+    getSkillCatalogCallCount++;
+    if (catalogError != null) throw catalogError!;
+    return skillCatalog;
+  }
+
+  @override
+  Future<List<OpportunitySkillModel>> syncOpportunitySkills(
+    int opportunityId,
+    Map<int, bool> skillIdToIsRequired,
+  ) async {
+    lastSkillsSync = skillIdToIsRequired;
+    if (syncSkillsError != null) throw syncSkillsError!;
+    return [];
   }
 }
 
@@ -230,6 +264,23 @@ void main() {
     expect(created?.id, 2);
     expect(provider.opportunities, hasLength(2));
     expect(provider.opportunities.map((o) => o.id), containsAll([1, 2]));
+  });
+
+  test('create passes eligibleMajors and skills through to the repository '
+      'atomically (Opportunity Requirements Integrity Patch)', () async {
+    repository.createResult = _opportunity(id: 2, title: 'New Role');
+    await provider.createOpportunity(
+      title: 'New Role',
+      description: 'A great opportunity.',
+      opportunityType: 'job',
+      employmentType: 'full_time',
+      workMode: 'remote',
+      experienceLevel: 'junior',
+      eligibleMajors: ['Computer Science'],
+      skills: {10: true},
+    );
+
+    expect(repository.lastCreateSkills, {10: true});
   });
 
   test(
@@ -350,4 +401,61 @@ void main() {
       expect(provider.opportunities.single.title, 'Org B Role');
     },
   );
+
+  group('loadSkillCatalog (Phase O8.2)', () {
+    test('populates catalogSkills on success', () async {
+      repository.skillCatalog = [const SkillModel(id: 1, name: 'Laravel')];
+
+      await provider.loadSkillCatalog();
+
+      expect(provider.catalogSkills, hasLength(1));
+      expect(provider.catalogErrorMessage, isNull);
+    });
+
+    test(
+      'a repeat call with results already cached is not re-fetched unless forced',
+      () async {
+        repository.skillCatalog = [const SkillModel(id: 1, name: 'Laravel')];
+        await provider.loadSkillCatalog();
+        expect(repository.getSkillCatalogCallCount, 1);
+
+        await provider.loadSkillCatalog();
+        expect(repository.getSkillCatalogCallCount, 1);
+
+        await provider.loadSkillCatalog(forceRefresh: true);
+        expect(repository.getSkillCatalogCallCount, 2);
+      },
+    );
+
+    test('sets catalogErrorMessage on failure', () async {
+      repository.catalogError = ApiException('Server error.');
+
+      await provider.loadSkillCatalog();
+
+      expect(provider.catalogSkills, isEmpty);
+      expect(provider.catalogErrorMessage, 'Server error.');
+    });
+  });
+
+  group('syncSkills (Phase O8.2)', () {
+    test(
+      'sends the real canonical skill ID map and returns true on success',
+      () async {
+        final success = await provider.syncSkills(9, {10: true, 11: false});
+
+        expect(success, isTrue);
+        expect(repository.lastSkillsSync, {10: true, 11: false});
+        expect(provider.skillsSyncErrorMessage, isNull);
+      },
+    );
+
+    test('returns false and sets skillsSyncErrorMessage on failure', () async {
+      repository.syncSkillsError = ApiException('Server error.');
+
+      final success = await provider.syncSkills(9, {10: true});
+
+      expect(success, isFalse);
+      expect(provider.skillsSyncErrorMessage, 'Server error.');
+    });
+  });
 }

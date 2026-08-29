@@ -208,6 +208,73 @@ class NotificationProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Permanently removes [notificationId] from the caller's own inbox
+  /// (Phase 9.1) — inbox cleanup only, never touches the business entity
+  /// the notification was about (see
+  /// `NotificationRepository.deleteNotification`'s own doc comment).
+  /// Returns `true` only on success, in which case [notifications] (and
+  /// therefore [unreadCount]/[hasUnread], both derived from it) update
+  /// immediately. A duplicate submission for the same ID while one is
+  /// already in flight is ignored. Shares [busyNotificationIds] with
+  /// [markAsRead] — a notification can't be marked-read and deleted at
+  /// the same time anyway, and the UI only ever offers one action at once
+  /// per item.
+  Future<bool> deleteNotification(int notificationId) async {
+    if (busyNotificationIds.contains(notificationId)) return false;
+
+    busyNotificationIds.add(notificationId);
+    actionErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      await repository.deleteNotification(notificationId);
+      // Deliberately never touches `notifications` on failure — a failed
+      // delete must never make an already-visible notification silently
+      // disappear when it didn't actually happen.
+      notifications = notifications.where((n) => n.id != notificationId).toList();
+      success = true;
+    } on ApiException catch (error) {
+      actionErrorMessage = error.message;
+    } catch (_) {
+      actionErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      busyNotificationIds.remove(notificationId);
+      notifyListeners();
+    }
+    return success;
+  }
+
+  bool isClearingRead = false;
+
+  /// Permanently removes every currently-read notification from the
+  /// caller's own inbox (Phase 9.1) — unread notifications are always
+  /// left untouched, both by the backend and by this local update.
+  /// Returns `true` only on success. A duplicate submission while one is
+  /// already in flight is ignored.
+  Future<bool> clearRead() async {
+    if (isClearingRead) return false;
+
+    isClearingRead = true;
+    actionErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      await repository.clearRead();
+      notifications = notifications.where((n) => !n.isRead).toList();
+      success = true;
+    } on ApiException catch (error) {
+      actionErrorMessage = error.message;
+    } catch (_) {
+      actionErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isClearingRead = false;
+      notifyListeners();
+    }
+    return success;
+  }
+
   /// Clears all notification state — called when the signed-in user
   /// changes.
   void reset() {
@@ -215,6 +282,7 @@ class NotificationProvider extends ChangeNotifier {
     isLoading = false;
     errorMessage = null;
     isMarkingAll = false;
+    isClearingRead = false;
     actionErrorMessage = null;
     busyNotificationIds.clear();
     // Invalidates any load still in flight — a stale response arriving

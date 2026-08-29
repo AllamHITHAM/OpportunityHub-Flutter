@@ -2,17 +2,20 @@ import 'package:flutter/foundation.dart';
 
 import '../core/api/api_client.dart';
 import '../features/skills/data/student_skill_repository.dart';
+import '../models/skill_model.dart';
 import '../models/student_skill_model.dart';
 import 'auth_provider.dart';
 
 /// Holds the authenticated student's own skill list (Phase 8A-6.1's "My
 /// Skills" screen), each carrying its evidence `source` so the student can
-/// see which skills are CV-supported vs self-declared, plus the ability to
-/// remove one from their own profile.
+/// see which skills are CV-supported vs self-declared; the real Skill
+/// catalog for a Manual Add Skill flow (Phase 8A-6.3); and the ability to
+/// add or remove a skill from the student's own profile.
 ///
-/// Adding a skill is out of scope here: accepting an AI CV suggestion
-/// already goes through `StudentCvProvider.addSelectedSkills`, and the
-/// ordinary manual-add flow has no Flutter UI yet.
+/// Accepting an AI CV suggestion still goes through
+/// `StudentCvProvider.addSelectedSkills` -- entirely separate from
+/// [addSkill] here, which is always `source: manual` (the backend, never
+/// this provider, is what actually assigns the source).
 class StudentSkillProvider extends ChangeNotifier {
   StudentSkillProvider({
     required this.repository,
@@ -40,6 +43,16 @@ class StudentSkillProvider extends ChangeNotifier {
   /// duplicate requests, without preventing an explicit refresh once the
   /// previous fetch has finished. Mirrors `StudentCvProvider._pendingListFetch`.
   Future<void>? _pendingFetch;
+
+  /// The real, full Skill catalog (Phase 8A-6.3) for the Manual Add Skill
+  /// picker -- never a partial or hardcoded list.
+  List<SkillModel> catalogSkills = [];
+  bool isLoadingCatalog = false;
+  String? catalogErrorMessage;
+  Future<void>? _pendingCatalogFetch;
+
+  bool isAddingSkill = false;
+  String? addErrorMessage;
 
   bool isBusy(int studentSkillId) => busySkillIds.contains(studentSkillId);
 
@@ -105,6 +118,70 @@ class StudentSkillProvider extends ChangeNotifier {
     return success;
   }
 
+  /// Fetches the real Skill catalog for the Manual Add Skill picker.
+  /// Mirrors [load]'s single-in-flight-request pattern, but cached across
+  /// sheet opens by default -- the catalog rarely changes, so reopening
+  /// the sheet doesn't need a fresh network round trip every time; pass
+  /// [forceRefresh] to force one anyway.
+  Future<void> loadCatalog({bool forceRefresh = false}) {
+    if (forceRefresh) {
+      _pendingCatalogFetch = null;
+    }
+    if (!forceRefresh && catalogSkills.isNotEmpty) {
+      return _pendingCatalogFetch ?? Future.value();
+    }
+    return _pendingCatalogFetch ??= _performLoadCatalog();
+  }
+
+  Future<void> _performLoadCatalog() async {
+    isLoadingCatalog = true;
+    catalogErrorMessage = null;
+    notifyListeners();
+
+    try {
+      catalogSkills = await repository.getSkillCatalog();
+    } on ApiException catch (error) {
+      catalogErrorMessage = error.message;
+    } catch (_) {
+      catalogErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isLoadingCatalog = false;
+      _pendingCatalogFetch = null;
+      notifyListeners();
+    }
+  }
+
+  /// Manually adds [skillId] at the student's chosen [level] to their own
+  /// profile -- always `source: manual`; the backend is the sole authority
+  /// on what source ends up stored (see `StudentSkillRepository.addSkill`).
+  /// Returns `true` only once the backend has actually persisted the row,
+  /// which is then appended to [skills] from the real response -- never a
+  /// locally-fabricated entry. A duplicate submission while one is already
+  /// in flight is ignored (returns `false` immediately, no second
+  /// repository call).
+  Future<bool> addSkill({required int skillId, required String level}) async {
+    if (isAddingSkill) return false;
+
+    isAddingSkill = true;
+    addErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      final added = await repository.addSkill(skillId: skillId, level: level);
+      skills = [...skills, added];
+      success = true;
+    } on ApiException catch (error) {
+      addErrorMessage = error.message;
+    } catch (_) {
+      addErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isAddingSkill = false;
+      notifyListeners();
+    }
+    return success;
+  }
+
   void reset() {
     skills = [];
     isLoading = false;
@@ -112,6 +189,12 @@ class StudentSkillProvider extends ChangeNotifier {
     actionErrorMessage = null;
     busySkillIds.clear();
     _pendingFetch = null;
+    catalogSkills = [];
+    isLoadingCatalog = false;
+    catalogErrorMessage = null;
+    _pendingCatalogFetch = null;
+    isAddingSkill = false;
+    addErrorMessage = null;
     notifyListeners();
   }
 

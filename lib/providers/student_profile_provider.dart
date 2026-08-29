@@ -100,6 +100,9 @@ class StudentProfileProvider extends ChangeNotifier {
     required String university,
     required String major,
     required int graduationYear,
+    required List<String> interestedIn,
+    int? currentLocationId,
+    List<int>? availableLocationIds,
   }) async {
     isLoading = true;
     errorMessage = null;
@@ -111,6 +114,9 @@ class StudentProfileProvider extends ChangeNotifier {
         university: university,
         major: major,
         graduationYear: graduationYear,
+        interestedIn: interestedIn,
+        currentLocationId: currentLocationId,
+        availableLocationIds: availableLocationIds,
       );
       hasChecked = true;
       _checkSucceeded = true;
@@ -154,8 +160,11 @@ class StudentProfileProvider extends ChangeNotifier {
     required String university,
     required String major,
     required int graduationYear,
+    required List<String> interestedIn,
     String? phone,
     String? bio,
+    int? currentLocationId,
+    List<int> availableLocationIds = const [],
   }) async {
     if (isSubmitting) return false;
 
@@ -170,8 +179,11 @@ class StudentProfileProvider extends ChangeNotifier {
         university: university,
         major: major,
         graduationYear: graduationYear,
+        interestedIn: interestedIn,
         phone: phone,
         bio: bio,
+        currentLocationId: currentLocationId,
+        availableLocationIds: availableLocationIds,
       );
       success = true;
     } on ApiException catch (error) {

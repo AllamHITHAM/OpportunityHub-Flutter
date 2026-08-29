@@ -46,6 +46,27 @@ const educationLevelLabels = {
 
 const statusLabels = {'draft': 'Draft', 'open': 'Open', 'closed': 'Closed'};
 
+/// Phase 10A.4B — backend-authoritative `recruitment_process` labels.
+/// Deliberately only 3 values, not the 4 the product spec's own copy
+/// initially sketches out ("Quiz Only" vs "Quiz -> Interview/Offer
+/// decision") — Phase 10A.4A already made a real Organization decision
+/// mandatory before any Quiz result can reach a Student, so a
+/// no-decision-needed "Quiz Only" mode doesn't structurally exist any
+/// more; `quiz` here always means the full decision-aware flow.
+const recruitmentProcessLabels = {
+  'none': 'No Assessment',
+  'interview': 'Interview Only',
+  'quiz': 'Quiz',
+};
+
+const recruitmentProcessDescriptions = {
+  'none': 'Choose how to evaluate each candidate individually, as before.',
+  'interview': 'Shortlisted candidates proceed directly to an interview.',
+  'quiz':
+      'Shortlisted candidates complete a shared quiz before the '
+      'organization decides the next step.',
+};
+
 AppStatusType statusChipType(String status) {
   switch (status) {
     case 'open':
@@ -75,25 +96,23 @@ String formatSalaryRange(OpportunityModel opportunity) {
 /// "+N" suffix, so a long list never overflows its container.
 const _maxNamedMajors = 2;
 
-/// A short, honest summary of who an opportunity is open to — prefers the
-/// explicit [OpportunityModel.eligibleMajors] list (Phase 8B-3.2) and
-/// falls back to the legacy single [OpportunityModel.fieldOfStudy] only
-/// when no explicit majors are set, mirroring the fallback documented on
-/// the model itself. Returns `null` (render nothing) when neither is
-/// present, rather than a fabricated "Open to all majors". Shared between
-/// [OpportunityCard] and the student details screen rather than duplicated.
+/// A short, honest summary of which majors an opportunity is restricted
+/// to — built only from the explicit [OpportunityModel.eligibleMajors]
+/// list (Phase 8B-3.2), the sole authoritative academic-eligibility
+/// source (see `OpportunityEligibilityService` on the backend; the legacy
+/// free-text `field_of_study` is deprecated as of the Opportunity
+/// Academic Matching Cleanup and is no longer modeled here at all).
+/// Returns `null` (render nothing)
+/// when [OpportunityModel.eligibleMajors] is empty, rather than a
+/// fabricated "Open to all majors". Shared between [OpportunityCard] and
+/// the student details screen rather than duplicated.
 String? eligibilityLabel(OpportunityModel opportunity) {
   final majors = opportunity.eligibleMajors;
-  if (majors.isNotEmpty) {
-    final named = majors.take(_maxNamedMajors).join(', ');
-    final remaining = majors.length - _maxNamedMajors;
-    return remaining > 0 ? '$named, +$remaining more' : named;
-  }
-  if (opportunity.fieldOfStudy != null &&
-      opportunity.fieldOfStudy!.trim().isNotEmpty) {
-    return opportunity.fieldOfStudy;
-  }
-  return null;
+  if (majors.isEmpty) return null;
+
+  final named = majors.take(_maxNamedMajors).join(', ');
+  final remaining = majors.length - _maxNamedMajors;
+  return remaining > 0 ? '$named, +$remaining more' : named;
 }
 
 /// How urgent an opportunity's application deadline is, purely a function

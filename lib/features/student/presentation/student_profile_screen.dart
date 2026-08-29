@@ -11,6 +11,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_button_content.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../providers/auth_provider.dart';
+import '../../opportunities/presentation/opportunity_display.dart';
 import '../../../providers/student_cv_provider.dart';
 import '../../../providers/student_education_verification_provider.dart';
 import '../../../providers/student_profile_provider.dart';
@@ -126,7 +127,9 @@ class _ProfileContent extends StatelessWidget {
 
     final mainSections = <Widget>[
       _PersonalInfoSection(studentProfile: studentProfile),
+      _CareerInterestsSection(studentProfile: studentProfile),
       _ContactSection(studentProfile: studentProfile),
+      _WorkPreferencesSection(studentProfile: studentProfile),
       const SizedBox(height: AppSpacing.md),
       const _SkillsPreviewSection(),
       const SizedBox(height: AppSpacing.md),
@@ -625,6 +628,13 @@ class _ReadinessPanel extends StatelessWidget {
             : _ReadinessState.pending,
       ),
       _ReadinessItem(
+        icon: Icons.pin_drop_outlined,
+        label: 'Work locations added',
+        state: (studentProfile?.availableLocations as List?)?.isNotEmpty ?? false
+            ? _ReadinessState.done
+            : _ReadinessState.pending,
+      ),
+      _ReadinessItem(
         icon: Icons.verified_outlined,
         label: 'Education verification',
         state: verification == null
@@ -826,6 +836,64 @@ class _InfoTileState extends State<_InfoTile> {
   }
 }
 
+/// "Interested In" — the canonical Opportunity Type(s) this Student wants
+/// to be recommended for (Candidate Opportunity Preferences patch). Always
+/// renders (mirrors [_WorkPreferencesSection]'s own "always show, even
+/// when empty" convention) so the Student can see this preference exists
+/// and is configurable via Edit Profile, rather than the section silently
+/// vanishing for a profile from before this patch shipped.
+class _CareerInterestsSection extends StatelessWidget {
+  const _CareerInterestsSection({required this.studentProfile});
+
+  final dynamic studentProfile;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final interestedIn =
+        (studentProfile?.interestedIn as List<String>?) ?? const <String>[];
+
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Career Interests', style: textTheme.headlineSmall),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'INTERESTED IN',
+            style: textTheme.labelSmall?.copyWith(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxs),
+          if (interestedIn.isEmpty)
+            Text(
+              'Not added yet',
+              style: textTheme.bodyMedium?.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            )
+          else
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xxs,
+              children: [
+                for (final type in interestedIn)
+                  StatusChip(
+                    label: opportunityTypeLabels[type] ?? type,
+                    type: AppStatusType.info,
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Phone and bio -- real `StudentProfileModel` fields, now editable via
 /// `StudentProfileEditScreen` (UI Phase 3.1). Kept as its own section
 /// rather than folded into "Academic Information" since neither is an
@@ -879,6 +947,72 @@ class _ContactSection extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Current Location + Available Work Locations (Student Location Profile
+/// Patch) — deliberately two distinct facts, never conflated: a Student
+/// may live in one city but be willing to work in several others. Unlike
+/// [_ContactSection], this always renders (never disappears when both are
+/// unset) — showing a truthful "not added yet" state is the point, so the
+/// Student knows this data exists and can be configured via Edit Profile.
+class _WorkPreferencesSection extends StatelessWidget {
+  const _WorkPreferencesSection({required this.studentProfile});
+
+  final dynamic studentProfile;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final currentLocationName =
+        studentProfile?.currentLocation?.canonicalName as String?;
+    final availableLocations =
+        (studentProfile?.availableLocations as List?) ?? const [];
+
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Work Preferences', style: textTheme.headlineSmall),
+          const SizedBox(height: AppSpacing.sm),
+          _InfoTile(
+            icon: Icons.home_outlined,
+            label: 'Current Location',
+            value: currentLocationName ?? 'Not specified',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'AVAILABLE WORK LOCATIONS',
+            style: textTheme.labelSmall?.copyWith(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxs),
+          if (availableLocations.isEmpty)
+            Text(
+              'Work locations not added',
+              style: textTheme.bodyMedium?.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            )
+          else
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xxs,
+              children: [
+                for (final location in availableLocations)
+                  StatusChip(
+                    label: location.canonicalName as String,
+                    type: AppStatusType.info,
+                  ),
+              ],
             ),
         ],
       ),

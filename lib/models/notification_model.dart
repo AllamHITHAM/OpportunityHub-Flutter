@@ -37,7 +37,7 @@ class NotificationModel {
   final String priority;
 
   /// One of: system, application, interview, assessment, offer,
-  /// organization, opportunity.
+  /// organization, opportunity, message.
   final String type;
 
   /// App-relative Flutter route path (e.g. `/student/applications/42`), or

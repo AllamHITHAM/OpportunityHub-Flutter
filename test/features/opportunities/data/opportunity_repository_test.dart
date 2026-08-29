@@ -248,6 +248,9 @@ void main() {
         expect(adapter.lastRequest?.method, 'POST');
         expect(adapter.lastRequest?.path, '/organization/opportunities');
         final body = adapter.lastRequest?.data as Map<String, dynamic>;
+        // `location_id` is always sent, even when null (Phase O8.2) --
+        // unlike every other optional field here, which is omitted
+        // entirely when absent.
         expect(body.keys.toSet(), {
           'title',
           'description',
@@ -255,7 +258,9 @@ void main() {
           'employment_type',
           'work_mode',
           'experience_level',
+          'location_id',
         });
+        expect(body['location_id'], isNull);
       },
     );
 
@@ -272,11 +277,10 @@ void main() {
           description: 'A great opportunity.',
           opportunityType: 'job',
           employmentType: 'full_time',
-          workMode: 'remote',
+          workMode: 'onsite',
           experienceLevel: 'junior',
           educationLevel: 'bachelor',
-          fieldOfStudy: 'Computer Science',
-          location: 'Amman, Jordan',
+          locationId: 5,
           salaryMin: 1500,
           salaryMax: 2500,
           applicationDeadline: DateTime(2027, 1, 15),
@@ -293,14 +297,14 @@ void main() {
           'work_mode',
           'experience_level',
           'education_level',
-          'field_of_study',
-          'location',
+          'location_id',
           'salary_min',
           'salary_max',
           'application_deadline',
           'positions_available',
           'status',
         });
+        expect(body['location_id'], 5);
         expect(body['salary_min'], isA<num>());
         expect(body['salary_max'], isA<num>());
         expect(body['positions_available'], isA<int>());
@@ -309,7 +313,8 @@ void main() {
     );
 
     test(
-      'omits blank optional string fields rather than sending them empty',
+      'never sends field_of_study -- deprecated by the Opportunity '
+      'Academic Matching Cleanup, not a parameter on this method at all',
       () async {
         final adapter = _FakeHttpClientAdapter((options) {
           return _jsonResponse({'data': _opportunityJson()}, 201);
@@ -323,15 +328,38 @@ void main() {
           employmentType: 'full_time',
           workMode: 'remote',
           experienceLevel: 'junior',
-          fieldOfStudy: '',
-          location: '',
         );
 
         final body = adapter.lastRequest?.data as Map<String, dynamic>;
         expect(body.containsKey('field_of_study'), isFalse);
-        expect(body.containsKey('location'), isFalse);
       },
     );
+
+    test('sends eligible_majors and skills atomically, never a separate later '
+        'call (Opportunity Requirements Integrity Patch)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': _opportunityJson()}, 201);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await repository.createOpportunity(
+        title: 'Software Engineer',
+        description: 'A great opportunity.',
+        opportunityType: 'job',
+        employmentType: 'full_time',
+        workMode: 'remote',
+        experienceLevel: 'junior',
+        eligibleMajors: ['Civil Engineering'],
+        skills: {10: true, 11: false},
+      );
+
+      final body = adapter.lastRequest?.data as Map<String, dynamic>;
+      expect(body['eligible_majors'], ['Civil Engineering']);
+      expect(body['skills'], [
+        {'skill_id': 10, 'is_required': true},
+        {'skill_id': 11, 'is_required': false},
+      ]);
+    });
 
     test(
       'throws with the exact 403 approval message on an unapproved organization',

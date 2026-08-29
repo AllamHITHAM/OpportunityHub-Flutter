@@ -35,14 +35,12 @@ class _FakeAuthRepository extends AuthRepository {
 MatchAnalysisModel _analysis({
   double overallMatchScore = 87,
   double? skillsMatchScore = 90,
-  double? fieldMatchScore = 100,
-  double? experienceMatchScore = 66.67,
+  double? locationMatchScore = 66.67,
 }) {
   return MatchAnalysisModel(
     overallMatchScore: overallMatchScore,
     skillsMatchScore: skillsMatchScore,
-    fieldMatchScore: fieldMatchScore,
-    experienceMatchScore: experienceMatchScore,
+    locationMatchScore: locationMatchScore,
     strengths: const ['Matches required skill: Laravel'],
     weaknesses: const ['Missing preferred skill: Docker'],
     recommendation: 'Strong candidate, recommended for interview.',

@@ -7,8 +7,7 @@ import 'package:opportunityhub_flutter/models/match_analysis_model.dart';
 Map<String, dynamic> _analysisJson({
   dynamic overallMatchScore = 87,
   dynamic skillsMatchScore = 90,
-  dynamic fieldMatchScore = 100,
-  dynamic experienceMatchScore = 66.67,
+  dynamic locationMatchScore = 66.67,
   dynamic strengths = const ['Matches required skill: Laravel'],
   dynamic weaknesses = const ['Missing preferred skill: Docker'],
   dynamic recommendation = 'Strong candidate, recommended for interview.',
@@ -16,8 +15,7 @@ Map<String, dynamic> _analysisJson({
   return {
     'overall_match_score': overallMatchScore,
     'skills_match_score': skillsMatchScore,
-    'field_match_score': fieldMatchScore,
-    'experience_match_score': experienceMatchScore,
+    'location_match_score': locationMatchScore,
     'strengths': strengths,
     'weaknesses': weaknesses,
     'recommendation': recommendation,
@@ -30,8 +28,7 @@ void main() {
 
     expect(model.overallMatchScore, 87.0);
     expect(model.skillsMatchScore, 90.0);
-    expect(model.fieldMatchScore, 100.0);
-    expect(model.experienceMatchScore, 66.67);
+    expect(model.locationMatchScore, 66.67);
     expect(model.strengths, ['Matches required skill: Laravel']);
     expect(model.weaknesses, ['Missing preferred skill: Docker']);
     expect(
@@ -52,30 +49,20 @@ void main() {
 
   test('each factor score is independently nullable (unavailable factor)', () {
     final model = MatchAnalysisModel.fromJson(
-      _analysisJson(
-        skillsMatchScore: null,
-        fieldMatchScore: null,
-        experienceMatchScore: 50,
-      ),
+      _analysisJson(skillsMatchScore: null, locationMatchScore: 50),
     );
 
     expect(model.skillsMatchScore, isNull);
-    expect(model.fieldMatchScore, isNull);
-    expect(model.experienceMatchScore, 50.0);
+    expect(model.locationMatchScore, 50.0);
   });
 
-  test('all three factor scores can be simultaneously unavailable', () {
+  test('both factor scores can be simultaneously unavailable', () {
     final model = MatchAnalysisModel.fromJson(
-      _analysisJson(
-        skillsMatchScore: null,
-        fieldMatchScore: null,
-        experienceMatchScore: null,
-      ),
+      _analysisJson(skillsMatchScore: null, locationMatchScore: null),
     );
 
     expect(model.skillsMatchScore, isNull);
-    expect(model.fieldMatchScore, isNull);
-    expect(model.experienceMatchScore, isNull);
+    expect(model.locationMatchScore, isNull);
     // The overall score is still a real, calculated value even when every
     // factor is unavailable -- see MatchAnalysisModel's own doc comment.
     expect(model.overallMatchScore, isA<double>());
@@ -102,15 +89,13 @@ void main() {
       _analysisJson(
         overallMatchScore: 100,
         skillsMatchScore: 100,
-        fieldMatchScore: 100,
-        experienceMatchScore: 100,
+        locationMatchScore: 100,
       ),
     );
 
     expect(model.overallMatchScore, 100.0);
     expect(model.skillsMatchScore, 100.0);
-    expect(model.fieldMatchScore, 100.0);
-    expect(model.experienceMatchScore, 100.0);
+    expect(model.locationMatchScore, 100.0);
   });
 
   test('strengths and weaknesses default to an empty list when missing', () {
@@ -223,4 +208,42 @@ void main() {
     // No `educationMatchScore` field/getter exists on this model at all --
     // this test would fail to compile if one were ever added.
   });
+
+  test(
+    'there is no field/major factor parsed or exposed by this model '
+    '(Opportunity Academic Matching Cleanup)',
+    () {
+      // Structural guard: the backend's v1.2 formula removed the
+      // Field/Major scoring factor entirely -- this model must never grow
+      // a `fieldMatchScore` getter back in, even if a stray
+      // `field_match_score` key appeared in a legacy-cached response.
+      final json = _analysisJson();
+      json['field_match_score'] = 100;
+
+      final model = MatchAnalysisModel.fromJson(json);
+
+      expect(model.overallMatchScore, 87.0);
+      // No `fieldMatchScore` field/getter exists on this model at all --
+      // this test would fail to compile if one were ever added.
+    },
+  );
+
+  test(
+    'there is no experience factor parsed or exposed by this model '
+    '(Final Recommendation Match Formula)',
+    () {
+      // Structural guard: Experience was removed from the canonical
+      // formula entirely -- this model must never grow an
+      // `experienceMatchScore` getter back in, even if a stray
+      // `experience_match_score` key appeared in a legacy-cached response.
+      final json = _analysisJson();
+      json['experience_match_score'] = 50;
+
+      final model = MatchAnalysisModel.fromJson(json);
+
+      expect(model.overallMatchScore, 87.0);
+      // No `experienceMatchScore` field/getter exists on this model at
+      // all -- this test would fail to compile if one were ever added.
+    },
+  );
 }

@@ -16,6 +16,7 @@ import 'package:opportunityhub_flutter/core/widgets/app_widgets.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/features/skills/presentation/student_skills_screen.dart';
+import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_skill_provider.dart';
@@ -66,6 +67,16 @@ class _FakeStudentSkillRepository extends StudentSkillRepository {
   Duration deleteDelay = Duration.zero;
   final List<int> deletedIds = [];
 
+  List<SkillModel>? catalogResult;
+  ApiException? catalogError;
+  Duration catalogDelay = Duration.zero;
+  int getSkillCatalogCallCount = 0;
+
+  StudentSkillModel? addResult;
+  ApiException? addError;
+  Duration addDelay = Duration.zero;
+  int addSkillCallCount = 0;
+
   @override
   Future<List<StudentSkillModel>> getStudentSkills() async {
     getStudentSkillsCallCount++;
@@ -83,6 +94,41 @@ class _FakeStudentSkillRepository extends StudentSkillRepository {
       await Future<void>.delayed(deleteDelay);
     }
     if (deleteError != null) throw deleteError!;
+  }
+
+  @override
+  Future<List<SkillModel>> getSkillCatalog() async {
+    getSkillCatalogCallCount++;
+    if (catalogDelay > Duration.zero) {
+      await Future<void>.delayed(catalogDelay);
+    }
+    if (catalogError != null) throw catalogError!;
+    return catalogResult ?? [];
+  }
+
+  @override
+  Future<StudentSkillModel> addSkill({
+    required int skillId,
+    String level = 'intermediate',
+    String source = 'manual',
+    int? cvId,
+  }) async {
+    addSkillCallCount++;
+    if (addDelay > Duration.zero) {
+      await Future<void>.delayed(addDelay);
+    }
+    if (addError != null) throw addError!;
+    return addResult ??
+        StudentSkillModel(
+          id: 900 + addSkillCallCount,
+          skillId: skillId,
+          skillName: catalogResult
+                  ?.firstWhere((s) => s.id == skillId, orElse: () => const SkillModel(id: -1, name: 'Unknown'))
+                  .name ??
+              'Unknown',
+          level: level,
+          source: source,
+        );
   }
 }
 
@@ -864,6 +910,374 @@ void main() {
         expect(find.byKey(const ValueKey('skills-grid-desktop')), findsOneWidget);
       },
     );
+  });
+
+  group('Add Skill (UI Phase 7.2 — real Manual Add Skill)', () {
+    List<SkillModel> catalog() => const [
+      SkillModel(id: 30, name: 'AutoCAD', category: 'Civil Engineering'),
+      SkillModel(id: 31, name: 'Python', category: 'Computer Science'),
+    ];
+
+    testWidgets('the Add Skill action is visible near Your Skills', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')];
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.byKey(const Key('add-skill-button')), findsOneWidget);
+    });
+
+    testWidgets(
+      'tapping Add Skill opens the real flow: loads the real catalog',
+      (tester) async {
+        final repository = _FakeStudentSkillRepository()
+          ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+          ..catalogResult = catalog();
+
+        await _pumpScreen(tester, repository: repository);
+
+        await tester.tap(find.byKey(const Key('add-skill-button')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Add Skill'), findsWidgets);
+        expect(repository.getSkillCatalogCallCount, 1);
+        expect(find.text('AutoCAD'), findsOneWidget);
+        expect(find.text('Python'), findsOneWidget);
+      },
+    );
+
+    testWidgets('shows a real loading state while the catalog is in flight', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog()
+        ..catalogDelay = const Duration(milliseconds: 300);
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      // Frame 1: the sheet is inserted, initState runs, its postFrameCallback
+      // fires and calls loadCatalog() (marking isLoadingCatalog dirty).
+      // Frame 2: the rebuild showing the now-true isLoadingCatalog actually
+      // happens.
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byType(AppLoading), findsOneWidget);
+
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a catalog fetch failure shows AppErrorView with retry', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogError = ApiException('Server error, please try again later.');
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Server error, please try again later.'),
+        findsOneWidget,
+      );
+
+      repository.catalogError = null;
+      repository.catalogResult = catalog();
+      await tester.tap(find.text('Try Again'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+    });
+
+    testWidgets('catalog search filters the real catalog by name', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).last, 'auto');
+      await tester.pumpAndSettle();
+
+      expect(find.text('AutoCAD'), findsOneWidget);
+      expect(find.text('Python'), findsNothing);
+    });
+
+    testWidgets('selecting a catalog skill highlights it', (tester) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('catalog-skill-30')));
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
+    });
+
+    testWidgets('Add Skill is disabled until both a skill and a level are chosen', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      final addButtonFinder = find.widgetWithText(PrimaryButton, 'Add Skill');
+      expect(tester.widget<PrimaryButton>(addButtonFinder).onPressed, isNull);
+
+      await tester.tap(find.byKey(const Key('catalog-skill-30')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<PrimaryButton>(addButtonFinder).onPressed, isNull);
+
+      await tester.tap(find.byKey(const Key('add-skill-level-beginner')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<PrimaryButton>(addButtonFinder).onPressed, isNotNull);
+    });
+
+    testWidgets('Cancel closes the sheet without adding anything', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('catalog-skill-30')));
+      await tester.tap(find.byKey(const Key('add-skill-level-beginner')));
+      await tester.tap(find.widgetWithText(SecondaryButton, 'Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(repository.addSkillCallCount, 0);
+      expect(find.text('AutoCAD'), findsNothing);
+    });
+
+    testWidgets(
+      'a real successful add persists, refreshes the provider, and updates the summary/filters',
+      (tester) async {
+        final repository = _FakeStudentSkillRepository()
+          ..loadResult = [_skill(id: 1, skillId: 1, skillName: 'Excel', source: 'cv_ai')]
+          ..catalogResult = catalog()
+          ..addResult = _skill(
+            id: 2,
+            skillId: 30,
+            skillName: 'AutoCAD',
+            level: 'beginner',
+            source: 'manual',
+          );
+
+        await _pumpScreen(tester, repository: repository);
+        await tester.tap(find.byKey(const Key('add-skill-button')));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('catalog-skill-30')));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('add-skill-level-beginner')));
+        await tester.pump();
+        await tester.tap(find.widgetWithText(PrimaryButton, 'Add Skill'));
+        await tester.pumpAndSettle();
+
+        expect(repository.addSkillCallCount, 1);
+        expect(find.text('Skill added successfully'), findsOneWidget);
+
+        // The real skill now appears in the main list as Self-Declared.
+        expect(find.text('AutoCAD'), findsOneWidget);
+        expect(find.text('Self-Declared'), findsWidgets); // summary + filter
+        expect(find.text('2'), findsOneWidget); // Total Skills
+
+        // The Self-Declared filter includes it; the CV-Supported filter
+        // excludes it.
+        await tester.tap(find.byKey(const Key('skill-filter-source-manual')));
+        await tester.pumpAndSettle();
+        expect(find.text('AutoCAD'), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('skill-filter-source-cv_ai')));
+        await tester.pumpAndSettle();
+        expect(find.text('AutoCAD'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a clean duplicate error is shown inline, form state preserved',
+      (tester) async {
+        final repository = _FakeStudentSkillRepository()
+          ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+          ..catalogResult = catalog()
+          ..addError = ApiException('You have already added this skill', statusCode: 409);
+
+        await _pumpScreen(tester, repository: repository);
+        await tester.tap(find.byKey(const Key('add-skill-button')));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('catalog-skill-30')));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('add-skill-level-beginner')));
+        await tester.pump();
+        await tester.tap(find.widgetWithText(PrimaryButton, 'Add Skill'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('You have already added this skill'), findsOneWidget);
+        // The sheet stays open with the selection intact -- never silently
+        // closes on a real failure.
+        expect(find.text('Add Skill'), findsWidgets);
+        expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
+      },
+    );
+
+    testWidgets('a network/unexpected error is shown safely, not a crash', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog()
+        ..addError = ApiException('Network error. Please check your connection.');
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('catalog-skill-30')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('add-skill-level-beginner')));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Add Skill'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Network error. Please check your connection.'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a duplicate submit while adding sends only one request', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog()
+        ..addDelay = const Duration(milliseconds: 300);
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('catalog-skill-30')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('add-skill-level-beginner')));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Add Skill'));
+      await tester.pump();
+      // A second tap while the request is already in flight -- the button
+      // shows a spinner and its onPressed is now null, so this is a no-op.
+      await tester.tap(
+        find.widgetWithText(PrimaryButton, 'Add Skill'),
+        warnIfMissed: false,
+      );
+      await tester.pumpAndSettle();
+
+      expect(repository.addSkillCallCount, 1);
+    });
+
+    testWidgets('a very long skill name in the catalog does not overflow', (
+      tester,
+    ) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = const [
+          SkillModel(
+            id: 40,
+            name: 'A Very Long Catalog Skill Name That Might Wrap Or Overflow',
+          ),
+        ];
+
+      await _pumpScreen(tester, repository: repository, size: const Size(320, 700));
+      await tester.ensureVisible(find.byKey(const Key('add-skill-button')));
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('no overflow on a narrow mobile viewport', (tester) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog();
+
+      await _pumpScreen(tester, repository: repository, size: const Size(320, 700));
+      await tester.ensureVisible(find.byKey(const Key('add-skill-button')));
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('no overflow on a desktop viewport', (tester) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog();
+
+      await _pumpScreen(tester, repository: repository, size: const Size(1440, 1000));
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('renders safely in Dark Mode', (tester) async {
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog();
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        theme: AppTheme.darkTheme,
+      );
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('AutoCAD'), findsOneWidget);
+    });
+
+    testWidgets('honors reduced motion, no throw', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+
+      final repository = _FakeStudentSkillRepository()
+        ..loadResult = [_skill(id: 1, skillName: 'Excel')]
+        ..catalogResult = catalog();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.byKey(const Key('add-skill-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('catalog-skill-30')));
+      await tester.tap(find.byKey(const Key('add-skill-level-beginner')));
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Add Skill'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
   });
 
   testWidgets('honors reduced motion without throwing', (tester) async {

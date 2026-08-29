@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -35,19 +37,71 @@ class _AdminEducationVerificationsScreenState
     });
   }
 
+  /// The actual document preview fix. Previously this only ever fetched
+  /// the authenticated bytes and reported success on that alone (a
+  /// SnackBar showing a byte count) — nothing was ever opened or shown.
+  /// Now: a PDF is handed to a real viewer (a new browser tab on Web, the
+  /// device's own PDF app on native platforms); an image is shown in an
+  /// in-app preview the Admin can pinch/scroll-zoom and close; anything
+  /// else offers an explicit "Download Document" fallback instead of
+  /// silently failing to preview. The Admin always stays on this screen —
+  /// nothing here ever navigates away except pushing the image preview,
+  /// which pops right back here.
   Future<void> _viewDocument(
     AdminEducationVerificationModel verification,
   ) async {
     final provider = context.read<AdminEducationVerificationsProvider>();
 
-    final bytes = await provider.downloadDocument(verification.id);
+    final result = await provider.viewDocument(verification.id);
     if (!mounted) return;
 
-    if (bytes != null) {
-      final kb = (bytes.length / 1024).toStringAsFixed(0);
+    final imageBytes = result.imageBytes;
+    if (imageBytes != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _DocumentImagePreviewScreen(imageBytes: imageBytes),
+        ),
+      );
+      return;
+    }
+
+    if (result.success) return; // PDF already opened in a real viewer.
+
+    if (result.unsupportedContentType != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            "This file type can't be previewed in the app.",
+          ),
+          action: SnackBarAction(
+            label: 'Download Document',
+            onPressed: () => _downloadDocument(verification),
+          ),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+      return;
+    }
+
+    if (provider.viewErrorMessage != null) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Document downloaded ($kb KB)')));
+      ).showSnackBar(SnackBar(content: Text(provider.viewErrorMessage!)));
+    }
+  }
+
+  Future<void> _downloadDocument(
+    AdminEducationVerificationModel verification,
+  ) async {
+    final provider = context.read<AdminEducationVerificationsProvider>();
+
+    final success = await provider.downloadDocument(verification.id);
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Document downloaded')));
     } else if (provider.downloadErrorMessage != null) {
       ScaffoldMessenger.of(
         context,
@@ -324,6 +378,50 @@ class _RejectReasonDialogState extends State<_RejectReasonDialog> {
         ),
         DangerButton(label: 'Reject', onPressed: _confirm),
       ],
+    );
+  }
+}
+
+/// A full-screen, in-app preview for an image education-verification
+/// document (JPG/JPEG/PNG). Pure Flutter (`Image.memory` +
+/// `InteractiveViewer`) — no platform plugin needed, so it behaves
+/// identically on Web, mobile, and desktop: fits the screen, supports
+/// pinch/scroll-to-zoom, and a standard AppBar back button returns to
+/// Education Verifications. Never a network image and never a public
+/// URL — [imageBytes] are the exact bytes already fetched through the
+/// normal authenticated request.
+class _DocumentImagePreviewScreen extends StatelessWidget {
+  const _DocumentImagePreviewScreen({required this.imageBytes});
+
+  final Uint8List imageBytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Document Preview'),
+      ),
+      body: SafeArea(
+        child: Center(
+          child: InteractiveViewer(
+            minScale: 0.5,
+            maxScale: 5,
+            child: Image.memory(
+              imageBytes,
+              errorBuilder: (context, error, stackTrace) => const Padding(
+                padding: EdgeInsets.all(AppSpacing.lg),
+                child: Text(
+                  "Couldn't display this image.",
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

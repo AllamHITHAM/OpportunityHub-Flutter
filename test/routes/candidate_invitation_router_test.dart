@@ -19,19 +19,24 @@ import 'package:opportunityhub_flutter/features/candidates/data/candidate_reposi
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/education_verification/data/education_verification_repository.dart';
 import 'package:opportunityhub_flutter/features/invitations/data/invitation_repository.dart';
+import 'package:opportunityhub_flutter/features/messaging/data/conversation_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
+import 'package:opportunityhub_flutter/features/organization/data/organization_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
+import 'package:opportunityhub_flutter/features/organization/presentation/organization_home_screen.dart';
 import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/candidate_model.dart';
+import 'package:opportunityhub_flutter/models/conversation_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/education_verification_model.dart';
 import 'package:opportunityhub_flutter/models/invitation_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
+import 'package:opportunityhub_flutter/models/organization_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_skill_model.dart';
@@ -39,7 +44,9 @@ import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/candidate_search_provider.dart';
+import 'package:opportunityhub_flutter/providers/conversations_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_opportunities_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
@@ -135,12 +142,34 @@ class _FakeAdminDashboardRepository extends AdminDashboardRepository {
   }
 }
 
+// See _FakeAdminDashboardRepository's own doc comment above —
+// OrganizationHomeScreen now requires OrganizationDashboardProvider
+// directly, for the identical reason.
+class _FakeOrganizationDashboardRepository
+    extends OrganizationDashboardRepository {
+  _FakeOrganizationDashboardRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<OrganizationDashboardStatsModel> getDashboardStats() async {
+    throw ApiException('Not used in these router tests');
+  }
+}
+
 class _FakeNotificationRepository extends NotificationRepository {
   _FakeNotificationRepository()
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   @override
   Future<List<NotificationModel>> getNotifications() async => [];
+}
+
+class _FakeConversationRepository extends ConversationRepository {
+  _FakeConversationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<ConversationSummaryModel>> getConversations() async => [];
 }
 
 /// StudentHomeScreen now reads these 5 providers unconditionally in
@@ -166,6 +195,7 @@ class _FakeStudentOpportunityRepository extends OpportunityRepository {
     String? location,
     String? fieldOfStudy,
     String? keyword,
+    int? organizationId,
     int page = 1,
     int perPage = 15,
   }) async {
@@ -274,8 +304,18 @@ Future<void> _pumpAsRole(
     repository: _FakeAdminDashboardRepository(),
     authProvider: authProvider,
   );
+  final organizationDashboardProvider = OrganizationDashboardProvider(
+    repository: _FakeOrganizationDashboardRepository(),
+    authProvider: authProvider,
+  );
   final notificationProvider = NotificationProvider(
     repository: _FakeNotificationRepository(),
+    authProvider: authProvider,
+  );
+  // MessagesBellAction now renders unconditionally next to
+  // NotificationBellAction on Student/Organization Home.
+  final conversationsProvider = ConversationsProvider(
+    repository: _FakeConversationRepository(),
     authProvider: authProvider,
   );
   final studentApplicationsProvider = StudentApplicationsProvider(
@@ -328,8 +368,14 @@ Future<void> _pumpAsRole(
         ChangeNotifierProvider<AdminDashboardProvider>.value(
           value: adminDashboardProvider,
         ),
+        ChangeNotifierProvider<OrganizationDashboardProvider>.value(
+          value: organizationDashboardProvider,
+        ),
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
+        ),
+        ChangeNotifierProvider<ConversationsProvider>.value(
+          value: conversationsProvider,
         ),
         ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ChangeNotifierProvider<StudentApplicationsProvider>.value(
@@ -421,7 +467,7 @@ void main() {
       await authProvider.initialize();
       await tester.pumpAndSettle();
 
-      expect(find.text('Find Candidates'), findsNothing);
+      expect(find.text('Talent Directory'), findsNothing);
       expect(find.text('Login'), findsWidgets);
       expect(tester.takeException(), isNull);
     },
@@ -436,7 +482,7 @@ void main() {
       initialPath: AppRoutes.organizationCandidates,
     );
 
-    expect(find.text('Find Candidates'), findsNothing);
+    expect(find.text('Talent Directory'), findsNothing);
     expect(find.text("Discover Opportunities"), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -450,7 +496,7 @@ void main() {
       initialPath: AppRoutes.organizationCandidates,
     );
 
-    expect(find.text('Find Candidates'), findsNothing);
+    expect(find.text('Talent Directory'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -463,7 +509,7 @@ void main() {
       initialPath: AppRoutes.organizationCandidates,
     );
 
-    expect(find.text('Find Candidates'), findsOneWidget);
+    expect(find.text('Talent Directory'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -477,7 +523,7 @@ void main() {
     );
 
     expect(find.text('No Invitations Yet'), findsNothing);
-    expect(find.text('Role: Organization'), findsOneWidget);
+    expect(find.byType(OrganizationHomeScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -511,6 +557,6 @@ void main() {
     );
 
     // Settling completed without a pumpAndSettle timeout.
-    expect(find.text('Find Candidates'), findsOneWidget);
+    expect(find.text('Talent Directory'), findsOneWidget);
   });
 }

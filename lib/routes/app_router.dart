@@ -25,12 +25,19 @@ import '../features/applications/presentation/student_application_details_screen
 import '../features/applications/presentation/student_applications_screen.dart';
 import '../features/assessments/presentation/create_quiz_screen.dart';
 import '../features/assessments/presentation/organization_quiz_editor_screen.dart';
+import '../features/assessments/presentation/organization_quiz_results_screen.dart';
 import '../features/assessments/presentation/schedule_interview_screen.dart';
 import '../features/assessments/presentation/student_quiz_screen.dart';
 import '../features/candidates/presentation/candidate_search_screen.dart';
+import '../features/candidates/presentation/organization_candidate_profile_screen.dart';
+import '../features/candidates/presentation/organization_recommended_candidates_screen.dart';
 import '../features/cv/presentation/student_cv_screen.dart';
 import '../features/education_verification/presentation/student_education_verification_screen.dart';
 import '../features/invitations/presentation/student_invitations_screen.dart';
+import '../features/messaging/presentation/conversation_list_screen.dart';
+import '../features/messaging/presentation/conversation_screen.dart';
+import '../features/organization_profile/presentation/company_profile_screen.dart';
+import '../features/organization_profile/presentation/organization_profile_edit_screen.dart';
 import '../features/skills/presentation/student_skills_screen.dart';
 import '../features/opportunities/presentation/opportunity_form_screen.dart';
 import '../features/opportunities/presentation/organization_opportunities_screen.dart';
@@ -169,6 +176,24 @@ const _studentInvitationsPathPrefix = AppRoutes.studentInvitations;
 /// this one currently has no dynamic `:id` sub-routes.
 const _studentProfilePathPrefix = AppRoutes.studentProfile;
 
+/// Messaging MVP — Student-only conversation list/detail. A protected
+/// feature area, not onboarding. Matched by prefix since
+/// [AppRoutes.studentConversation] carries a dynamic `:id` segment.
+const _studentMessagesPathPrefix = AppRoutes.studentMessages;
+
+/// Messaging MVP — Organization-only conversation list/detail. Matched by
+/// prefix for the same reason as [_studentMessagesPathPrefix].
+const _organizationMessagesPathPrefix = AppRoutes.organizationMessages;
+
+/// Organization Public Profile phase — the Organization's own Company
+/// Profile view/edit is an organization-only feature area, not
+/// onboarding. Matched by prefix so it also covers
+/// [AppRoutes.organizationProfileEdit]. The public
+/// `/organizations/:id` route is a *different*, unrelated prefix
+/// (plural "organizations") reachable by any authenticated role, so it
+/// deliberately has no guard here.
+const _organizationProfilePathPrefix = AppRoutes.organizationProfile;
+
 /// Defines the app's navigation routes and redirects based on
 /// [AuthProvider], [StudentProfileProvider], and [OrganizationProfileProvider].
 class AppRouter {
@@ -270,6 +295,19 @@ class AppRouter {
           builder: (_, _) => const CandidateSearchScreen(),
         ),
         GoRoute(
+          path: '${AppRoutes.organizationCandidates}/:id',
+          builder: (_, state) => OrganizationCandidateProfileScreen(
+            // Phase O8.1 — only ever passed by "View Profile" (Talent
+            // Directory or Recommended Candidates); there is no
+            // single-candidate-by-ID backend endpoint to fall back to on a
+            // direct URL visit, so a missing `extra` renders the screen's
+            // own graceful "not found" state instead of crashing.
+            candidate: state.extra is CandidateProfileView
+                ? state.extra as CandidateProfileView
+                : null,
+          ),
+        ),
+        GoRoute(
           path: AppRoutes.studentInvitations,
           builder: (_, _) => const StudentInvitationsScreen(),
         ),
@@ -313,6 +351,20 @@ class AppRouter {
           ),
         ),
         GoRoute(
+          path:
+              '${AppRoutes.organizationOpportunities}/:id/recommended-candidates',
+          builder: (_, state) => OrganizationRecommendedCandidatesScreen(
+            opportunityId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+            // Only ever available via in-app navigation (see
+            // OrganizationOpportunityDetailsScreen) — mirrors
+            // OrganizationApplicantsScreen's own `opportunityTitle` extra
+            // just above.
+            opportunityTitle: state.extra is String
+                ? state.extra as String
+                : null,
+          ),
+        ),
+        GoRoute(
           path: '${AppRoutes.organizationApplications}/:id',
           builder: (_, state) => OrganizationApplicationDetailsScreen(
             applicationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
@@ -323,6 +375,14 @@ class AppRouter {
               '${AppRoutes.organizationApplications}/:id/assessment/interview',
           builder: (_, state) => ScheduleInterviewScreen(
             applicationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+            // Phase 10A.4A: only passed by `_QuizAssessmentSummaryCard`'s
+            // "Advance to Interview" decision action — `extra` (not a path
+            // param) since this is transient action state, not a
+            // deep-linkable route, the same convention this file's own
+            // `opportunityTitle` extra just above already uses.
+            nextActionOriginAssessmentId: state.extra is int
+                ? state.extra as int
+                : null,
           ),
         ),
         GoRoute(
@@ -335,6 +395,27 @@ class AppRouter {
           path: '${AppRoutes.organizationAssessments}/:id/quiz',
           builder: (_, state) => OrganizationQuizEditorScreen(
             assessmentId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
+        // Phase 10A.4B — the shared Opportunity Quiz template. Registered
+        // before the read/manage route below so the more specific
+        // `/quiz/new` path always wins.
+        GoRoute(
+          path: '${AppRoutes.organizationOpportunities}/:id/quiz/new',
+          builder: (_, state) => CreateQuizScreen(
+            opportunityId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
+        GoRoute(
+          path: '${AppRoutes.organizationOpportunities}/:id/quiz',
+          builder: (_, state) => OrganizationQuizEditorScreen(
+            opportunityId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
+        GoRoute(
+          path: '${AppRoutes.organizationOpportunities}/:id/quiz/results',
+          builder: (_, state) => OrganizationQuizResultsScreen(
+            opportunityId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
           ),
         ),
         GoRoute(
@@ -382,6 +463,49 @@ class AppRouter {
         GoRoute(
           path: AppRoutes.studentProfileEdit,
           builder: (_, _) => const StudentProfileEditScreen(),
+        ),
+        // Messaging MVP — role-gated the same way every other protected
+        // feature area above is (see the `_redirect` guards near
+        // `_studentMessagesPathPrefix`/`_organizationMessagesPathPrefix`).
+        GoRoute(
+          path: AppRoutes.studentMessages,
+          builder: (_, _) => const StudentMessagesScreen(),
+        ),
+        GoRoute(
+          path: '${AppRoutes.studentMessages}/:id',
+          builder: (_, state) => ConversationScreen(
+            conversationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
+        GoRoute(
+          path: AppRoutes.organizationMessages,
+          builder: (_, _) => const OrganizationMessagesScreen(),
+        ),
+        GoRoute(
+          path: '${AppRoutes.organizationMessages}/:id',
+          builder: (_, state) => ConversationScreen(
+            conversationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
+        ),
+        // Organization Public Profile phase — the owner's own Company
+        // Profile (organization-only, see the `_organizationProfilePathPrefix`
+        // guard) plus its Edit screen.
+        GoRoute(
+          path: AppRoutes.organizationProfile,
+          builder: (_, _) => const OrganizationOwnProfileScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.organizationProfileEdit,
+          builder: (_, _) => const OrganizationProfileEditScreen(),
+        ),
+        // The public, read-only Company Profile for any organization by
+        // ID -- reachable by any authenticated role (no extra role guard
+        // below), same as `/notifications`.
+        GoRoute(
+          path: '/organizations/:id',
+          builder: (_, state) => CompanyProfileScreen(
+            organizationId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+          ),
         ),
       ],
     );
@@ -527,6 +651,30 @@ class AppRouter {
     // area — not onboarding, but still off-limits to every other role.
     if (role != 'student' &&
         currentPath.startsWith(_studentProfilePathPrefix)) {
+      return homePath;
+    }
+
+    // Messaging MVP — Student conversations are a student-only feature
+    // area, not onboarding, but still off-limits to every other role.
+    if (role != 'student' &&
+        currentPath.startsWith(_studentMessagesPathPrefix)) {
+      return homePath;
+    }
+
+    // Messaging MVP — Organization conversations are an organization-only
+    // feature area, not onboarding, but still off-limits to every other
+    // role.
+    if (role != 'organization' &&
+        currentPath.startsWith(_organizationMessagesPathPrefix)) {
+      return homePath;
+    }
+
+    // Organization Public Profile phase — the owner's own Company
+    // Profile view/edit is an organization-only feature area, not
+    // onboarding. The public `/organizations/:id` route is intentionally
+    // NOT guarded here (reachable by any authenticated role).
+    if (role != 'organization' &&
+        currentPath.startsWith(_organizationProfilePathPrefix)) {
       return homePath;
     }
 

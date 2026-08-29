@@ -17,9 +17,25 @@ final _emailRegExp = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 /// route parameter, never GoRouter `extra`), matching every other
 /// organization-application route in this app.
 class ScheduleInterviewScreen extends StatefulWidget {
-  const ScheduleInterviewScreen({super.key, required this.applicationId});
+  const ScheduleInterviewScreen({
+    super.key,
+    required this.applicationId,
+    this.nextActionOriginAssessmentId,
+  });
 
   final int applicationId;
+
+  /// Phase 10A.4A — non-null only when this screen is reached as a
+  /// completed Quiz's "Advance to Interview" *decision*
+  /// (`_QuizAssessmentSummaryCard`), rather than the plain "Choose
+  /// Assessment" flow (Path A, or a direct post-10A.3 advance outside any
+  /// Quiz decision). When set, submitting stages the real Interview via
+  /// `OrganizationAssessmentProvider.setNextActionInterview()` instead of
+  /// creating it immediately (`createAssessment()`) — the Student is not
+  /// notified and cannot see it until the origin Quiz Assessment's
+  /// decision is actually released. The Interview fields/validation
+  /// themselves are identical either way.
+  final int? nextActionOriginAssessmentId;
 
   @override
   State<ScheduleInterviewScreen> createState() =>
@@ -246,11 +262,18 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
       notes: orNull(_notesController),
     );
 
-    final success = await provider.createAssessment(
-      applicationId: widget.applicationId,
-      type: 'interview',
-      interviewInput: input,
-    );
+    final originAssessmentId = widget.nextActionOriginAssessmentId;
+    final success = originAssessmentId != null
+        ? await provider.setNextActionInterview(
+            applicationId: widget.applicationId,
+            assessmentId: originAssessmentId,
+            input: input,
+          )
+        : await provider.createAssessment(
+            applicationId: widget.applicationId,
+            type: 'interview',
+            interviewInput: input,
+          );
     if (!mounted) return;
 
     if (!success) {
@@ -268,25 +291,43 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
       return;
     }
 
-    final created = provider.assessment;
-    final updatedApplication = created?.application;
-    final applicationsProvider = context
-        .read<OrganizationApplicationsProvider>();
+    if (originAssessmentId == null) {
+      // The plain (non-staged) path changes `Application.status` — patch
+      // it into the Applications list so the details screen picks it up
+      // without a redundant full reload.
+      final created = provider.latestAssessment;
+      final updatedApplication = created?.application;
+      final applicationsProvider = context
+          .read<OrganizationApplicationsProvider>();
 
-    if (updatedApplication != null) {
-      applicationsProvider.patchApplication(updatedApplication);
-    } else {
-      // The Assessment was still created successfully — only the response
-      // didn't carry the application back. Don't lose the success; make
-      // sure the details screen picks up the status change on its own.
-      applicationsProvider.loadApplicationDetails(
-        widget.applicationId,
-        forceRefresh: true,
-      );
+      if (updatedApplication != null) {
+        applicationsProvider.patchApplication(updatedApplication);
+      } else {
+        // The Assessment was still created successfully — only the
+        // response didn't carry the application back. Don't lose the
+        // success; make sure the details screen picks up the status
+        // change on its own.
+        applicationsProvider.loadApplicationDetails(
+          widget.applicationId,
+          forceRefresh: true,
+        );
+      }
     }
+    // The staged path never touches `Application.status` -- nothing to
+    // patch. `OrganizationAssessmentProvider.setNextActionInterview()`
+    // already updated `assessments` in place, which the origin Quiz
+    // card's own `_QuizAssessmentSummaryCard` already watches, so it picks
+    // up the new decision automatically once this screen pops.
 
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Assessment created successfully')),
+      SnackBar(
+        content: Text(
+          originAssessmentId != null
+              ? 'Interview prepared as the next step'
+              : 'Assessment created successfully',
+        ),
+      ),
     );
     Navigator.of(context).pop(true);
   }
@@ -294,11 +335,20 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<OrganizationAssessmentProvider>();
-    final isLoading = provider.isCreatingFor(widget.applicationId);
+    final originAssessmentId = widget.nextActionOriginAssessmentId;
+    final isLoading = originAssessmentId != null
+        ? provider.isSettingNextAction(originAssessmentId)
+        : provider.isCreatingFor(widget.applicationId);
     final hasFieldErrors = provider.fieldErrors.isNotEmpty;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Schedule Interview')),
+      appBar: AppBar(
+        title: Text(
+          originAssessmentId != null
+              ? 'Advance to Interview'
+              : 'Schedule Interview',
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
@@ -463,7 +513,9 @@ class _ScheduleInterviewScreenState extends State<ScheduleInterviewScreen> {
                       ],
                       const SizedBox(height: AppSpacing.lg),
                       PrimaryButton(
-                        label: 'Schedule Interview',
+                        label: originAssessmentId != null
+                            ? 'Advance to Interview'
+                            : 'Schedule Interview',
                         isLoading: isLoading,
                         onPressed: _conflictDetected
                             ? null

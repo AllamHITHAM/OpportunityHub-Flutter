@@ -9,8 +9,11 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
+import 'package:opportunityhub_flutter/core/storage/theme_preference_storage.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
+import 'package:opportunityhub_flutter/core/theme/app_colors.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
+import 'package:opportunityhub_flutter/core/widgets/app_widgets.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/applications/presentation/organization_application_details_screen.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
@@ -29,6 +32,7 @@ import 'package:opportunityhub_flutter/models/interview_model.dart';
 import 'package:opportunityhub_flutter/models/match_analysis_model.dart';
 import 'package:opportunityhub_flutter/models/offer_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
+import 'package:opportunityhub_flutter/models/quiz_attempt_model.dart';
 import 'package:opportunityhub_flutter/models/quiz_model.dart';
 import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/providers/organization_quiz_provider.dart';
@@ -37,7 +41,20 @@ import 'package:opportunityhub_flutter/providers/organization_applications_provi
 import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_match_analysis_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_offer_provider.dart';
+import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 import 'package:opportunityhub_flutter/routes/app_routes.dart';
+
+class _FakeThemePreferenceStorage extends ThemePreferenceStorage {
+  ThemeMode? saved;
+
+  @override
+  Future<void> saveThemeMode(ThemeMode mode) async {
+    saved = mode;
+  }
+
+  @override
+  Future<ThemeMode> readThemeMode() async => saved ?? ThemeMode.system;
+}
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository()
@@ -134,18 +151,33 @@ AssessmentModel _quizAssessment({
   int id = 1,
   int applicationId = 1,
   String quizStatus = 'draft',
+  String? status,
+  String? result,
+  DateTime? resultReleasedAt,
+  List<QuizAttemptModel> attempts = const [],
+  String? nextAction,
+  AssessmentModel? nextActionAssessment,
+  String resultReleaseMode = 'immediate',
+  DateTime? resultReleaseAt,
 }) {
   return AssessmentModel(
     id: id,
     applicationId: applicationId,
     type: 'quiz',
-    status: quizStatus == 'published' ? 'scheduled' : 'pending',
+    status: status ?? (quizStatus == 'published' ? 'scheduled' : 'pending'),
+    result: result,
+    resultReleasedAt: resultReleasedAt,
+    nextAction: nextAction,
+    nextActionAssessment: nextActionAssessment,
     quiz: QuizModel(
       id: id,
       assessmentId: id,
       title: 'Backend Fundamentals',
       passingScore: 70,
       status: quizStatus,
+      resultReleaseMode: resultReleaseMode,
+      resultReleaseAt: resultReleaseAt,
+      attempts: attempts,
     ),
   );
 }
@@ -225,9 +257,17 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     this.getError,
     this.getDelay = Duration.zero,
     this.createResult,
+    this.releaseResult,
+    this.releaseError,
   }) : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   AssessmentModel? getResult;
+
+  /// Phase 10A.3 — set this instead of [getResult] to return a full,
+  /// multi-element Assessment history (e.g. a completed Quiz already
+  /// followed by an Interview). Takes priority over [getResult] when
+  /// non-null.
+  List<AssessmentModel>? historyResult;
   ApiException? getError;
   Duration getDelay;
   int getCallCount = 0;
@@ -235,9 +275,10 @@ class _FakeAssessmentRepository extends AssessmentRepository {
   AssessmentModel? createResult;
   InterviewCreateInput? lastInterviewInput;
   QuizCreateInput? lastQuizInput;
+  int createCallCount = 0;
 
   @override
-  Future<AssessmentModel?> getAssessmentForApplication(
+  Future<List<AssessmentModel>> getAssessmentsForApplication(
     int applicationId,
   ) async {
     getCallCount++;
@@ -245,7 +286,8 @@ class _FakeAssessmentRepository extends AssessmentRepository {
       await Future<void>.delayed(getDelay);
     }
     if (getError != null) throw getError!;
-    return getResult;
+    if (historyResult != null) return historyResult!;
+    return getResult == null ? [] : [getResult!];
   }
 
   @override
@@ -255,6 +297,7 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     InterviewCreateInput? interviewInput,
     QuizCreateInput? quizInput,
   }) async {
+    createCallCount++;
     lastInterviewInput = interviewInput;
     lastQuizInput = quizInput;
     return createResult ?? _assessment(applicationId: applicationId);
@@ -267,7 +310,111 @@ class _FakeAssessmentRepository extends AssessmentRepository {
 
   QuizModel? quizGetResult;
 
-  /// What `getAssessmentForApplication` returns is switched to this once
+  /// Phase 10A.4A — mirrors [OrganizationAssessmentProvider._setNextAction]'s
+  /// own in-place replace: the real backend returns the *same* Quiz
+  /// Assessment, now carrying `next_action`/`next_action_assessment`, never
+  /// a separate history entry, so these fakes do the same.
+  int setNextActionInterviewCallCount = 0;
+  int? lastNextActionInterviewAssessmentId;
+  InterviewCreateInput? lastNextActionInterviewInput;
+  AssessmentModel? nextActionInterviewResult;
+  ApiException? nextActionInterviewError;
+
+  @override
+  Future<AssessmentModel> setNextActionInterview(
+    int assessmentId,
+    InterviewCreateInput input,
+  ) async {
+    setNextActionInterviewCallCount++;
+    lastNextActionInterviewAssessmentId = assessmentId;
+    lastNextActionInterviewInput = input;
+    if (nextActionInterviewError != null) throw nextActionInterviewError!;
+    final updated =
+        nextActionInterviewResult ??
+        _quizAssessment(
+          id: assessmentId,
+          applicationId: 1,
+          quizStatus: 'published',
+          status: 'completed',
+          result: 'passed',
+          nextAction: 'interview',
+          nextActionAssessment: _assessment(
+            id: assessmentId + 1,
+            applicationId: 1,
+            status: 'scheduled',
+          ),
+        );
+    getResult = updated;
+    return updated;
+  }
+
+  int setNextActionOfferCallCount = 0;
+  int? lastNextActionOfferAssessmentId;
+  SendOfferInput? lastNextActionOfferInput;
+  AssessmentModel? nextActionOfferResult;
+  ApiException? nextActionOfferError;
+
+  @override
+  Future<AssessmentModel> setNextActionOffer(
+    int assessmentId,
+    SendOfferInput input,
+  ) async {
+    setNextActionOfferCallCount++;
+    lastNextActionOfferAssessmentId = assessmentId;
+    lastNextActionOfferInput = input;
+    if (nextActionOfferError != null) throw nextActionOfferError!;
+    final updated =
+        nextActionOfferResult ??
+        _quizAssessment(
+          id: assessmentId,
+          applicationId: 1,
+          quizStatus: 'published',
+          status: 'completed',
+          result: 'passed',
+          nextAction: 'offer',
+        );
+    getResult = updated;
+    return updated;
+  }
+
+  int setNextActionRejectCallCount = 0;
+  int? lastNextActionRejectAssessmentId;
+  AssessmentModel? nextActionRejectResult;
+  ApiException? nextActionRejectError;
+
+  @override
+  Future<AssessmentModel> setNextActionReject(int assessmentId) async {
+    setNextActionRejectCallCount++;
+    lastNextActionRejectAssessmentId = assessmentId;
+    if (nextActionRejectError != null) throw nextActionRejectError!;
+    final updated =
+        nextActionRejectResult ??
+        _quizAssessment(
+          id: assessmentId,
+          applicationId: 1,
+          quizStatus: 'published',
+          status: 'completed',
+          result: 'passed',
+          nextAction: 'reject',
+        );
+    getResult = updated;
+    return updated;
+  }
+
+  AssessmentModel? releaseResult;
+  ApiException? releaseError;
+  int releaseCallCount = 0;
+  int? lastReleaseAssessmentId;
+
+  @override
+  Future<AssessmentModel> releaseQuizResult(int assessmentId) async {
+    releaseCallCount++;
+    lastReleaseAssessmentId = assessmentId;
+    if (releaseError != null) throw releaseError!;
+    return releaseResult ?? getResult ?? _quizAssessment(id: assessmentId);
+  }
+
+  /// What `getAssessmentsForApplication` returns is switched to this once
   /// `completeInterview` succeeds — simulating the real backend, where the
   /// completion PUT actually changes the state a follow-up GET would then
   /// see. Defaults to a completed version of [getResult] so a test only
@@ -317,8 +464,8 @@ class _FakeAssessmentRepository extends AssessmentRepository {
 MatchAnalysisModel _analysis({
   double overallMatchScore = 87,
   double? skillsMatchScore = 90,
-  double? fieldMatchScore = 100,
-  double? experienceMatchScore = 66.67,
+  double? majorMatchScore = 100,
+  double? locationMatchScore = 66.67,
   List<String> strengths = const [],
   List<String> weaknesses = const [],
   String? recommendation,
@@ -326,8 +473,8 @@ MatchAnalysisModel _analysis({
   return MatchAnalysisModel(
     overallMatchScore: overallMatchScore,
     skillsMatchScore: skillsMatchScore,
-    fieldMatchScore: fieldMatchScore,
-    experienceMatchScore: experienceMatchScore,
+    majorMatchScore: majorMatchScore,
+    locationMatchScore: locationMatchScore,
     strengths: strengths,
     weaknesses: weaknesses,
     recommendation: recommendation,
@@ -442,6 +589,36 @@ class _Providers {
   final OrganizationMatchAnalysisProvider matchAnalysis;
 }
 
+/// Fills in the real Schedule Interview screen's date/time pickers — the
+/// same key-based, dialog-scoped interaction
+/// `schedule_interview_screen_test.dart`'s own `_pickValidDateAndTime`
+/// uses, replicated here (private helpers aren't importable across files)
+/// for the "Advance to Interview" end-to-end test below, which now
+/// navigates to that real screen instead of an informational dialog.
+Future<void> _pickValidDateAndTime(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('scheduledDateField')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('OK'));
+  await tester.pumpAndSettle();
+
+  await tester.tap(find.byKey(const Key('scheduledTimeField')));
+  await tester.pumpAndSettle();
+  final timeFields = find.descendant(
+    of: find.byType(Dialog),
+    matching: find.byType(TextField),
+  );
+  await tester.enterText(timeFields.at(0), '11');
+  await tester.enterText(timeFields.at(1), '59');
+  await tester.pumpAndSettle();
+  final pm = find.text('PM');
+  if (pm.evaluate().isNotEmpty) {
+    await tester.tap(pm.first);
+    await tester.pumpAndSettle();
+  }
+  await tester.tap(find.text('OK'));
+  await tester.pumpAndSettle();
+}
+
 GoRouter _detailsRouter(int applicationId) {
   return GoRouter(
     initialLocation: AppRoutes.organizationApplicationDetails(applicationId),
@@ -453,12 +630,17 @@ GoRouter _detailsRouter(int applicationId) {
         ),
       ),
       // Registered so the real "Choose Assessment" -> Interview -> Continue
-      // flow can navigate all the way to the real screen in tests that
-      // exercise it, exactly like AppRouter's own route table.
+      // flow, and the Phase 10A.4A staged "Advance to Interview" decision
+      // flow, can both navigate all the way to the real screen in tests
+      // that exercise them, exactly like AppRouter's own route table --
+      // including forwarding `extra` for the staged path.
       GoRoute(
         path: '${AppRoutes.organizationApplications}/:id/assessment/interview',
         builder: (_, state) => ScheduleInterviewScreen(
           applicationId: int.parse(state.pathParameters['id']!),
+          nextActionOriginAssessmentId: state.extra is int
+              ? state.extra as int
+              : null,
         ),
       ),
       // Registered so the real "Manage Quiz"/"View Quiz" action can
@@ -482,6 +664,10 @@ Future<_Providers> _pumpDetails(
   int applicationId = 1,
   Size size = const Size(420, 1400),
 }) async {
+  // AppColors.updateBrightness is a process-global static -- reset it so
+  // one test's theme choice never leaks into the next.
+  addTearDown(() => AppColors.updateBrightness(Brightness.light));
+
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
@@ -510,6 +696,8 @@ Future<_Providers> _pumpDetails(
     repository: repository,
     authProvider: authProvider,
   );
+  final themeProvider = ThemeProvider(storage: _FakeThemePreferenceStorage());
+  await themeProvider.initialize();
 
   final router = _detailsRouter(applicationId);
 
@@ -531,10 +719,18 @@ Future<_Providers> _pumpDetails(
         ChangeNotifierProvider<OrganizationMatchAnalysisProvider>.value(
           value: matchAnalysisProvider,
         ),
+        ChangeNotifierProvider<ThemeProvider>.value(value: themeProvider),
       ],
-      child: MaterialApp.router(
-        theme: AppTheme.lightTheme,
-        routerConfig: router,
+      child: Builder(
+        builder: (context) {
+          final mode = context.watch<ThemeProvider>().mode;
+          return MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: mode,
+            routerConfig: router,
+          );
+        },
       ),
     ),
   );
@@ -553,6 +749,8 @@ void main() {
   testWidgets('Loading state renders while details are in flight', (
     tester,
   ) async {
+    addTearDown(() => AppColors.updateBrightness(Brightness.light));
+
     final repository = _FakeApplicationRepository(
       detailsResult: _application(),
       detailsDelay: const Duration(milliseconds: 200),
@@ -596,6 +794,7 @@ void main() {
           ChangeNotifierProvider<OrganizationMatchAnalysisProvider>.value(
             value: matchAnalysisProvider,
           ),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,
@@ -1206,9 +1405,697 @@ void main() {
     },
   );
 
+  group('Quiz result review and release (Phase 10A.2)', () {
+    testWidgets(
+      'a completed quiz with no decision yet shows the real score, passing '
+      'score, and result, plus Decision Required instead of Release Result',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 85,
+                submittedAt: null,
+              ),
+            ],
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('85'), findsOneWidget);
+        expect(find.text('70'), findsOneWidget);
+        expect(find.text('Passed'), findsOneWidget);
+        expect(find.text('Not yet'), findsOneWidget);
+        // Phase 10A.4A: releasing is gated on a real next-step decision --
+        // no decision yet means Decision Required, never Release Result.
+        expect(find.text('Release Result'), findsNothing);
+        expect(find.text('Decision Required'), findsOneWidget);
+        expect(find.text('Advance to Interview'), findsOneWidget);
+        expect(find.text('Proceed to Offer'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a completed quiz shows Release Result once a next-step decision is '
+      'ready (Phase 10A.4A)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            nextAction: 'interview',
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 85,
+              ),
+            ],
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Decision Required'), findsNothing);
+        expect(find.text('Interview'), findsOneWidget);
+        expect(find.text('Release Result'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a released result shows the release date and hides the Release '
+      'Result action',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'failed',
+            resultReleasedAt: DateTime(2026, 8, 20),
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 40,
+              ),
+            ],
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Yes, on Aug 20, 2026'), findsOneWidget);
+        expect(find.text('Release Result'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a quiz still in progress shows no score rows and no Release Result '
+      'action',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Score'), findsNothing);
+        expect(find.text('Release Result'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'tapping Release Result, confirming, releases the result and shows a '
+      'success SnackBar',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final released = _quizAssessment(
+          applicationId: 1,
+          quizStatus: 'published',
+          status: 'completed',
+          result: 'passed',
+          resultReleasedAt: DateTime(2026, 8, 25),
+          attempts: [
+            const QuizAttemptModel(
+              id: 1,
+              quizId: 1,
+              applicationId: 1,
+              score: 85,
+            ),
+          ],
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            nextAction: 'interview',
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 85,
+              ),
+            ],
+          ),
+          releaseResult: released,
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        await tester.tap(find.text('Release Result'));
+        await tester.pumpAndSettle();
+        expect(find.text('Release'), findsOneWidget);
+
+        await tester.tap(find.text('Release'));
+        await tester.pumpAndSettle();
+
+        expect(assessmentRepository.releaseCallCount, 1);
+        expect(assessmentRepository.lastReleaseAssessmentId, 1);
+        expect(
+          find.text('Result released to the candidate'),
+          findsOneWidget,
+        );
+        expect(find.text('Yes, on Aug 25, 2026'), findsOneWidget);
+        expect(find.text('Release Result'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'cancelling the Release Result confirmation makes no request',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            nextAction: 'interview',
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 85,
+              ),
+            ],
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        await tester.tap(find.text('Release Result'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+
+        expect(assessmentRepository.releaseCallCount, 0);
+        expect(find.text('Release Result'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a release failure shows the error message and keeps the action '
+      'available',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            nextAction: 'interview',
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 85,
+              ),
+            ],
+          ),
+          releaseError: ApiException('This result was already released'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        await tester.tap(find.text('Release Result'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Release'));
+        await tester.pumpAndSettle();
+
+        expect(assessmentRepository.releaseCallCount, 1);
+        expect(find.text('This result was already released'), findsOneWidget);
+        expect(find.text('Release Result'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Advance to Interview (Phase 10A.3) navigates to the real Schedule '
+      'Interview screen, not an informational dialog',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 85,
+              ),
+            ],
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Advance to Interview'), findsOneWidget);
+        await tester.tap(find.text('Advance to Interview'));
+        await tester.pumpAndSettle();
+
+        // The real Schedule Interview form, not a dialog — proven by its
+        // own submit button and field, and by the informational dialog's
+        // old copy being nowhere on screen. Phase 10A.4A: this is now the
+        // staged decision flow, so the submit button reads "Advance to
+        // Interview" rather than the plain-creation "Schedule Interview".
+        expect(find.widgetWithText(ElevatedButton, 'Advance to Interview'),
+            findsOneWidget);
+        expect(find.widgetWithText(TextFormField, 'Meeting Link'),
+            findsOneWidget);
+        expect(find.textContaining("isn't available yet"), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'completing Advance to Interview stages a real Interview Assessment '
+      'as the next-step decision, preserves the completed Quiz, and swaps '
+      'the decision buttons for Release Result (Phase 10A.4A)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final completedQuiz = _quizAssessment(
+          applicationId: 1,
+          quizStatus: 'published',
+          status: 'completed',
+          result: 'passed',
+          attempts: [
+            const QuizAttemptModel(
+              id: 1,
+              quizId: 1,
+              applicationId: 1,
+              score: 85,
+            ),
+          ],
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: completedQuiz,
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        await tester.tap(find.text('Advance to Interview'));
+        await tester.pumpAndSettle();
+
+        await _pickValidDateAndTime(tester);
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Meeting Link'),
+          'https://meet.example.com/room',
+        );
+        await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Advance to Interview'),
+        );
+        await tester.pumpAndSettle();
+
+        expect(assessmentRepository.setNextActionInterviewCallCount, 1);
+        expect(assessmentRepository.lastNextActionInterviewAssessmentId, 1);
+        // Back on Application Details: the same completed Quiz is still
+        // shown, now carrying the staged decision — nothing is created as
+        // a separate visible history entry, and the candidate has not been
+        // notified (only "Release Result" -- never a real Interview
+        // notification/email -- is now offered).
+        expect(find.text('Backend Fundamentals'), findsOneWidget);
+        expect(find.text('Decision Required'), findsNothing);
+        // No decision buttons remain — a decision is already staged.
+        expect(find.text('Advance to Interview'), findsNothing);
+        expect(find.text('Proceed to Offer'), findsNothing);
+        expect(find.text('Release Result'), findsOneWidget);
+      },
+    );
+  });
+
+  group('Next Step decision panel (Phase 10A.4A)', () {
+    testWidgets(
+      'completing Proceed to Offer stages a real Offer as the next-step '
+      'decision without sending a real Offer yet',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 85,
+              ),
+            ],
+          ),
+        );
+        final offerRepository = _FakeOfferRepository();
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+          offerRepository: offerRepository,
+        );
+
+        await tester.tap(find.text('Proceed to Offer'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Proceed to Offer').last,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Proceed to Offer').last,
+        );
+        await tester.pumpAndSettle();
+
+        expect(assessmentRepository.setNextActionOfferCallCount, 1);
+        // The real Offer flow is never touched by staging -- nothing is
+        // created or sent to the candidate yet.
+        expect(offerRepository.sendCallCount, 0);
+        expect(find.text('Offer'), findsOneWidget);
+        expect(find.text('Release Result'), findsOneWidget);
+        expect(find.text('Proceed to Offer'), findsNothing);
+        expect(find.text('Advance to Interview'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'confirming Reject stages a rejection as the next-step decision '
+      'without changing Application status or notifying the candidate yet',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'failed',
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 40,
+              ),
+            ],
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        await tester.tap(find.text('Reject'));
+        await tester.pumpAndSettle();
+        expect(find.text('Prepare Rejection'), findsOneWidget);
+        await tester.tap(find.text('Prepare Rejection'));
+        await tester.pumpAndSettle();
+
+        expect(assessmentRepository.setNextActionRejectCallCount, 1);
+        expect(assessmentRepository.lastNextActionRejectAssessmentId, 1);
+        // Staging never touches Application.status directly here -- the
+        // fixture's own status is untouched, and no reject request went to
+        // the applications repository.
+        expect(repository.updateStatusCallCount, 0);
+        // The Reject *button* is gone -- only the "Next Step: Reject"
+        // summary row remains, which legitimately reuses the same label
+        // text as the value it displays.
+        expect(find.text('Prepare Rejection'), findsNothing);
+        expect(find.text('Advance to Interview'), findsNothing);
+        expect(find.text('Release Result'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'the Result Release row shows "Scheduled for <date>" while a '
+      'scheduled release time is still in the future',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            nextAction: 'interview',
+            resultReleaseMode: 'scheduled',
+            resultReleaseAt: DateTime.now().add(const Duration(days: 2)),
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.textContaining('Scheduled for'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'the Result Release row shows the scheduled-time-passed copy once a '
+      'scheduled release time has already passed with a ready decision',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            nextAction: 'interview',
+            resultReleaseMode: 'scheduled',
+            resultReleaseAt: DateTime.now().subtract(const Duration(hours: 2)),
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(
+          find.text('Scheduled time passed — release when ready'),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'the Result Release row shows "Releases as soon as ready" for '
+      'immediate mode',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            nextAction: 'interview',
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Releases as soon as ready'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'the Result Release row shows "Manual — release when ready" for '
+      'manual mode',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            nextAction: 'interview',
+            resultReleaseMode: 'manual',
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(
+          find.text('Manual — release when ready'),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'narrow viewport does not overflow with the Decision Required panel '
+      'visible',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 85,
+              ),
+            ],
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+          size: const Size(320, 900),
+        );
+
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'narrow viewport does not overflow with the ready-decision Release '
+      'Result panel visible',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _quizAssessment(
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+            nextAction: 'interview',
+            nextActionAssessment: _assessment(
+              id: 2,
+              applicationId: 1,
+              status: 'scheduled',
+            ),
+            attempts: [
+              const QuizAttemptModel(
+                id: 1,
+                quizId: 1,
+                applicationId: 1,
+                score: 85,
+              ),
+            ],
+          ),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+          size: const Size(320, 900),
+        );
+
+        expect(tester.takeException(), isNull);
+      },
+    );
+  });
+
   testWidgets('Assessment section shows a compact spinner while loading', (
     tester,
   ) async {
+    addTearDown(() => AppColors.updateBrightness(Brightness.light));
+
     final repository = _FakeApplicationRepository(
       detailsResult: _application(status: 'interview_scheduled'),
     );
@@ -1256,6 +2143,7 @@ void main() {
           ChangeNotifierProvider<OrganizationMatchAnalysisProvider>.value(
             value: matchAnalysisProvider,
           ),
+          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,
@@ -2049,6 +2937,75 @@ void main() {
         expect(find.text('Offer'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'Send Offer is hidden once a completed Quiz has a follow-up '
+      'Interview that is not yet completed (Phase 10A.3)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository();
+        assessmentRepository.historyResult = [
+          _quizAssessment(
+            id: 1,
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+          ),
+          _assessment(id: 2, applicationId: 1, status: 'scheduled'),
+        ];
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        // The latest Assessment (the new Interview) isn't completed yet --
+        // an old completed Quiz must never satisfy Offer eligibility once
+        // a newer Assessment exists and hasn't finished, mirroring
+        // OfferService::assertEligibleForOffer() on the backend.
+        expect(find.text('Send Offer'), findsNothing);
+        expect(find.text('Advance to Interview'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'Send Offer reappears once the follow-up Interview completes '
+      '(Phase 10A.3)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+        );
+        final assessmentRepository = _FakeAssessmentRepository();
+        assessmentRepository.historyResult = [
+          _quizAssessment(
+            id: 1,
+            applicationId: 1,
+            quizStatus: 'published',
+            status: 'completed',
+            result: 'passed',
+          ),
+          _assessment(
+            id: 2,
+            applicationId: 1,
+            status: 'completed',
+            result: 'passed',
+          ),
+        ];
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Send Offer'), findsOneWidget);
+        // The latest Assessment is an Interview, not a Quiz -- Advance to
+        // Interview never applies to it.
+        expect(find.text('Advance to Interview'), findsNothing);
+      },
+    );
   });
 
   group('Offer — summary card (Phase 6C-2)', () {
@@ -2095,6 +3052,8 @@ void main() {
     testWidgets('the Offer section shows a compact spinner while loading', (
       tester,
     ) async {
+      addTearDown(() => AppColors.updateBrightness(Brightness.light));
+
       final repository = _FakeApplicationRepository(
         detailsResult: _application(status: 'offer_sent'),
       );
@@ -2146,6 +3105,9 @@ void main() {
             ),
             ChangeNotifierProvider<OrganizationMatchAnalysisProvider>.value(
               value: matchAnalysisProvider,
+            ),
+            ChangeNotifierProvider<ThemeProvider>.value(
+              value: ThemeProvider(),
             ),
           ],
           child: MaterialApp.router(
@@ -2494,24 +3456,24 @@ void main() {
       expect(find.text('87%'), findsOneWidget);
     });
 
-    testWidgets('renders skills, field, and experience factor scores', (
+    testWidgets('renders skills, major, and location factor scores', (
       tester,
     ) async {
       final repository = _FakeApplicationRepository(
         detailsResult: _application(),
         analysisResult: _analysis(
           skillsMatchScore: 90,
-          fieldMatchScore: 100,
-          experienceMatchScore: 67,
+          majorMatchScore: 100,
+          locationMatchScore: 67,
         ),
       );
       await _pumpDetails(tester, repository: repository);
 
       expect(find.text('Skills Match'), findsOneWidget);
       expect(find.text('90%'), findsOneWidget);
-      expect(find.text('Field / Major Match'), findsOneWidget);
+      expect(find.text('Major Match'), findsOneWidget);
       expect(find.text('100%'), findsOneWidget);
-      expect(find.text('Experience Match'), findsOneWidget);
+      expect(find.text('Location Match'), findsOneWidget);
       expect(find.text('67%'), findsOneWidget);
     });
 
@@ -2522,13 +3484,48 @@ void main() {
           detailsResult: _application(),
           analysisResult: _analysis(
             skillsMatchScore: null,
-            fieldMatchScore: null,
-            experienceMatchScore: 100,
+            locationMatchScore: 100,
           ),
         );
         await _pumpDetails(tester, repository: repository);
 
-        expect(find.text('Not available'), findsNWidgets(2));
+        expect(find.text('Not available'), findsNWidgets(1));
+        expect(find.text('0%'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'the Major factor is labeled "Major Match", never "Field / Major '
+      'Match" or anything mentioning Field of Study (Recommendation '
+      'Match: Major Must Contribute to Total Score -- the factor is real '
+      'and canonical-major-based, but must never imply a field_of_study '
+      'dependency)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+          analysisResult: _analysis(),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(find.text('Major Match'), findsOneWidget);
+        expect(find.textContaining('Field'), findsNothing);
+        expect(find.textContaining('field of study'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a null major factor score renders "Not available" (unrestricted '
+      'Opportunity -- no Eligible Majors configured, nothing to compare '
+      'against), never a misleading 0%',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+          analysisResult: _analysis(majorMatchScore: null),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        expect(find.text('Major Match'), findsOneWidget);
+        expect(find.text('Not available'), findsNWidgets(1));
         expect(find.text('0%'), findsNothing);
       },
     );
@@ -2616,27 +3613,25 @@ void main() {
         await _pumpDetails(tester, repository: repository);
 
         // Scoped to the match-factor label format specifically (see
-        // matchFactorLabels: "Skills Match", "Field / Major Match",
-        // "Experience Match") -- a bare "Education" substring check would
-        // now also match the unrelated, legitimate "Education
-        // Verification" applicant field (Phase 8B-1).
+        // matchFactorLabels: "Skills Match", "Major Match", "Location
+        // Match") -- a bare "Education" substring check would now also
+        // match the unrelated, legitimate "Education Verification"
+        // applicant field (Phase 8B-1).
         expect(find.textContaining('Education Match'), findsNothing);
       },
     );
 
-    testWidgets(
-      'there is no Location or Work Mode factor anywhere on the card',
-      (tester) async {
-        final repository = _FakeApplicationRepository(
-          detailsResult: _application(),
-          analysisResult: _analysis(),
-        );
-        await _pumpDetails(tester, repository: repository);
+    testWidgets('there is no Work Mode factor anywhere on the card', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+        analysisResult: _analysis(),
+      );
+      await _pumpDetails(tester, repository: repository);
 
-        expect(find.textContaining('Location Match'), findsNothing);
-        expect(find.textContaining('Work Mode Match'), findsNothing);
-      },
-    );
+      expect(find.textContaining('Work Mode Match'), findsNothing);
+    });
 
     testWidgets(
       'no analysis yet shows a lightweight message, not an error, and '
@@ -2777,5 +3772,182 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+  });
+
+  group('theme toggle (UI Phase O6)', () {
+    testWidgets('is present in the AppBar and switches the resolved theme', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.byType(ThemeToggleButton), findsOneWidget);
+      expect(
+        Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+        Brightness.light,
+      );
+
+      await tester.tap(find.byType(ThemeToggleButton));
+      await tester.pumpAndSettle();
+
+      expect(
+        Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+        Brightness.dark,
+      );
+    });
+
+    testWidgets('the tooltip reflects the real toggle direction in both '
+        'states', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      expect(find.byTooltip('Switch to dark mode'), findsOneWidget);
+
+      await tester.tap(find.byType(ThemeToggleButton));
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('Switch to light mode'), findsOneWidget);
+    });
+
+    testWidgets(
+      'candidate header switches surface together with the rest of the '
+      'page on toggle (no stale card)',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(),
+        );
+        await _pumpDetails(tester, repository: repository);
+
+        Color cardBackground(int index) {
+          final container = tester.widget<Container>(
+            find
+                .descendant(
+                  of: find.byType(AppCard).at(index),
+                  matching: find.byType(Container),
+                )
+                .first,
+          );
+          return (container.decoration as BoxDecoration).color!;
+        }
+
+        final before = cardBackground(0);
+
+        await tester.tap(find.byType(ThemeToggleButton));
+        await tester.pumpAndSettle();
+
+        final after = cardBackground(0);
+        expect(after, isNot(before));
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('renders correctly in Dark mode with a full page of real '
+        'data (assessment, offer, match analysis, skills)', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'accepted'),
+        analysisResult: _analysis(),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _assessment(status: 'completed', result: 'passed'),
+      );
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(status: 'accepted', respondedAt: DateTime(2026, 8, 12)),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+        offerRepository: offerRepository,
+      );
+
+      await tester.tap(find.byType(ThemeToggleButton));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('responsive layout (UI Phase O6)', () {
+    testWidgets(
+      'desktop (1280x900) shows the main/sidebar split with no overflow',
+      (tester) async {
+        final repository = _FakeApplicationRepository(
+          detailsResult: _application(status: 'in_assessment'),
+          analysisResult: _analysis(),
+        );
+        final assessmentRepository = _FakeAssessmentRepository(
+          getResult: _assessment(status: 'completed', result: 'passed'),
+        );
+        await _pumpDetails(
+          tester,
+          repository: repository,
+          assessmentRepository: assessmentRepository,
+          size: const Size(1280, 900),
+        );
+
+        expect(find.text('Jane Student'), findsOneWidget);
+        expect(find.text('View CV'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('tablet (960x800) renders with no overflow', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'shortlisted'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        size: const Size(960, 800),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('narrow tablet (700x900) renders with no overflow', (
+      tester,
+    ) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'in_assessment'),
+      );
+      final assessmentRepository = _FakeAssessmentRepository(
+        getResult: _assessment(status: 'completed', result: 'passed'),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        assessmentRepository: assessmentRepository,
+        size: const Size(700, 900),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('mobile (375x812) stacks main content and sidebar with no '
+        'overflow', (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(status: 'accepted'),
+        analysisResult: _analysis(
+          strengths: ['Matches required skill: Laravel'],
+        ),
+      );
+      final offerRepository = _FakeOfferRepository(
+        getResult: _offer(status: 'accepted', respondedAt: DateTime(2026, 8, 12)),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        offerRepository: offerRepository,
+        size: const Size(375, 812),
+      );
+
+      expect(find.text('Jane Student'), findsOneWidget);
+      expect(find.text('View CV'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 }

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/api/api_client.dart';
 import '../features/organization/data/organization_profile_repository.dart';
+import '../features/organization_profile/data/picked_image_file.dart';
 import '../models/organization_profile_model.dart';
 import 'auth_provider.dart';
 
@@ -83,11 +84,132 @@ class OrganizationProfileProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool isUpdating = false;
+  String? updateErrorMessage;
+
+  /// Updates the current organization's own profile (Organization Public
+  /// Profile phase). Returns `true` only on success, in which case
+  /// [profile] is replaced with the real, freshly-saved row from the
+  /// backend response — never a locally-guessed merge. A duplicate
+  /// submission while one is already in flight is ignored.
+  Future<bool> updateProfile({
+    required String organizationName,
+    required String organizationType,
+    String? industry,
+    String? description,
+    String? website,
+    String? phone,
+    int? locationId,
+  }) async {
+    if (isUpdating) return false;
+
+    isUpdating = true;
+    updateErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      profile = await repository.updateProfile(
+        organizationName: organizationName,
+        organizationType: organizationType,
+        industry: industry,
+        description: description,
+        website: website,
+        phone: phone,
+        locationId: locationId,
+      );
+      success = true;
+    } on ApiException catch (error) {
+      // Deliberately never touches `profile` on failure — a failed save
+      // must never make the screen believe unsaved edits actually
+      // persisted.
+      updateErrorMessage = error.message;
+    } catch (_) {
+      updateErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isUpdating = false;
+      notifyListeners();
+    }
+    return success;
+  }
+
+  void clearUpdateError() {
+    updateErrorMessage = null;
+    notifyListeners();
+  }
+
+  bool isUploadingLogo = false;
+  String? logoErrorMessage;
+
+  /// Uploads (or replaces) the Company Logo (Company Profile Polish
+  /// phase). Returns `true` only on success, in which case [profile] is
+  /// replaced with the real, freshly-saved row (including the new
+  /// `logoUrl`) from the backend response. A duplicate submission while
+  /// one is already in flight is ignored.
+  Future<bool> uploadLogo(PickedImageFile file) async {
+    if (isUploadingLogo) return false;
+
+    isUploadingLogo = true;
+    logoErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      profile = await repository.uploadLogo(file);
+      success = true;
+    } on ApiException catch (error) {
+      // Deliberately never touches `profile` on failure -- a failed
+      // upload must never make the screen believe a new logo actually
+      // persisted, and must never lose the previously-displayed one.
+      logoErrorMessage = error.message;
+    } catch (_) {
+      logoErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isUploadingLogo = false;
+      notifyListeners();
+    }
+    return success;
+  }
+
+  /// Removes the Company Logo, reverting to the initials fallback.
+  /// Returns `true` only on success. A duplicate submission while one is
+  /// already in flight is ignored.
+  Future<bool> removeLogo() async {
+    if (isUploadingLogo) return false;
+
+    isUploadingLogo = true;
+    logoErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      profile = await repository.removeLogo();
+      success = true;
+    } on ApiException catch (error) {
+      logoErrorMessage = error.message;
+    } catch (_) {
+      logoErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isUploadingLogo = false;
+      notifyListeners();
+    }
+    return success;
+  }
+
+  void clearLogoError() {
+    logoErrorMessage = null;
+    notifyListeners();
+  }
+
   /// Clears all profile state — called when the signed-in user changes.
   void reset() {
     profile = null;
     hasChecked = false;
     _checkSucceeded = false;
+    isUpdating = false;
+    updateErrorMessage = null;
+    isUploadingLogo = false;
+    logoErrorMessage = null;
     notifyListeners();
   }
 

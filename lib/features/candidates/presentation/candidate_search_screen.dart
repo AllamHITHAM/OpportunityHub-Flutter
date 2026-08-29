@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -8,12 +9,34 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../models/candidate_model.dart';
 import '../../../providers/candidate_search_provider.dart';
+import '../../../routes/app_routes.dart';
 import '../../applications/presentation/application_display.dart';
-import 'invite_bottom_sheet.dart';
+import '../../opportunities/presentation/opportunity_display.dart';
+import 'organization_candidate_profile_screen.dart';
 
-/// Candidate Search (Phase 8B-3, Flow B) — lets an Organization discover
-/// Student profiles to invite. Filter/search-only, matching
-/// `StudentOpportunitiesScreen`'s own search+filter-sheet shape.
+/// UI Phase O8: below this width, candidate cards stack into a single
+/// column with a full-width View Profile button; at or above it, a
+/// responsive multi-column grid with a compact trailing action — matching
+/// the same breakpoints/technique already used by the Applicants list.
+const _wideBreakpoint = 1200.0;
+const _desktopBreakpoint = 900.0;
+
+/// A centered, intentional desktop width — the same "don't stretch sparse
+/// content edge-to-edge" treatment already applied throughout the
+/// Organization UI.
+const _maxContentWidth = 1100.0;
+
+/// Talent Directory (Phase 8B-3, Flow B; renamed from "Find Candidates" in
+/// Phase O8.1) — lets an Organization browse and discover Student profiles.
+/// Filter/search-only, matching `StudentOpportunitiesScreen`'s own
+/// search+filter-sheet shape.
+///
+/// Phase O8.1: this screen is pure profile discovery — inviting a student
+/// now happens from a specific Opportunity's Recommended Candidates screen,
+/// where eligibility and match context are already known. The Invite
+/// action and its opportunity-picker dialog were removed from this flow;
+/// the primary action here is "View Profile"
+/// ([OrganizationCandidateProfileScreen]). No search/filter logic changed.
 class CandidateSearchScreen extends StatefulWidget {
   const CandidateSearchScreen({super.key});
 
@@ -48,6 +71,13 @@ class _CandidateSearchScreenState extends State<CandidateSearchScreen> {
 
   bool get _hasActiveFilters =>
       _major != null || _university != null || _graduationYear != null || _skill != null;
+
+  int get _activeFilterCount => [
+    _major,
+    _university,
+    _graduationYear,
+    _skill,
+  ].where((value) => value != null).length;
 
   void _runSearch() {
     context.read<CandidateSearchProvider>().search(
@@ -91,57 +121,94 @@ class _CandidateSearchScreenState extends State<CandidateSearchScreen> {
     );
   }
 
-  Future<void> _invite(CandidateModel candidate) async {
-    final sent = await showInviteBottomSheet(context, candidate: candidate);
-    if (!mounted) return;
-    if (sent) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Invitation sent')));
-    }
+  void _viewProfile(CandidateModel candidate) {
+    context.push(
+      AppRoutes.organizationCandidateProfile(candidate.id),
+      extra: CandidateProfileView.fromCandidate(candidate),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<CandidateSearchProvider>();
+    final filterCount = _activeFilterCount;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Find Candidates'),
-        actions: [
-          IconButton(
-            onPressed: _openFilters,
-            icon: Icon(
-              _hasActiveFilters ? Icons.filter_alt : Icons.filter_alt_outlined,
-            ),
-            tooltip: 'Filters',
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.screenHorizontal,
-                AppSpacing.sm,
-                AppSpacing.screenHorizontal,
-                AppSpacing.xs,
-              ),
-              child: AppSearchField(
-                controller: _nameController,
-                hint: 'Search candidates by name',
-                onChanged: _onNameChanged,
+            const Text('Talent Directory'),
+            Text(
+              'Browse student profiles to discover future candidates',
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.textSecondary,
               ),
             ),
-            Expanded(child: _buildBody(provider)),
           ],
         ),
+        actions: [
+          Badge(
+            label: Text('$filterCount'),
+            isLabelVisible: filterCount > 0,
+            child: IconButton(
+              onPressed: _openFilters,
+              icon: Icon(
+                _hasActiveFilters
+                    ? Icons.filter_alt
+                    : Icons.filter_alt_outlined,
+              ),
+              tooltip: filterCount > 0
+                  ? 'Filters ($filterCount active)'
+                  : 'Filters',
+            ),
+          ),
+          const ThemeToggleSurface(),
+        ],
       ),
+      body: SafeArea(child: _buildBody(provider)),
     );
   }
 
   Widget _buildBody(CandidateSearchProvider provider) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+
+        return Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                width >= _desktopBreakpoint
+                    ? AppSpacing.xl
+                    : AppSpacing.screenHorizontal,
+                AppSpacing.md,
+                width >= _desktopBreakpoint
+                    ? AppSpacing.xl
+                    : AppSpacing.screenHorizontal,
+                AppSpacing.sm,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+                  child: AppSearchField(
+                    controller: _nameController,
+                    hint: 'Search candidates by name',
+                    onChanged: _onNameChanged,
+                  ),
+                ),
+              ),
+            ),
+            Expanded(child: _buildResults(provider, width)),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildResults(CandidateSearchProvider provider, double width) {
     if (provider.isSearching && provider.candidates.isEmpty) {
       return const AppSkeletonList();
     }
@@ -165,96 +232,270 @@ class _CandidateSearchScreenState extends State<CandidateSearchScreen> {
 
     return RefreshIndicator(
       onRefresh: () async => _runSearch(),
-      child: ListView.separated(
-        padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
-        itemCount: provider.candidates.length,
-        separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
-        itemBuilder: (context, index) {
-          final candidate = provider.candidates[index];
-          return _CandidateCard(
-            candidate: candidate,
-            onInvite: () => _invite(candidate),
-          );
-        },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.symmetric(
+          horizontal: width >= _desktopBreakpoint
+              ? AppSpacing.xl
+              : AppSpacing.screenHorizontal,
+          vertical: AppSpacing.sm,
+        ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+            child: _CandidateGrid(
+              candidates: provider.candidates,
+              width: width,
+              onViewProfile: _viewProfile,
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
+/// A responsive grid of [_CandidateCard]s — a single stacked column below
+/// [_desktopBreakpoint] (full-width View Profile button), up to 3 columns
+/// on wide desktop (compact trailing action), so compact cards never
+/// stretch across the full page with mostly blank space.
+class _CandidateGrid extends StatelessWidget {
+  const _CandidateGrid({
+    required this.candidates,
+    required this.width,
+    required this.onViewProfile,
+  });
+
+  final List<CandidateModel> candidates;
+  final double width;
+  final ValueChanged<CandidateModel> onViewProfile;
+
+  int get _columns {
+    if (width >= _wideBreakpoint) return 3;
+    if (width >= _desktopBreakpoint) return 2;
+    return 1;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final columns = _columns;
+    const spacing = AppSpacing.md;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tileWidth = columns == 1
+            ? constraints.maxWidth
+            : (constraints.maxWidth - spacing * (columns - 1)) / columns;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            for (final candidate in candidates)
+              SizedBox(
+                width: tileWidth,
+                child: _CandidateCard(
+                  candidate: candidate,
+                  compactAction: columns > 1,
+                  onViewProfile: () => onViewProfile(candidate),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Skill chips beyond this count collapse into a single "+N more" chip —
+/// keeps a candidate with a long skill list from making their card much
+/// taller than everyone else's (goal: consistent, scannable card rhythm).
+const _maxVisibleSkills = 4;
+
+/// A soft floor so cards with little data (no major/university/skills)
+/// still read as deliberate tiles rather than looking collapsed/broken
+/// next to fuller ones in the same grid row.
+const _cardMinHeight = 220.0;
+
 class _CandidateCard extends StatelessWidget {
-  const _CandidateCard({required this.candidate, required this.onInvite});
+  const _CandidateCard({
+    required this.candidate,
+    required this.compactAction,
+    required this.onViewProfile,
+  });
 
   final CandidateModel candidate;
-  final VoidCallback onInvite;
+
+  /// True in a multi-column desktop grid — the View Profile action reads
+  /// as a compact trailing/footer button rather than a full-width one.
+  final bool compactAction;
+
+  final VoidCallback onViewProfile;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final subtitleParts = [
-      candidate.major,
-      candidate.university,
-      if (candidate.graduationYear != null) 'Class of ${candidate.graduationYear}',
-    ].whereType<String>().where((s) => s.isNotEmpty).toList();
+    final visibleSkills = candidate.skills.take(_maxVisibleSkills).toList();
+    final hiddenSkillCount = candidate.skills.length - visibleSkills.length;
 
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(candidate.name, style: textTheme.titleMedium),
-          if (subtitleParts.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.xxs),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: _cardMinHeight),
+      child: AppCard(
+        borderColor: AppColors.secondaryLight,
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
             Text(
-              subtitleParts.join(' · '),
-              style: textTheme.bodyMedium?.copyWith(
-                color: AppColors.textSecondary,
-              ),
+              candidate.name,
+              style: textTheme.titleMedium,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
-          const SizedBox(height: AppSpacing.xs),
-          Wrap(
-            spacing: AppSpacing.xs,
-            runSpacing: AppSpacing.xxs,
-            children: [
-              StatusChip(
-                label: educationVerificationStatusLabel(
-                  candidate.educationVerificationStatus,
-                ),
-                type: candidate.educationVerificationStatus == 'verified'
-                    ? AppStatusType.success
-                    : AppStatusType.neutral,
-                compact: true,
-              ),
-              for (final skill in candidate.skills)
-                StatusChip(
-                  label: '${skill.name} (${skill.evidenceLabel})',
-                  compact: true,
-                ),
+            if (candidate.major != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              _IconLine(icon: Icons.school_outlined, text: candidate.major!),
             ],
-          ),
-          if (candidate.alreadyApplied == true ||
-              candidate.alreadyInvited == true) ...[
-            const SizedBox(height: AppSpacing.xs),
+            if (candidate.university != null) ...[
+              const SizedBox(height: AppSpacing.xxs),
+              _IconLine(
+                icon: Icons.account_balance_outlined,
+                text: candidate.university!,
+              ),
+            ],
+            if (candidate.graduationYear != null) ...[
+              const SizedBox(height: AppSpacing.xxs),
+              _IconLine(
+                icon: Icons.calendar_today_outlined,
+                text: 'Class of ${candidate.graduationYear}',
+              ),
+            ],
+            const SizedBox(height: AppSpacing.sm),
+            // The education-verification chip always sits under its own
+            // real, truthful label ("Education Verification") instead of
+            // appearing as a bare, unlabeled "Not Submitted"/"Verified"
+            // chip with no context.
             Text(
-              candidate.alreadyApplied == true
-                  ? 'Already applied to this opportunity'
-                  : 'Already invited to this opportunity',
-              style: textTheme.bodySmall?.copyWith(
-                color: AppColors.textSecondary,
+              'Education Verification',
+              style: textTheme.labelSmall?.copyWith(
+                color: AppColors.textMuted,
+                fontWeight: FontWeight.w700,
               ),
             ),
+            const SizedBox(height: AppSpacing.xxs),
+            StatusChip(
+              label: educationVerificationStatusLabel(
+                candidate.educationVerificationStatus,
+              ),
+              type: candidate.educationVerificationStatus == 'verified'
+                  ? AppStatusType.success
+                  : AppStatusType.neutral,
+              compact: true,
+            ),
+            if (candidate.skills.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                'Skills',
+                style: textTheme.labelSmall?.copyWith(
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxs),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xxs,
+                children: [
+                  for (final skill in visibleSkills)
+                    StatusChip(
+                      label: '${skill.name} (${skill.evidenceLabel})',
+                      compact: true,
+                    ),
+                  if (hiddenSkillCount > 0)
+                    StatusChip(
+                      label: '+$hiddenSkillCount more',
+                      type: AppStatusType.neutral,
+                      compact: true,
+                    ),
+                ],
+              ),
+            ],
+            if (candidate.interestedIn != null &&
+                candidate.interestedIn!.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                'Interested In',
+                style: textTheme.labelSmall?.copyWith(
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxs),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xxs,
+                children: [
+                  for (final type in candidate.interestedIn!)
+                    StatusChip(
+                      label: opportunityTypeLabels[type] ?? type,
+                      type: AppStatusType.info,
+                      compact: true,
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: AppSpacing.sm),
+            const Divider(height: 1),
+            const SizedBox(height: AppSpacing.sm),
+            if (compactAction)
+              Align(
+                alignment: Alignment.centerRight,
+                child: SecondaryButton(
+                  label: 'View Profile',
+                  icon: Icons.person_outline,
+                  onPressed: onViewProfile,
+                ),
+              )
+            else
+              SecondaryButton(
+                label: 'View Profile',
+                icon: Icons.person_outline,
+                width: double.infinity,
+                onPressed: onViewProfile,
+              ),
           ],
-          const SizedBox(height: AppSpacing.sm),
-          Align(
-            alignment: Alignment.centerRight,
-            child: SecondaryButton(
-              label: 'Invite',
-              onPressed: candidate.alreadyApplied == true
-                  ? null
-                  : onInvite,
+        ),
+      ),
+    );
+  }
+}
+
+/// A small leading-icon + text row for a scannable candidate fact (major,
+/// university, graduation year) — wraps naturally rather than truncating,
+/// so a long university/major name never gets clipped.
+class _IconLine extends StatelessWidget {
+  const _IconLine({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 15, color: AppColors.textMuted),
+        const SizedBox(width: AppSpacing.xxs),
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: AppColors.textSecondary,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -338,6 +579,17 @@ class _FilterSheetState extends State<_FilterSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
             const SectionHeader(title: 'Filters'),
             const SizedBox(height: AppSpacing.xs),
             AppTextField(

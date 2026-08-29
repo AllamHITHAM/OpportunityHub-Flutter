@@ -3,14 +3,13 @@ import 'package:dio/dio.dart';
 import '../../../core/api/api_client.dart';
 import '../../../models/notification_model.dart';
 
-/// Talks to the Laravel Notification endpoints (Phase 7A-1/7A-2 backend).
-/// Role-agnostic — `/notifications` is one shared endpoint for all three
-/// roles, so there is exactly one repository, matching
-/// `NotificationProvider`'s own "one shared provider" design (see that
-/// class's own doc comment).
+/// Talks to the Laravel Notification endpoints (Phase 7A-1/7A-2 backend,
+/// delete/clear-read added Phase 9.1). Role-agnostic — `/notifications` is
+/// one shared endpoint for all three roles, so there is exactly one
+/// repository, matching `NotificationProvider`'s own "one shared provider"
+/// design (see that class's own doc comment).
 ///
-/// Read/mark-read only, matching the backend's own current contract — no
-/// delete, no unread-count endpoint, no pagination.
+/// No unread-count endpoint, no pagination — the backend has neither.
 class NotificationRepository {
   NotificationRepository({required this.apiClient});
 
@@ -62,6 +61,38 @@ class NotificationRepository {
       final response = await apiClient.dio.put('/notifications/read-all');
       final data = apiClient.parseData(response) as Map<String, dynamic>;
       return data['updated_count'] as int;
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Permanently removes one notification from the caller's own inbox
+  /// with `DELETE /api/notifications/{notificationId}` (Phase 9.1). Inbox
+  /// cleanup only — the backend guarantees this can never affect the
+  /// Application/Invitation/Assessment/Interview/Offer/EducationVerification
+  /// the notification was originally about (see
+  /// `NotificationController::destroy()`'s own doc comment).
+  ///
+  /// Errors: 401, 403, 404 (not found / not owned by this user).
+  Future<void> deleteNotification(int notificationId) async {
+    try {
+      await apiClient.dio.delete('/notifications/$notificationId');
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Permanently removes every currently-read notification from the
+  /// caller's own inbox with `DELETE /api/notifications/read` (Phase
+  /// 9.1). Unread notifications are never touched. Returns how many rows
+  /// were actually deleted.
+  ///
+  /// Errors: 401, 403.
+  Future<int> clearRead() async {
+    try {
+      final response = await apiClient.dio.delete('/notifications/read');
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return data['deleted_count'] as int;
     } on DioException catch (error) {
       throw apiClient.handleError(error);
     }

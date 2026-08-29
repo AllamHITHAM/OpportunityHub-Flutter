@@ -23,21 +23,19 @@ bool isMajorEligibleForOpportunity(
   String? major,
   OpportunityModel opportunity,
 ) {
-  if (opportunity.eligibleMajors.isNotEmpty) {
-    if (major == null || major.trim().isEmpty) return false;
-    final normalizedMajor = normalizeMajor(major);
-    return opportunity.eligibleMajors.any(
-      (eligible) => normalizeMajor(eligible) == normalizedMajor,
-    );
+  if (opportunity.eligibleMajors.isEmpty) {
+    // No explicit restriction -- the legacy `field_of_study` (deprecated,
+    // no longer even modeled in `OpportunityModel`) was never an
+    // eligibility gate and still isn't (matches the backend's rule
+    // exactly; see `OpportunityEligibilityService::isStudentEligible()`).
+    return true;
   }
 
-  final fieldOfStudy = opportunity.fieldOfStudy;
-  if (fieldOfStudy != null && fieldOfStudy.trim().isNotEmpty) {
-    if (major == null || major.trim().isEmpty) return false;
-    return normalizeMajor(major) == normalizeMajor(fieldOfStudy);
-  }
-
-  return true;
+  if (major == null || major.trim().isEmpty) return false;
+  final normalizedMajor = normalizeMajor(major);
+  return opportunity.eligibleMajors.any(
+    (eligible) => normalizeMajor(eligible) == normalizedMajor,
+  );
 }
 
 /// Used only for the Invite flow's UX (disabling an ineligible Opportunity

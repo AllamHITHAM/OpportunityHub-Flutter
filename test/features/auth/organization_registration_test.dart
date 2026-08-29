@@ -19,15 +19,22 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/core/widgets/theme_toggle_button.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/messaging/data/conversation_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
+import 'package:opportunityhub_flutter/features/organization/data/organization_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
+import 'package:opportunityhub_flutter/features/organization/presentation/organization_home_screen.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
+import 'package:opportunityhub_flutter/models/conversation_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
+import 'package:opportunityhub_flutter/models/organization_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/conversations_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/theme_provider.dart';
@@ -139,6 +146,21 @@ class _FakeOrganizationProfileRepository extends OrganizationProfileRepository {
 }
 
 /// A fake repository that never touches the network — unused by this
+/// file's tests, but OrganizationHomeScreen requires
+/// OrganizationDashboardProvider directly wherever the router can land
+/// after a successful organization registration.
+class _FakeOrganizationDashboardRepository
+    extends OrganizationDashboardRepository {
+  _FakeOrganizationDashboardRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<OrganizationDashboardStatsModel> getDashboardStats() async {
+    throw ApiException('Not used in these registration tests');
+  }
+}
+
+/// A fake repository that never touches the network — unused by this
 /// file's tests, but the Home screens' NotificationBellAction requires a
 /// NotificationProvider wherever the router can land after registration.
 class _FakeNotificationRepository extends NotificationRepository {
@@ -147,6 +169,18 @@ class _FakeNotificationRepository extends NotificationRepository {
 
   @override
   Future<List<NotificationModel>> getNotifications() async => [];
+}
+
+/// A fake repository that never touches the network — unused by this
+/// file's tests, but OrganizationHomeScreen's MessagesBellAction (next to
+/// NotificationBellAction) requires a ConversationsProvider wherever the
+/// router can land after registration.
+class _FakeConversationRepository extends ConversationRepository {
+  _FakeConversationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<ConversationSummaryModel>> getConversations() async => [];
 }
 
 Widget _buildApp(
@@ -163,9 +197,24 @@ Widget _buildApp(
       ChangeNotifierProvider<OrganizationProfileProvider>.value(
         value: organizationProfileProvider,
       ),
+      ChangeNotifierProvider<OrganizationDashboardProvider>(
+        create: (_) => OrganizationDashboardProvider(
+          repository: _FakeOrganizationDashboardRepository(),
+          authProvider: authProvider,
+        ),
+      ),
       ChangeNotifierProvider<NotificationProvider>(
         create: (_) => NotificationProvider(
           repository: _FakeNotificationRepository(),
+          authProvider: authProvider,
+        ),
+      ),
+      // OrganizationHomeScreen now reads MessagesBellAction's
+      // ConversationsProvider unconditionally too, next to
+      // NotificationProvider above.
+      ChangeNotifierProvider<ConversationsProvider>(
+        create: (_) => ConversationsProvider(
+          repository: _FakeConversationRepository(),
           authProvider: authProvider,
         ),
       ),
@@ -490,7 +539,7 @@ void main() {
       await _tapVisible(tester, finishButton);
       await tester.pumpAndSettle();
 
-      expect(find.text('Role: Organization'), findsOneWidget);
+      expect(find.byType(OrganizationHomeScreen), findsOneWidget);
       expect(authProvider.isAuthenticated, isTrue);
       expect(authProvider.user?.role, 'organization');
     },
@@ -636,7 +685,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(authRepository.registerOrganizationCallCount, 2);
-      expect(find.text('Role: Organization'), findsOneWidget);
+      expect(find.byType(OrganizationHomeScreen), findsOneWidget);
     },
   );
 
@@ -652,7 +701,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(authRepository.registerOrganizationCallCount, 1);
-      expect(find.text('Role: Organization'), findsOneWidget);
+      expect(find.byType(OrganizationHomeScreen), findsOneWidget);
 
       // Nothing about arriving at Organization Home should trigger another
       // registration call.

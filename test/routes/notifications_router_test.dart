@@ -10,14 +10,17 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/locations/data/location_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
+import 'package:opportunityhub_flutter/models/location_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/location_catalog_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
@@ -68,6 +71,17 @@ class _FakeNotificationRepository extends NotificationRepository {
 
   @override
   Future<List<NotificationModel>> getNotifications() async => [];
+}
+
+/// A fake repository that never touches the network — unused by this
+/// file's tests, but Student Profile Setup (reached when an incomplete
+/// profile redirects there) reads LocationCatalogProvider unconditionally.
+class _FakeLocationRepository extends LocationRepository {
+  _FakeLocationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<LocationModel>> getLocations() async => [];
 }
 
 void _setViewSize(WidgetTester tester, Size size) {
@@ -148,6 +162,10 @@ Future<void> _pumpAsRole(
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
         ),
+        ChangeNotifierProvider<LocationCatalogProvider>(
+          create: (_) =>
+              LocationCatalogProvider(repository: _FakeLocationRepository()),
+        ),
         ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
       ],
       child: MaterialApp.router(
@@ -172,8 +190,10 @@ void main() {
       initialPath: AppRoutes.notifications,
     );
 
-    expect(find.text('Notifications'), findsOneWidget);
-    expect(find.text('No Notifications'), findsOneWidget);
+    // "Notifications" legitimately appears twice now (the AppBar title and
+    // the page header) -- this just confirms the screen actually rendered.
+    expect(find.text('Notifications'), findsWidgets);
+    expect(find.text("You're All Caught Up"), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -186,7 +206,9 @@ void main() {
       initialPath: AppRoutes.notifications,
     );
 
-    expect(find.text('Notifications'), findsOneWidget);
+    // "Notifications" legitimately appears twice now (the AppBar title and
+    // the page header) -- this just confirms the screen actually rendered.
+    expect(find.text('Notifications'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
@@ -197,7 +219,9 @@ void main() {
       initialPath: AppRoutes.notifications,
     );
 
-    expect(find.text('Notifications'), findsOneWidget);
+    // "Notifications" legitimately appears twice now (the AppBar title and
+    // the page header) -- this just confirms the screen actually rendered.
+    expect(find.text('Notifications'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
@@ -231,7 +255,11 @@ void main() {
           ChangeNotifierProvider<OrganizationProfileProvider>.value(
             value: organizationProfileProvider,
           ),
-          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
+          ChangeNotifierProvider<LocationCatalogProvider>(
+          create: (_) =>
+              LocationCatalogProvider(repository: _FakeLocationRepository()),
+        ),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,
@@ -260,7 +288,9 @@ void main() {
         status: 'suspended',
       );
 
-      expect(find.text('Notifications'), findsOneWidget);
+      // "Notifications" legitimately appears twice now (the AppBar title and
+    // the page header) -- this just confirms the screen actually rendered.
+    expect(find.text('Notifications'), findsWidgets);
       expect(tester.takeException(), isNull);
     },
   );
@@ -270,7 +300,9 @@ void main() {
   ) async {
     await _pumpAsRole(tester, role: 'student', initialPath: '/notifications');
 
-    expect(find.text('Notifications'), findsOneWidget);
+    // "Notifications" legitimately appears twice now (the AppBar title and
+    // the page header) -- this just confirms the screen actually rendered.
+    expect(find.text('Notifications'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
@@ -321,7 +353,11 @@ void main() {
           ChangeNotifierProvider<NotificationProvider>.value(
             value: notificationProvider,
           ),
-          ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
+          ChangeNotifierProvider<LocationCatalogProvider>(
+          create: (_) =>
+              LocationCatalogProvider(repository: _FakeLocationRepository()),
+        ),
+        ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
         child: MaterialApp.router(
           theme: AppTheme.lightTheme,
@@ -349,6 +385,8 @@ void main() {
 
     // Settling completed without a pumpAndSettle timeout (which throws if
     // frames never stop scheduling, e.g. from a redirect loop).
-    expect(find.text('Notifications'), findsOneWidget);
+    // "Notifications" legitimately appears twice now (the AppBar title and
+    // the page header) -- this just confirms the screen actually rendered.
+    expect(find.text('Notifications'), findsWidgets);
   });
 }

@@ -21,10 +21,14 @@ import 'package:provider/provider.dart';
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
+import 'package:opportunityhub_flutter/core/utils/date_formatter.dart';
 import 'package:opportunityhub_flutter/features/assessments/data/assessment_repository.dart';
 import 'package:opportunityhub_flutter/features/assessments/presentation/student_quiz_screen.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
+import 'package:opportunityhub_flutter/models/cv_model.dart';
+import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/question_model.dart';
 import 'package:opportunityhub_flutter/models/quiz_attempt_model.dart';
 import 'package:opportunityhub_flutter/models/quiz_model.dart';
@@ -72,6 +76,10 @@ QuizModel _quiz({
   int? timeLimitMinutes,
   int passingScore = 70,
   List<QuestionModel> questions = const [],
+  String displayMode = 'all',
+  int? questionsPerPage,
+  DateTime? availableAt,
+  DateTime? dueAt,
 }) {
   return QuizModel(
     id: id,
@@ -82,6 +90,10 @@ QuizModel _quiz({
     passingScore: passingScore,
     status: 'published',
     questions: questions,
+    displayMode: displayMode,
+    questionsPerPage: questionsPerPage,
+    availableAt: availableAt,
+    dueAt: dueAt,
   );
 }
 
@@ -110,6 +122,7 @@ AssessmentModel _assessment({
   int applicationId = 5,
   String status = 'completed',
   String? result,
+  ApplicationModel? application,
 }) {
   return AssessmentModel(
     id: id,
@@ -117,6 +130,45 @@ AssessmentModel _assessment({
     type: 'quiz',
     status: status,
     result: result,
+    application: application,
+  );
+}
+
+CvModel _cv({int id = 1}) {
+  return CvModel(
+    id: id,
+    studentId: 1,
+    title: 'My CV',
+    filePath: 'cv.pdf',
+    version: 1,
+    isDefault: true,
+    createdByAi: false,
+  );
+}
+
+OpportunityModel _opportunity({int id = 1, String title = 'Backend Intern'}) {
+  return OpportunityModel(
+    id: id,
+    title: title,
+    description: 'A great role.',
+    opportunityType: 'internship',
+    employmentType: 'full_time',
+    workMode: 'remote',
+    experienceLevel: 'entry',
+    positionsAvailable: 1,
+    status: 'open',
+  );
+}
+
+ApplicationModel _application({int id = 5, OpportunityModel? opportunity}) {
+  return ApplicationModel(
+    id: id,
+    studentId: 1,
+    opportunityId: opportunity?.id ?? 1,
+    cvId: 1,
+    status: 'in_assessment',
+    cv: _cv(),
+    opportunity: opportunity,
   );
 }
 
@@ -174,8 +226,18 @@ Future<StudentQuizProvider> _pumpScreen(
   WidgetTester tester, {
   required _FakeAssessmentRepository repository,
   int assessmentId = 1,
+  Size size = const Size(420, 1800),
+  // Phase 10A.4B addendum: `false` for a loaded quiz whose
+  // `isUpcoming`/`dueAt`-pending-transition state keeps a periodic clock
+  // timer alive (see `StudentQuizProvider._syncPreAttemptClock`) — under
+  // FakeAsync, `pumpAndSettle()` would spin forever waiting for a frame
+  // that a live periodic timer keeps rescheduling, exactly the same hazard
+  // this file's own top-of-file comment already documents for the
+  // in-progress countdown timer. Such tests must use `pump()` afterward
+  // instead, and explicitly dispose the provider via `addTearDown`.
+  bool settle = true,
 }) async {
-  tester.view.physicalSize = const Size(420, 1800);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -209,7 +271,12 @@ Future<StudentQuizProvider> _pumpScreen(
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    await tester.pump();
+    await tester.pump();
+  }
 
   return quizProvider;
 }
@@ -454,8 +521,8 @@ void main() {
       expect(find.text('Submit Quiz'), findsWidgets);
       expect(
         find.text(
-          'Are you sure you want to submit your answers? You cannot retake '
-          'this quiz.',
+          'You have answered all 1 question. Once submitted, you cannot '
+          'change your answers or retake this assessment.',
         ),
         findsOneWidget,
       );
@@ -505,11 +572,14 @@ void main() {
       await tester.tap(find.widgetWithText(ElevatedButton, 'Submit'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Quiz submitted successfully'), findsOneWidget);
-      expect(find.text('Quiz Completed'), findsOneWidget);
+      expect(find.text('Assessment Result'), findsOneWidget);
       expect(find.text('Score'), findsOneWidget);
       expect(find.text('100%'), findsOneWidget);
       expect(find.text('Passed'), findsOneWidget);
+      expect(
+        find.textContaining('Congratulations'),
+        findsOneWidget,
+      );
     });
 
     testWidgets(
@@ -722,5 +792,646 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
+  });
+
+  group('Opportunity context header (Phase 10A)', () {
+    testWidgets('shows the real Opportunity title once its Assessment loads', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()])
+        ..assessmentResult = _assessment(
+          application: _application(
+            opportunity: _opportunity(title: 'Backend Intern'),
+          ),
+        );
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.text('Backend Intern'), findsOneWidget);
+    });
+
+    testWidgets(
+      'never shows a subtitle (or crashes) when Opportunity context fails to load',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()])
+          ..assessmentError = ApiException('Server error.');
+
+        await _pumpScreen(tester, repository: repository);
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('Backend Fundamentals'), findsWidgets);
+      },
+    );
+
+    testWidgets('never invents an organization name (the backend exposes none)', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()])
+        ..assessmentResult = _assessment(
+          application: _application(
+            opportunity: _opportunity(title: 'Backend Intern'),
+          ),
+        );
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.textContaining('Organization'), findsNothing);
+    });
+  });
+
+  group('leave confirmation (Phase 10A)', () {
+    Future<void> pumpWithBackStack(
+      WidgetTester tester,
+      _FakeAssessmentRepository repository,
+    ) async {
+      tester.view.physicalSize = const Size(420, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+      final quizProvider = StudentQuizProvider(
+        repository: repository,
+        authProvider: authProvider,
+      );
+
+      final router = GoRouter(
+        initialLocation: '/home',
+        routes: [
+          GoRoute(
+            path: '/home',
+            builder: (context, _) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () => context.push('/quiz'),
+                  child: const Text('Open Quiz'),
+                ),
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/quiz',
+            builder: (_, _) => const StudentQuizScreen(assessmentId: 1),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<StudentQuizProvider>.value(
+              value: quizProvider,
+            ),
+            Provider<AssessmentRepository>.value(value: repository),
+            ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open Quiz'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'leaving before starting the quiz never shows a confirmation',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()]);
+
+        await pumpWithBackStack(tester, repository);
+
+        await tester.tap(find.byTooltip('Back'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Leave quiz?'), findsNothing);
+        expect(find.text('Open Quiz'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'leaving a started quiz with no answers selected never shows a confirmation',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()])
+          ..startResult = _attempt();
+
+        await pumpWithBackStack(tester, repository);
+        await tester.tap(find.text('Start Quiz'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byTooltip('Back'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Leave quiz?'), findsNothing);
+        expect(find.text('Open Quiz'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'leaving with an unsaved answer asks for confirmation and stays by default',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()])
+          ..startResult = _attempt();
+
+        await pumpWithBackStack(tester, repository);
+        await tester.tap(find.text('Start Quiz'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Paris'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byTooltip('Back'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Leave assessment?'), findsOneWidget);
+        expect(
+          find.textContaining("haven't been submitted yet"),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('Stay'));
+        await tester.pumpAndSettle();
+
+        // Still on the quiz, with the answer intact -- nothing was lost.
+        expect(find.text('1 of 1 answered'), findsOneWidget);
+        expect(find.text('Open Quiz'), findsNothing);
+      },
+    );
+
+    testWidgets('confirming Leave actually navigates away', (tester) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()])
+        ..startResult = _attempt();
+
+      await pumpWithBackStack(tester, repository);
+      await tester.tap(find.text('Start Quiz'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Paris'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Leave'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Open Quiz'), findsOneWidget);
+    });
+  });
+
+  group('progress and answered indication (Phase 10A)', () {
+    testWidgets('a real progress bar reflects answered/total, not just text', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(
+          timeLimitMinutes: null,
+          questions: [_mcQuestion(), _tfQuestion()],
+        )
+        ..startResult = _attempt();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.text('Start Quiz'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+      await tester.tap(find.text('Paris'));
+      await tester.pumpAndSettle();
+
+      final bar = tester.widget<LinearProgressIndicator>(
+        find.byType(LinearProgressIndicator),
+      );
+      expect(bar.value, closeTo(0.5, 0.001));
+    });
+
+    testWidgets(
+      'an answered question shows a check icon, not just a filled radio',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()])
+          ..startResult = _attempt();
+
+        await _pumpScreen(tester, repository: repository);
+        await tester.tap(find.text('Start Quiz'));
+        await tester.pumpAndSettle();
+
+        expect(find.byIcon(Icons.check_circle), findsNothing);
+
+        await tester.tap(find.text('Paris'));
+        await tester.pumpAndSettle();
+
+        expect(find.byIcon(Icons.check_circle), findsOneWidget);
+      },
+    );
+  });
+
+  group('desktop question navigator (Phase 10A)', () {
+    testWidgets('shows a numbered chip per question on a desktop viewport', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(
+          timeLimitMinutes: null,
+          questions: [
+            _mcQuestion(position: 1),
+            _tfQuestion(position: 2),
+          ],
+        )
+        ..startResult = _attempt();
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(1440, 1000),
+      );
+      await tester.tap(find.text('Start Quiz'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Questions'), findsOneWidget);
+      // The navigator chip shows the bare position ("1"/"2"); the question
+      // card's own number chip shows "#1"/"#2" -- a different string, so
+      // these match only the navigator chips.
+      expect(find.text('1'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+    });
+
+    testWidgets('tapping a navigator chip does not throw or submit anything', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(
+          timeLimitMinutes: null,
+          questions: [
+            _mcQuestion(position: 1),
+            _tfQuestion(position: 2),
+          ],
+        )
+        ..startResult = _attempt();
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(1440, 1000),
+      );
+      await tester.tap(find.text('Start Quiz'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('2'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Quiz Completed'), findsNothing);
+    });
+
+    testWidgets('no navigator panel clutters a mobile-width viewport', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(
+          timeLimitMinutes: null,
+          questions: [_mcQuestion(), _tfQuestion()],
+        )
+        ..startResult = _attempt();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.text('Start Quiz'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Questions'), findsNothing);
+    });
+
+    testWidgets('a desktop viewport does not overflow', (tester) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(
+          timeLimitMinutes: null,
+          questions: [_mcQuestion(), _tfQuestion()],
+        )
+        ..startResult = _attempt();
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(1440, 1000),
+      );
+      await tester.tap(find.text('Start Quiz'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('human question numbering (Phase 10A.2)', () {
+    testWidgets(
+      'questions are numbered 1, 2, 3... by display order, even when '
+      'every backend position is 0 -- the real-world authoring case',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(
+            timeLimitMinutes: null,
+            questions: [
+              _mcQuestion(id: 1, position: 0),
+              _tfQuestion(id: 2, position: 0),
+            ],
+          )
+          ..startResult = _attempt();
+
+        await _pumpScreen(tester, repository: repository);
+        await tester.tap(find.text('Start Quiz'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('#0'), findsNothing);
+        expect(find.text('#1'), findsOneWidget);
+        expect(find.text('#2'), findsOneWidget);
+      },
+    );
+  });
+
+  group('display modes (Phase 10A.2)', () {
+    testWidgets('single mode shows one question at a time with Next', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(
+          timeLimitMinutes: null,
+          displayMode: 'single',
+          questions: [
+            _mcQuestion(id: 1, position: 0),
+            _tfQuestion(id: 2, position: 1),
+          ],
+        )
+        ..startResult = _attempt();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.text('Start Quiz'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('What is the capital of France?'), findsOneWidget);
+      expect(find.text('The sky is blue.'), findsNothing);
+      expect(find.text('Question 1 of 2'), findsOneWidget);
+      expect(find.text('Submit Quiz'), findsNothing);
+      expect(find.text('Next'), findsOneWidget);
+
+      await tester.tap(find.text('Paris'));
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('What is the capital of France?'), findsNothing);
+      expect(find.text('The sky is blue.'), findsOneWidget);
+      expect(find.text('Question 2 of 2'), findsOneWidget);
+      expect(find.text('Previous'), findsOneWidget);
+      expect(find.text('Submit Quiz'), findsOneWidget);
+    });
+
+    testWidgets('answers survive moving between pages in single mode', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(
+          timeLimitMinutes: null,
+          displayMode: 'single',
+          questions: [
+            _mcQuestion(id: 1, position: 0),
+            _tfQuestion(id: 2, position: 1),
+          ],
+        )
+        ..startResult = _attempt();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.text('Start Quiz'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Paris'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Previous'));
+      await tester.pumpAndSettle();
+
+      // Still on question 1, and the earlier answer is still selected --
+      // the provider (not page-local state) owns selections, so this
+      // never resets on navigation.
+      expect(find.text('1 of 2 answered'), findsOneWidget);
+    });
+
+    testWidgets(
+      'paginated mode shows the configured number of questions per page',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(
+            timeLimitMinutes: null,
+            displayMode: 'paginated',
+            questionsPerPage: 2,
+            questions: [
+              _mcQuestion(id: 1, position: 0),
+              _tfQuestion(id: 2, position: 1),
+              QuestionModel(
+                id: 3,
+                quizId: 1,
+                prompt: 'Third question.',
+                type: 'true_false',
+                points: 1,
+                position: 2,
+              ),
+            ],
+          )
+          ..startResult = _attempt();
+
+        await _pumpScreen(tester, repository: repository);
+        await tester.tap(find.text('Start Quiz'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('What is the capital of France?'), findsOneWidget);
+        expect(find.text('The sky is blue.'), findsOneWidget);
+        expect(find.text('Third question.'), findsNothing);
+        expect(find.text('Questions 1–2 of 3'), findsOneWidget);
+
+        await tester.tap(find.text('Next'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Third question.'), findsOneWidget);
+        expect(find.text('Questions 3–3 of 3'), findsOneWidget);
+        expect(find.text('Submit Quiz'), findsOneWidget);
+      },
+    );
+
+    testWidgets('all mode (the default) shows every question with no Previous/Next', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..loadResult = _quiz(
+          timeLimitMinutes: null,
+          questions: [_mcQuestion(), _tfQuestion()],
+        )
+        ..startResult = _attempt();
+
+      await _pumpScreen(tester, repository: repository);
+      await tester.tap(find.text('Start Quiz'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('What is the capital of France?'), findsOneWidget);
+      expect(find.text('The sky is blue.'), findsOneWidget);
+      expect(find.text('Previous'), findsNothing);
+      expect(find.text('Next'), findsNothing);
+    });
+  });
+
+  group('result release states (Phase 10A.2)', () {
+    testWidgets(
+      'a hidden (pending) result shows "Assessment Submitted" with no score',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()])
+          ..startResult = _attempt()
+          // Score itself is hidden -- manual/future-scheduled release.
+          ..submitResult = _attempt(
+            answers: {1: 'Paris'},
+            submittedAt: DateTime.now(),
+          )
+          ..assessmentResult = _assessment(status: 'completed', result: null);
+
+        await _pumpScreen(tester, repository: repository);
+        await tester.tap(find.text('Start Quiz'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Paris'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Submit Quiz'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Submit'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Assessment Submitted'), findsOneWidget);
+        expect(find.text('Score'), findsNothing);
+        expect(find.textContaining('will be notified'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a released failing result uses respectful, non-aggressive copy',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(timeLimitMinutes: null, questions: [_mcQuestion()])
+          ..startResult = _attempt()
+          ..submitResult = _attempt(
+            answers: {1: 'London'},
+            score: 0,
+            submittedAt: DateTime.now(),
+          )
+          ..assessmentResult = _assessment(status: 'completed', result: 'failed');
+
+        await _pumpScreen(tester, repository: repository);
+        await tester.tap(find.text('Start Quiz'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('London'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Submit Quiz'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Submit'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Assessment Result'), findsOneWidget);
+        expect(find.textContaining('You failed'), findsNothing);
+        expect(
+          find.textContaining('Thank you for the time and effort'),
+          findsOneWidget,
+        );
+      },
+    );
+  });
+
+  group('Quiz availability window (Phase 10A.4B addendum)', () {
+    testWidgets(
+      'an upcoming window shows Assessment Upcoming, no questions, no Start action',
+      (tester) async {
+        final availableAt = DateTime.now().add(const Duration(days: 2));
+        final dueAt = availableAt.add(const Duration(hours: 48));
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(availableAt: availableAt, dueAt: dueAt);
+        final provider = await _pumpScreen(
+          tester,
+          repository: repository,
+          settle: false,
+        );
+
+        expect(find.text('Assessment Upcoming'), findsOneWidget);
+        expect(find.textContaining(formatDateTime(availableAt)), findsOneWidget);
+        expect(find.textContaining(formatDateTime(dueAt)), findsOneWidget);
+        expect(find.text('Start Quiz'), findsNothing);
+        expect(find.text('Questions'), findsNothing);
+
+        // Cancels the still-running periodic pre-attempt clock *before*
+        // this test body returns -- the binding's pending-timer check runs
+        // immediately after, ahead of any `addTearDown` callback, so
+        // disposal must happen here rather than in a teardown hook (see
+        // the identical pattern above for the in-progress countdown
+        // timer).
+        provider.dispose();
+      },
+    );
+
+    testWidgets(
+      'a passed deadline with no attempt shows Assessment Deadline Passed, no Start action',
+      (tester) async {
+        final dueAt = DateTime.now().subtract(const Duration(hours: 1));
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(
+            availableAt: DateTime.now().subtract(const Duration(days: 3)),
+            dueAt: dueAt,
+          );
+
+        // The deadline is already in the past, so there's no pending
+        // transition left to tick toward — safe to settle normally.
+        await _pumpScreen(tester, repository: repository);
+
+        expect(find.text('Assessment Deadline Passed'), findsOneWidget);
+        expect(find.textContaining(formatDateTime(dueAt)), findsOneWidget);
+        expect(find.text('Start Quiz'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'an available window (between available_at and due_at) shows the normal intro with a real deadline row',
+      (tester) async {
+        final dueAt = DateTime.now().add(const Duration(days: 1));
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(
+            availableAt: DateTime.now().subtract(const Duration(hours: 1)),
+            dueAt: dueAt,
+            questions: [_mcQuestion()],
+          );
+        final provider = await _pumpScreen(
+          tester,
+          repository: repository,
+          settle: false,
+        );
+
+        expect(find.text('Start Quiz'), findsOneWidget);
+        expect(find.text('Submission Deadline'), findsOneWidget);
+        expect(find.text(formatDateTime(dueAt)), findsOneWidget);
+
+        provider.dispose();
+      },
+    );
+
+    testWidgets(
+      'a legacy quiz with no availability window renders the normal intro unchanged',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..loadResult = _quiz(questions: [_mcQuestion()]);
+
+        await _pumpScreen(tester, repository: repository);
+
+        expect(find.text('Assessment Upcoming'), findsNothing);
+        expect(find.text('Assessment Deadline Passed'), findsNothing);
+        expect(find.text('Submission Deadline'), findsNothing);
+        expect(find.text('Start Quiz'), findsOneWidget);
+      },
+    );
   });
 }

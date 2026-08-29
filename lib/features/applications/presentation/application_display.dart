@@ -122,16 +122,31 @@ String educationVerificationStatusLabel(String? status) {
   return educationVerificationStatusLabels[status] ?? 'Not Submitted';
 }
 
-/// User-facing labels for the deterministic v1.1 match-analysis factors
-/// (`App\Services\MatchingService`, Phase 8A-2 backend) — Skills, Field/
-/// Major, and Experience only. There is no education/location/work-mode
-/// factor in this formula, so no label exists for one here. Deliberately
-/// never called "AI Score" anywhere in this app: the underlying scoring is
-/// entirely rule-based and deterministic, never AI/LLM-generated.
+/// User-facing labels for the deterministic match-analysis factors
+/// (`App\Services\MatchingService`) — Skills, Major, and Location.
+/// Deliberately never called "AI Score" anywhere in this app: the
+/// underlying scoring is entirely rule-based and deterministic, never
+/// AI/LLM-generated.
+///
+/// Opportunity Academic Matching Cleanup (v1.2) removed the original
+/// Field/Major factor (compared `major` against the deprecated free-text
+/// `field_of_study`) entirely. Recommendation Match: Major Must Contribute
+/// to Total Score (v1.3) added a new Major factor back in its place,
+/// computed from the Student's major against the Opportunity's canonical
+/// Eligible Majors — never `field_of_study`, which remains unused by any
+/// factor. Labeled `'major'`, not `'field'`, to avoid ever implying a
+/// `field_of_study` dependency.
+///
+/// Candidate Opportunity Preferences + Final Recommendation Match Formula
+/// (v2.0): Experience is removed entirely (no `'experience'` entry any
+/// more) and Location takes its place, computed from the Opportunity's
+/// canonical location against the Student's Available Work Locations —
+/// `null`/"Not available" for a Remote Opportunity, where Location is
+/// never considered at all.
 const matchFactorLabels = {
   'skills': 'Skills Match',
-  'field': 'Field / Major Match',
-  'experience': 'Experience Match',
+  'major': 'Major Match',
+  'location': 'Location Match',
 };
 
 /// Formats a 0–100 match factor score as a whole-number percentage, or

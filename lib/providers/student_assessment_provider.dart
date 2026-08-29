@@ -30,9 +30,20 @@ class StudentAssessmentProvider extends ChangeNotifier {
   final AssessmentRepository repository;
   final AuthProvider _authProvider;
 
-  AssessmentModel? assessment;
+  /// The full Assessment *history* for [loadedApplicationId], oldest first
+  /// (Phase 10A.3) — before this phase an application could only ever have
+  /// one Assessment, so this held at most one element; a completed Quiz
+  /// followed by a real "Advance to Interview" Assessment now both live
+  /// here, in full.
+  List<AssessmentModel> assessments = [];
 
-  /// Which application [assessment] (or the in-flight fetch) belongs to —
+  /// The application's *current* Assessment — the last element of
+  /// [assessments], or `null` when empty. Mirrors
+  /// `OrganizationAssessmentProvider.latestAssessment`.
+  AssessmentModel? get latestAssessment =>
+      assessments.isEmpty ? null : assessments.last;
+
+  /// Which application [assessments] (or the in-flight fetch) belongs to —
   /// mirrors `OrganizationAssessmentProvider.loadedApplicationId`'s dual
   /// role: it identifies both the currently in-flight load and the most
   /// recently completed one, so a request for a different application
@@ -57,7 +68,7 @@ class StudentAssessmentProvider extends ChangeNotifier {
   int _loadGeneration = 0;
 
   bool hasAssessmentFor(int applicationId) =>
-      loadedApplicationId == applicationId && assessment != null;
+      loadedApplicationId == applicationId && assessments.isNotEmpty;
 
   void _handleAuthChanged() {
     // A different student may sign in next — don't leak the previous
@@ -102,21 +113,21 @@ class StudentAssessmentProvider extends ChangeNotifier {
         loadedApplicationId == applicationId && generation == _loadGeneration;
 
     try {
-      final result = await repository.getStudentAssessmentForApplication(
+      final result = await repository.getStudentAssessmentsForApplication(
         applicationId,
       );
-      // `result` is `null` both when the application genuinely has no
+      // `result` is `[]` both when the application genuinely has no
       // assessment yet and is treated identically either way — there's no
       // separate "not found" error for this read, matching
-      // `getAssessmentForApplication`'s own "no assessment yet" contract.
+      // `getAssessmentsForApplication`'s own "no assessment yet" contract.
       if (stillCurrent()) {
-        assessment = result;
+        assessments = result;
       }
     } on ApiException catch (error) {
-      // Deliberately never touches `assessment` on a *refresh* — a refresh
-      // failure must never blank out an assessment the student is already
-      // looking at. On a genuinely first load, `assessment` is already
-      // `null`, so this has the same effect either way.
+      // Deliberately never touches `assessments` on a *refresh* — a refresh
+      // failure must never blank out assessment history the student is
+      // already looking at. On a genuinely first load, `assessments` is
+      // already `[]`, so this has the same effect either way.
       if (stillCurrent()) {
         errorMessage = error.message;
       }
@@ -139,7 +150,7 @@ class StudentAssessmentProvider extends ChangeNotifier {
   /// Clears all assessment state — called when the signed-in student
   /// changes.
   void reset() {
-    assessment = null;
+    assessments = [];
     loadedApplicationId = null;
     isLoading = false;
     errorMessage = null;

@@ -31,7 +31,10 @@ CandidateModel _candidate({int id = 1, String name = 'Omar Hassan'}) {
     university: 'State University',
     major: 'Computer Science',
     graduationYear: 2026,
+    bio: null,
     educationVerificationStatus: 'verified',
+    currentLocation: null,
+    availableLocations: const [],
     skills: const [],
   );
 }

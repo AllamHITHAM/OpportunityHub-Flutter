@@ -20,14 +20,18 @@ import 'package:opportunityhub_flutter/features/applications/data/application_re
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/education_verification/data/education_verification_repository.dart';
+import 'package:opportunityhub_flutter/features/locations/data/location_repository.dart';
+import 'package:opportunityhub_flutter/features/messaging/data/conversation_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/conversation_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/education_verification_model.dart';
+import 'package:opportunityhub_flutter/models/location_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
@@ -35,6 +39,8 @@ import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/conversations_provider.dart';
+import 'package:opportunityhub_flutter/providers/location_catalog_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
@@ -118,12 +124,18 @@ class _FakeStudentProfileRepository extends StudentProfileRepository {
     required String university,
     required String major,
     required int graduationYear,
+    required List<String> interestedIn,
+    int? currentLocationId,
+    List<int>? availableLocationIds,
   }) async {
     createProfileCallCount++;
     lastCreateProfilePayload = {
       'university': university,
       'major': major,
       'graduation_year': graduationYear,
+      'interested_in': interestedIn,
+      'current_location_id': currentLocationId,
+      'available_location_ids': availableLocationIds,
     };
     if (createDelay > Duration.zero) {
       await Future<void>.delayed(createDelay);
@@ -145,6 +157,16 @@ class _FakeStudentProfileRepository extends StudentProfileRepository {
   }
 }
 
+class _FakeLocationRepository extends LocationRepository {
+  _FakeLocationRepository({this.locations = const []})
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  List<LocationModel> locations;
+
+  @override
+  Future<List<LocationModel>> getLocations() async => locations;
+}
+
 /// A fake repository that never touches the network — unused by this
 /// file's tests, but AppRouter requires an OrganizationProfileProvider.
 class _FakeOrganizationProfileRepository extends OrganizationProfileRepository {
@@ -164,6 +186,18 @@ class _FakeNotificationRepository extends NotificationRepository {
 
   @override
   Future<List<NotificationModel>> getNotifications() async => [];
+}
+
+/// A fake repository that never touches the network — unused by this
+/// file's tests, but StudentHomeScreen's MessagesBellAction (next to
+/// NotificationBellAction) requires a ConversationsProvider wherever the
+/// router can land after registration.
+class _FakeConversationRepository extends ConversationRepository {
+  _FakeConversationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<ConversationSummaryModel>> getConversations() async => [];
 }
 
 /// Fake repositories below are unused by this file's tests, but
@@ -190,6 +224,7 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     String? location,
     String? fieldOfStudy,
     String? keyword,
+    int? organizationId,
     int page = 1,
     int perPage = 15,
   }) async {
@@ -231,8 +266,9 @@ Widget _buildApp(
   AuthProvider authProvider,
   StudentProfileProvider studentProfileProvider,
   OrganizationProfileProvider organizationProfileProvider,
-  AppRouter appRouter,
-) {
+  AppRouter appRouter, {
+  List<LocationModel> locations = const [],
+}) {
   return MultiProvider(
     providers: [
       ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
@@ -245,6 +281,14 @@ Widget _buildApp(
       ChangeNotifierProvider<NotificationProvider>(
         create: (_) => NotificationProvider(
           repository: _FakeNotificationRepository(),
+          authProvider: authProvider,
+        ),
+      ),
+      // StudentHomeScreen now reads MessagesBellAction's ConversationsProvider
+      // unconditionally too, next to NotificationProvider above.
+      ChangeNotifierProvider<ConversationsProvider>(
+        create: (_) => ConversationsProvider(
+          repository: _FakeConversationRepository(),
           authProvider: authProvider,
         ),
       ),
@@ -278,6 +322,11 @@ Widget _buildApp(
         create: (_) => StudentEducationVerificationProvider(
           repository: _FakeEducationVerificationRepository(),
           authProvider: authProvider,
+        ),
+      ),
+      ChangeNotifierProvider<LocationCatalogProvider>(
+        create: (_) => LocationCatalogProvider(
+          repository: _FakeLocationRepository(locations: locations),
         ),
       ),
     ],
@@ -323,6 +372,7 @@ _pumpToStep2(
   WidgetTester tester, {
   Size size = _formViewport,
   _FakeStudentProfileRepository? studentProfileRepository,
+  List<LocationModel> locations = const [],
 }) async {
   _setViewSize(tester, size);
 
@@ -348,6 +398,7 @@ _pumpToStep2(
       studentProfileProvider,
       organizationProfileProvider,
       appRouter,
+      locations: locations,
     ),
   );
   await authProvider.initialize();
@@ -443,6 +494,9 @@ Future<void> _fillValidStep2(WidgetTester tester) async {
 
   final currentYear = DateTime.now().year;
   await tester.tap(find.text('$currentYear').last);
+  await tester.pumpAndSettle();
+
+  await _tapVisible(tester, find.widgetWithText(FilterChip, 'Job'));
   await tester.pumpAndSettle();
 }
 
@@ -678,7 +732,8 @@ void main() {
   });
 
   testWidgets(
-    'Valid Step 2 Finish sends exactly university, major, graduation_year',
+    'Valid Step 2 Finish sends university, major, graduation_year, and '
+    'location fields (Student Location Profile Patch)',
     (tester) async {
       final repository = _FakeStudentProfileRepository();
       await _pumpToStep2(tester, studentProfileRepository: repository);
@@ -694,14 +749,197 @@ void main() {
         'university',
         'major',
         'graduation_year',
+        'interested_in',
+        'current_location_id',
+        'available_location_ids',
       });
+      expect(repository.lastCreateProfilePayload?['interested_in'], ['job']);
       expect(
         repository.lastCreateProfilePayload?['university'],
         'State University',
       );
       expect(repository.lastCreateProfilePayload?['major'], 'Computer Science');
+      // Neither location field is required -- Finish still succeeds with
+      // both left unconfigured.
+      expect(repository.lastCreateProfilePayload?['current_location_id'], isNull);
+      expect(
+        repository.lastCreateProfilePayload?['available_location_ids'],
+        isEmpty,
+      );
     },
   );
+
+  group('Work Location Preferences (Student Location Profile Patch)', () {
+    testWidgets('renders the Current Location control', (tester) async {
+      await _pumpToStep2(
+        tester,
+        locations: const [LocationModel(id: 1, canonicalName: 'Jenin')],
+      );
+
+      expect(find.text('Work Location Preferences'), findsOneWidget);
+      expect(
+        find.widgetWithText(TextFormField, 'Current Location (optional)'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets(
+      'the Available Work Locations control can search the real catalog',
+      (tester) async {
+        await _pumpToStep2(
+          tester,
+          locations: const [
+            LocationModel(id: 1, canonicalName: 'Jenin'),
+            LocationModel(id: 2, canonicalName: 'Nablus'),
+          ],
+        );
+
+        final searchField = find.widgetWithText(
+          TextFormField,
+          'Add a work location',
+        );
+        await tester.ensureVisible(searchField);
+        await tester.enterText(searchField, 'Nab');
+        await tester.pumpAndSettle();
+
+        expect(find.widgetWithText(ListTile, 'Nablus'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'shows the truthful Remote helper copy -- Remote opportunities are '
+      'not restricted by these locations',
+      (tester) async {
+        await _pumpToStep2(tester);
+
+        expect(
+          find.textContaining(
+            'Remote opportunities are not restricted by these locations',
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'does not clutter the minimal Step 1 account form -- location '
+      'fields only ever appear on Step 2',
+      (tester) async {
+        _setViewSize(tester, _formViewport);
+        final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+        final studentProfileProvider = StudentProfileProvider(
+          repository: _FakeStudentProfileRepository(),
+          authProvider: authProvider,
+        );
+        final organizationProfileProvider = OrganizationProfileProvider(
+          repository: _FakeOrganizationProfileRepository(),
+          authProvider: authProvider,
+        );
+        final appRouter = AppRouter(
+          authProvider,
+          studentProfileProvider,
+          organizationProfileProvider,
+        );
+        await tester.pumpWidget(
+          _buildApp(
+            authProvider,
+            studentProfileProvider,
+            organizationProfileProvider,
+            appRouter,
+          ),
+        );
+        await authProvider.initialize();
+        await tester.pumpAndSettle();
+
+        final createAccount = find.text('Create Account');
+        await tester.ensureVisible(createAccount);
+        await tester.tap(createAccount);
+        await tester.pumpAndSettle();
+        final continueAsStudent = find.text('Continue as Student');
+        await tester.ensureVisible(continueAsStudent);
+        await tester.tap(continueAsStudent);
+        await tester.pumpAndSettle();
+
+        // Still on Step 1 (the minimal account form) -- no location field
+        // here at all.
+        expect(find.text('Work Location Preferences'), findsNothing);
+        expect(find.text('Current Location (optional)'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'selecting a current location and available locations submits both',
+      (tester) async {
+        final repository = _FakeStudentProfileRepository();
+        await _pumpToStep2(
+          tester,
+          studentProfileRepository: repository,
+          locations: const [
+            LocationModel(id: 1, canonicalName: 'Jenin'),
+            LocationModel(id: 2, canonicalName: 'Nablus'),
+          ],
+        );
+
+        await _fillValidStep2(tester);
+
+        final currentLocationSearch = find.widgetWithText(
+          TextFormField,
+          'Current Location (optional)',
+        );
+        await tester.ensureVisible(currentLocationSearch);
+        await tester.enterText(currentLocationSearch, 'Jenin');
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(ListTile, 'Jenin'));
+        await tester.pumpAndSettle();
+
+        final availableLocationSearch = find.widgetWithText(
+          TextFormField,
+          'Add a work location',
+        );
+        await tester.ensureVisible(availableLocationSearch);
+        await tester.enterText(availableLocationSearch, 'Nablus');
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(ListTile, 'Nablus'));
+        await tester.pumpAndSettle();
+
+        final finishButton = find.text('Finish');
+        await _tapVisible(tester, finishButton);
+        await tester.pumpAndSettle();
+
+        expect(repository.lastCreateProfilePayload?['current_location_id'], 1);
+        expect(
+          repository.lastCreateProfilePayload?['available_location_ids'],
+          [2],
+        );
+      },
+    );
+
+    for (final width in [375.0, 390.0, 430.0]) {
+      testWidgets(
+        'mobile ${width.toInt()} — Work Location Preferences renders '
+        'without overflow',
+        (tester) async {
+          await _pumpToStep2(
+            tester,
+            size: Size(width, 1600),
+            locations: const [
+              LocationModel(id: 1, canonicalName: 'Jenin'),
+              LocationModel(id: 2, canonicalName: 'Nablus'),
+              LocationModel(id: 3, canonicalName: 'Ramallah'),
+              LocationModel(id: 4, canonicalName: 'Hebron'),
+              LocationModel(id: 5, canonicalName: 'Bethlehem'),
+            ],
+          );
+
+          expect(tester.takeException(), isNull);
+          expect(
+            find.widgetWithText(TextFormField, 'Add a work location'),
+            findsOneWidget,
+          );
+        },
+      );
+    }
+  });
 
   testWidgets(
     'Valid Step 2 Finish navigates to Student Home and does not show the old placeholder message',

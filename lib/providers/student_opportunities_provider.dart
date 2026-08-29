@@ -179,9 +179,26 @@ class StudentOpportunitiesProvider extends ChangeNotifier {
     return loadOpportunities(forceRefresh: true);
   }
 
-  /// Loads a single opportunity's details. Reuses an already-loaded copy
-  /// from the list when available, so navigating from the list to its
-  /// details doesn't repeat a GET the app already just made.
+  /// Loads a single opportunity's details. When an already-loaded copy
+  /// from the list is available, it's used for an instant paint (so
+  /// navigating from the list to its details doesn't show a blank
+  /// skeleton for a GET the app already just made) -- but a fresh fetch
+  /// is still kicked off in the background regardless, and always wins
+  /// once it lands.
+  ///
+  /// This matters specifically for eligibility-sensitive fields
+  /// (`eligible_majors`, `status`, `application_deadline`): the list may
+  /// have been fetched *before* an Organization changed them, and this
+  /// screen's Apply button/eligibility badge must never be gated on that
+  /// stale a copy -- only ever the backend's current truth. (The real
+  /// `POST /apply` call always re-validates server-side regardless, so a
+  /// stale cache here was never a security bypass -- but it could show a
+  /// student "Eligible"/an enabled Apply button that the backend would
+  /// then correctly reject, which is exactly the confusing UX this
+  /// avoids.) See `isThisOne`'s use in the screen's own `_buildBody` for
+  /// why this background refresh never causes a visible loading flash --
+  /// the cached copy keeps rendering right up until the fresh one
+  /// replaces it.
   Future<void> loadOpportunityDetails(int id, {bool forceRefresh = false}) {
     if (!forceRefresh) {
       for (final opportunity in opportunities) {
@@ -189,7 +206,7 @@ class StudentOpportunitiesProvider extends ChangeNotifier {
           selectedOpportunity = opportunity;
           detailsErrorMessage = null;
           notifyListeners();
-          return Future.value();
+          break;
         }
       }
     }

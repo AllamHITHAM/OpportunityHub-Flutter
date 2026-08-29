@@ -11,15 +11,15 @@ CandidateModel _candidate({String? major}) {
     university: 'State University',
     major: major,
     graduationYear: 2026,
+    bio: null,
     educationVerificationStatus: 'not_submitted',
+    currentLocation: null,
+    availableLocations: const [],
     skills: const [],
   );
 }
 
-OpportunityModel _opportunity({
-  List<String> eligibleMajors = const [],
-  String? fieldOfStudy,
-}) {
+OpportunityModel _opportunity({List<String> eligibleMajors = const []}) {
   return OpportunityModel(
     id: 1,
     title: 'Backend Developer',
@@ -30,7 +30,6 @@ OpportunityModel _opportunity({
     experienceLevel: 'junior',
     positionsAvailable: 1,
     status: 'open',
-    fieldOfStudy: fieldOfStudy,
     eligibleMajors: eligibleMajors,
   );
 }
@@ -67,21 +66,10 @@ void main() {
       expect(isCandidateEligibleForOpportunity(candidate, opportunity), isTrue);
     });
 
-    test('falls back to fieldOfStudy when there are no eligible majors', () {
-      final candidate = _candidate(major: 'Civil Engineering');
-      final opportunity = _opportunity(fieldOfStudy: 'civil engineering');
-
-      expect(isCandidateEligibleForOpportunity(candidate, opportunity), isTrue);
-    });
-
-    test('rejects a fieldOfStudy mismatch', () {
-      final candidate = _candidate(major: 'Fine Arts');
-      final opportunity = _opportunity(fieldOfStudy: 'Civil Engineering');
-
-      expect(isCandidateEligibleForOpportunity(candidate, opportunity), isFalse);
-    });
-
-    test('is unrestricted with neither eligible majors nor fieldOfStudy', () {
+    // Opportunity Academic Matching Cleanup: `field_of_study` is no longer
+    // modeled on `OpportunityModel` at all, so it structurally cannot
+    // influence this check any more -- `eligibleMajors` is the sole input.
+    test('is unrestricted with no eligible majors configured', () {
       final candidate = _candidate(major: 'Anything');
       final opportunity = _opportunity();
 

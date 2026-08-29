@@ -46,6 +46,11 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   AssessmentModel? loadResult;
+
+  /// Phase 10A.3 — set this instead of [loadResult] to return a full,
+  /// multi-element history in one response. Takes priority over both
+  /// [loadResult] and [resultsByApplication] when non-null.
+  List<AssessmentModel>? historyResult;
   ApiException? loadError;
   Object? loadRuntimeError;
   int getStudentAssessmentForApplicationCallCount = 0;
@@ -59,7 +64,7 @@ class _FakeAssessmentRepository extends AssessmentRepository {
   Map<int, Duration>? delaysByApplication;
 
   @override
-  Future<AssessmentModel?> getStudentAssessmentForApplication(
+  Future<List<AssessmentModel>> getStudentAssessmentsForApplication(
     int applicationId,
   ) async {
     getStudentAssessmentForApplicationCallCount++;
@@ -71,10 +76,12 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     }
     if (loadRuntimeError != null) throw loadRuntimeError!;
     if (loadError != null) throw loadError!;
+    if (historyResult != null) return historyResult!;
     if (resultsByApplication != null) {
-      return resultsByApplication![applicationId];
+      final result = resultsByApplication![applicationId];
+      return result == null ? [] : [result];
     }
-    return loadResult;
+    return loadResult == null ? [] : [loadResult!];
   }
 }
 
@@ -93,7 +100,7 @@ void main() {
   });
 
   test('initial state is empty and idle', () {
-    expect(provider.assessment, isNull);
+    expect(provider.latestAssessment, isNull);
     expect(provider.loadedApplicationId, isNull);
     expect(provider.isLoading, isFalse);
     expect(provider.errorMessage, isNull);
@@ -104,8 +111,8 @@ void main() {
 
     await provider.loadForApplication(5);
 
-    expect(provider.assessment, isNotNull);
-    expect(provider.assessment!.applicationId, 5);
+    expect(provider.latestAssessment, isNotNull);
+    expect(provider.latestAssessment!.applicationId, 5);
     expect(provider.loadedApplicationId, 5);
     expect(provider.isLoading, isFalse);
     expect(provider.errorMessage, isNull);
@@ -117,7 +124,7 @@ void main() {
     () async {
       await provider.loadForApplication(5);
 
-      expect(provider.assessment, isNull);
+      expect(provider.latestAssessment, isNull);
       expect(provider.errorMessage, isNull);
       expect(provider.hasAssessmentFor(5), isFalse);
     },
@@ -129,14 +136,14 @@ void main() {
     await provider.loadForApplication(5);
 
     expect(provider.errorMessage, 'Something went wrong.');
-    expect(provider.assessment, isNull);
+    expect(provider.latestAssessment, isNull);
 
     repository.loadError = null;
     repository.loadResult = _assessment(applicationId: 5);
     await provider.loadForApplication(5, forceRefresh: true);
 
     expect(provider.errorMessage, isNull);
-    expect(provider.assessment, isNotNull);
+    expect(provider.latestAssessment, isNotNull);
   });
 
   test('an unexpected parsing/runtime error exposes a safe message and never '
@@ -184,7 +191,7 @@ void main() {
     final secondCall = provider.loadForApplication(9);
     await Future.wait([firstCall, secondCall]);
 
-    expect(provider.assessment?.applicationId, 9);
+    expect(provider.latestAssessment?.applicationId, 9);
     expect(provider.loadedApplicationId, 9);
     expect(repository.requestedApplicationIds, containsAll([5, 9]));
   });
@@ -197,7 +204,7 @@ void main() {
     };
 
     await provider.loadForApplication(9);
-    expect(provider.assessment?.applicationId, 9);
+    expect(provider.latestAssessment?.applicationId, 9);
 
     repository.delaysByApplication = {5: const Duration(milliseconds: 100)};
     final staleCall = provider.loadForApplication(5);
@@ -205,11 +212,11 @@ void main() {
     // Switch back to application 9 before the stale application-5
     // response arrives.
     await provider.loadForApplication(9, forceRefresh: true);
-    expect(provider.assessment?.applicationId, 9);
+    expect(provider.latestAssessment?.applicationId, 9);
 
     await staleCall;
 
-    expect(provider.assessment?.applicationId, 9);
+    expect(provider.latestAssessment?.applicationId, 9);
     expect(provider.loadedApplicationId, 9);
   });
 
@@ -223,24 +230,24 @@ void main() {
     repository.delaysByApplication = {5: Duration.zero};
     await provider.loadForApplication(5, forceRefresh: true);
 
-    expect(provider.assessment?.id, 2);
+    expect(provider.latestAssessment?.id, 2);
 
     await staleCall;
 
-    expect(provider.assessment?.id, 2);
+    expect(provider.latestAssessment?.id, 2);
   });
 
   test('a refresh failure for the same application retains the previously '
       'loaded assessment', () async {
     repository.loadResult = _assessment(id: 1, applicationId: 5);
     await provider.loadForApplication(5);
-    expect(provider.assessment?.id, 1);
+    expect(provider.latestAssessment?.id, 1);
 
     repository.loadResult = null;
     repository.loadError = ApiException('Server error, please retry.');
     await provider.loadForApplication(5, forceRefresh: true);
 
-    expect(provider.assessment?.id, 1);
+    expect(provider.latestAssessment?.id, 1);
     expect(provider.errorMessage, 'Server error, please retry.');
   });
 
@@ -255,11 +262,11 @@ void main() {
   test('reset clears all state', () async {
     repository.loadResult = _assessment(applicationId: 5);
     await provider.loadForApplication(5);
-    expect(provider.assessment, isNotNull);
+    expect(provider.latestAssessment, isNotNull);
 
     provider.reset();
 
-    expect(provider.assessment, isNull);
+    expect(provider.latestAssessment, isNull);
     expect(provider.loadedApplicationId, isNull);
     expect(provider.isLoading, isFalse);
     expect(provider.errorMessage, isNull);
@@ -268,11 +275,11 @@ void main() {
   test('reset clears state on logout', () async {
     repository.loadResult = _assessment(applicationId: 5);
     await provider.loadForApplication(5);
-    expect(provider.assessment, isNotNull);
+    expect(provider.latestAssessment, isNotNull);
 
     await authProvider.logout();
 
-    expect(provider.assessment, isNull);
+    expect(provider.latestAssessment, isNull);
     expect(provider.loadedApplicationId, isNull);
     expect(provider.errorMessage, isNull);
   });
@@ -286,7 +293,7 @@ void main() {
     await staleLoad;
 
     // The stale response must not repopulate state after reset.
-    expect(provider.assessment, isNull);
+    expect(provider.latestAssessment, isNull);
     expect(provider.loadedApplicationId, isNull);
   });
 
@@ -298,4 +305,26 @@ void main() {
       await expectLater(authProvider.logout(), completes);
     },
   );
+
+  group('Assessment history (Phase 10A.3)', () {
+    test('assessments holds the full history; latestAssessment is the last '
+        'element', () async {
+      final quizAssessment = AssessmentModel(
+        id: 1,
+        applicationId: 5,
+        type: 'quiz',
+        status: 'completed',
+        result: 'passed',
+      );
+      final interviewAssessment = _assessment(id: 2, applicationId: 5);
+      repository.historyResult = [quizAssessment, interviewAssessment];
+
+      await provider.loadForApplication(5);
+
+      expect(provider.assessments, hasLength(2));
+      expect(provider.assessments.first.id, 1);
+      expect(provider.latestAssessment?.id, 2);
+      expect(provider.latestAssessment?.type, 'interview');
+    });
+  });
 }

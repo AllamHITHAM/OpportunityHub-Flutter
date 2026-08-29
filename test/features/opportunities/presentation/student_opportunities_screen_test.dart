@@ -60,6 +60,7 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     String? location,
     String? fieldOfStudy,
     String? keyword,
+    int? organizationId,
     int page = 1,
     int perPage = 15,
   }) async {

@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/widgets/app_widgets.dart';
+import '../../../providers/organization_assessment_provider.dart';
 import '../../../providers/organization_offer_provider.dart';
 import '../data/send_offer_input.dart';
 import 'offer_display.dart';
@@ -15,10 +16,23 @@ import 'offer_display.dart';
 /// `_StatusActionsSection` in `organization_application_details_screen.dart`
 /// for the eligibility gate. There is no edit/resend counterpart — once
 /// sent, an Offer is immutable in v1.
+///
+/// **Phase 10A.4A**: when [nextActionOriginAssessmentId] is set, this same
+/// form instead *stages* "Proceed to Offer" as a completed Quiz
+/// Assessment's next-step decision
+/// (`OrganizationAssessmentProvider.setNextActionOffer()`) — validated with
+/// the exact same rules, but creating no real `Offer` yet; nothing
+/// Student-visible happens until the decision is released. See
+/// `_QuizAssessmentSummaryCard`.
 class SendOfferSheet extends StatefulWidget {
-  const SendOfferSheet({super.key, required this.applicationId});
+  const SendOfferSheet({
+    super.key,
+    required this.applicationId,
+    this.nextActionOriginAssessmentId,
+  });
 
   final int applicationId;
+  final int? nextActionOriginAssessmentId;
 
   @override
   State<SendOfferSheet> createState() => _SendOfferSheetState();
@@ -35,6 +49,8 @@ class _SendOfferSheetState extends State<SendOfferSheet> {
   String? _salaryPeriod;
   DateTime? _startDate;
 
+  bool get _isStaged => widget.nextActionOriginAssessmentId != null;
+
   @override
   void initState() {
     super.initState();
@@ -43,7 +59,12 @@ class _SendOfferSheetState extends State<SendOfferSheet> {
     // ScheduleInterviewScreen's identical reasoning.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<OrganizationOfferProvider>().clearActionErrors();
+      if (_isStaged) {
+        context.read<OrganizationAssessmentProvider>().clearActionError();
+        context.read<OrganizationAssessmentProvider>().clearFieldErrors();
+      } else {
+        context.read<OrganizationOfferProvider>().clearActionErrors();
+      }
     });
   }
 
@@ -60,8 +81,10 @@ class _SendOfferSheetState extends State<SendOfferSheet> {
   bool get _hasSalaryAmount => _salaryAmountController.text.trim().isNotEmpty;
 
   String? _fieldError(String field) {
-    final provider = context.read<OrganizationOfferProvider>();
-    final messages = provider.fieldErrors[field];
+    final fieldErrors = _isStaged
+        ? context.read<OrganizationAssessmentProvider>().fieldErrors
+        : context.read<OrganizationOfferProvider>().fieldErrors;
+    final messages = fieldErrors[field];
     if (messages == null || messages.isEmpty) return null;
     return messages.first;
   }
@@ -153,16 +176,17 @@ class _SendOfferSheetState extends State<SendOfferSheet> {
 
     final confirmed = await showAppConfirmationDialog(
       context,
-      title: 'Send Offer',
-      message:
-          'Are you sure you want to send this offer? The candidate will be '
-          'able to accept or decline it.',
-      confirmLabel: 'Send Offer',
+      title: _isStaged ? 'Proceed to Offer' : 'Send Offer',
+      message: _isStaged
+          ? 'Prepare an offer as the next step for this candidate? Nothing '
+                'is sent to them yet — the offer is only sent once this '
+                "assessment's result is released."
+          : 'Are you sure you want to send this offer? The candidate will be '
+                'able to accept or decline it.',
+      confirmLabel: _isStaged ? 'Proceed to Offer' : 'Send Offer',
       type: AppConfirmationType.warning,
     );
     if (!confirmed || !mounted) return;
-
-    final provider = context.read<OrganizationOfferProvider>();
 
     final input = SendOfferInput(
       title: _titleController.text,
@@ -175,10 +199,17 @@ class _SendOfferSheetState extends State<SendOfferSheet> {
       message: _messageController.text,
     );
 
-    final success = await provider.sendOffer(
-      applicationId: widget.applicationId,
-      input: input,
-    );
+    final originAssessmentId = widget.nextActionOriginAssessmentId;
+    final success = originAssessmentId != null
+        ? await context.read<OrganizationAssessmentProvider>().setNextActionOffer(
+            applicationId: widget.applicationId,
+            assessmentId: originAssessmentId,
+            input: input,
+          )
+        : await context.read<OrganizationOfferProvider>().sendOffer(
+            applicationId: widget.applicationId,
+            input: input,
+          );
     if (!mounted) return;
 
     if (!success) {
@@ -194,9 +225,21 @@ class _SendOfferSheetState extends State<SendOfferSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<OrganizationOfferProvider>();
-    final isBusy = provider.isSending;
-    final hasFieldErrors = provider.fieldErrors.isNotEmpty;
+    final originAssessmentId = widget.nextActionOriginAssessmentId;
+    final bool isBusy;
+    final bool hasFieldErrors;
+    final String? actionErrorMessage;
+    if (originAssessmentId != null) {
+      final assessmentProvider = context.watch<OrganizationAssessmentProvider>();
+      isBusy = assessmentProvider.isSettingNextAction(originAssessmentId);
+      hasFieldErrors = assessmentProvider.fieldErrors.isNotEmpty;
+      actionErrorMessage = assessmentProvider.actionErrorMessage;
+    } else {
+      final offerProvider = context.watch<OrganizationOfferProvider>();
+      isBusy = offerProvider.isSending;
+      hasFieldErrors = offerProvider.fieldErrors.isNotEmpty;
+      actionErrorMessage = offerProvider.actionErrorMessage;
+    }
 
     return Padding(
       padding: EdgeInsets.only(
@@ -212,7 +255,7 @@ class _SendOfferSheetState extends State<SendOfferSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SectionHeader(title: 'Send Offer'),
+              SectionHeader(title: _isStaged ? 'Proceed to Offer' : 'Send Offer'),
               const SizedBox(height: AppSpacing.sm),
               AppTextField(
                 controller: _titleController,
@@ -293,25 +336,28 @@ class _SendOfferSheetState extends State<SendOfferSheet> {
                 textInputAction: TextInputAction.newline,
                 validator: _messageValidator,
               ),
-              if (!hasFieldErrors && provider.actionErrorMessage != null) ...[
+              if (!hasFieldErrors && actionErrorMessage != null) ...[
                 const SizedBox(height: AppSpacing.xs),
                 AppErrorView(
                   title: 'Something Went Wrong',
-                  message: provider.actionErrorMessage!,
+                  message: actionErrorMessage,
                   compact: true,
                 ),
               ],
               const SizedBox(height: AppSpacing.xs),
               Text(
-                'Once sent, this offer cannot be edited, cancelled, or '
-                'resent.',
+                _isStaged
+                    ? 'The candidate is not notified until this assessment\'s '
+                          'result is released.'
+                    : 'Once sent, this offer cannot be edited, cancelled, or '
+                          'resent.',
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
               ),
               const SizedBox(height: AppSpacing.lg),
               PrimaryButton(
-                label: 'Send Offer',
+                label: _isStaged ? 'Proceed to Offer' : 'Send Offer',
                 isLoading: isBusy,
                 onPressed: isBusy ? null : _submit,
               ),
@@ -324,15 +370,20 @@ class _SendOfferSheetState extends State<SendOfferSheet> {
 }
 
 /// Shows [SendOfferSheet] for [applicationId]. Returns `true` only if the
-/// Offer was successfully sent.
+/// Offer was successfully sent (or, when [nextActionOriginAssessmentId] is
+/// set, successfully staged as a next-step decision — Phase 10A.4A).
 Future<bool> showSendOfferSheet(
   BuildContext context, {
   required int applicationId,
+  int? nextActionOriginAssessmentId,
 }) async {
   final result = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
-    builder: (_) => SendOfferSheet(applicationId: applicationId),
+    builder: (_) => SendOfferSheet(
+      applicationId: applicationId,
+      nextActionOriginAssessmentId: nextActionOriginAssessmentId,
+    ),
   );
   return result ?? false;
 }

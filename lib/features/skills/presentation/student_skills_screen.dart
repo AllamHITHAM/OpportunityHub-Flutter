@@ -9,6 +9,7 @@ import '../../../core/theme/app_radius.dart';
 import '../../../core/theme/app_shadows.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_widgets.dart';
+import '../../../models/skill_model.dart';
 import '../../../models/student_skill_model.dart';
 import '../../../providers/student_skill_provider.dart';
 import '../../../routes/app_routes.dart';
@@ -38,27 +39,26 @@ String _levelLabel(String level) =>
     level.isEmpty ? level : '${level[0].toUpperCase()}${level.substring(1)}';
 
 /// A real skill profile (UI Phase 7) for the authenticated student's own
-/// `StudentSkill` rows -- a summary, local search/filters, and a richer
-/// per-skill card, all over the exact same [StudentSkillProvider] data and
-/// actions as before (`load`/`deleteSkill`). Presentation only.
+/// `StudentSkill` rows -- a summary, local search/filters, a richer
+/// per-skill card, and (Phase 8A-6.3/UI Phase 7.2) a real, persisted Manual
+/// Add Skill flow, all over the exact same [StudentSkillProvider].
+/// Presentation only -- Manual Add reuses the pre-existing
+/// `POST /student/skills` endpoint unchanged; the only new backend surface
+/// is the read-only `GET /student/skills/catalog` this flow needed to have
+/// a real catalog to pick from.
 ///
-/// **Audited gaps this screen deliberately does not paper over** (backend
-/// is read-only this phase, and nothing here may guess at an API that
-/// doesn't exist):
-/// - There is no student-facing Skill *catalog* endpoint (only
-///   `/admin/skills`, admin-only) and no `PATCH`/`PUT` for a `StudentSkill`
-///   row -- so a from-scratch "pick any skill and add it" flow, and any
-///   Edit action (e.g. changing level after the fact), have no real API to
-///   call. The only implemented, working way a student gains a *new* skill
-///   today is accepting an AI CV suggestion (`StudentCvProvider
-///   .addSelectedSkills`, on the CV screen). This screen's primary action
-///   is therefore real navigation to that flow ("Analyze My CV"), never a
-///   fake local catalog form or a fake Edit button.
+/// **Audited gaps this screen still deliberately does not paper over:**
+/// - There is still no `PATCH`/`PUT` for a `StudentSkill` row, so there is
+///   no Edit action (e.g. changing level after the fact) -- adding one
+///   would need a real backend endpoint that doesn't exist yet.
 /// - A `SkillSuggestion` (pending catalog review) is never returned by
 ///   `GET /student/skills` -- it isn't a `StudentSkill` at all until an
 ///   Admin approves it -- so there is no real "Pending Catalog Approval"
 ///   state to show among a student's *own* skills, and this screen never
-///   invents one.
+///   invents one. Likewise, students still have no supported way to
+///   *suggest* a name missing from the catalog (`SkillSuggestion.source`
+///   only allows `ai_cv` to be created today) -- so Add Skill has no
+///   "suggest a new skill" action either; see this phase's final report.
 class StudentSkillsScreen extends StatefulWidget {
   const StudentSkillsScreen({super.key});
 
@@ -128,6 +128,23 @@ class _StudentSkillsScreenState extends State<StudentSkillsScreen>
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(provider.actionErrorMessage!)));
+    }
+  }
+
+  Future<void> _openAddSkillSheet() async {
+    final provider = context.read<StudentSkillProvider>();
+    final added = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: provider,
+        child: const _AddSkillSheet(),
+      ),
+    );
+    if (added == true && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Skill added successfully')));
     }
   }
 
@@ -272,6 +289,7 @@ class _StudentSkillsScreenState extends State<StudentSkillsScreen>
                           setState(() => _sourceFilter = value),
                       onLevelChanged: (value) =>
                           setState(() => _selectedLevel = value),
+                      onAddSkill: _openAddSkillSheet,
                     ),
                   ),
                 ),
@@ -664,6 +682,7 @@ class _FiltersAndSearch extends StatelessWidget {
     required this.resultCount,
     required this.onSourceChanged,
     required this.onLevelChanged,
+    required this.onAddSkill,
   });
 
   final TextEditingController searchController;
@@ -672,16 +691,32 @@ class _FiltersAndSearch extends StatelessWidget {
   final int resultCount;
   final ValueChanged<_SourceFilter> onSourceChanged;
   final ValueChanged<String?> onLevelChanged;
+  final VoidCallback onAddSkill;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SectionHeader(
-          title: 'Your Skills',
-          subtitle: resultCount == 1 ? '1 skill' : '$resultCount skills',
-          padding: EdgeInsets.zero,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: SectionHeader(
+                title: 'Your Skills',
+                subtitle: resultCount == 1 ? '1 skill' : '$resultCount skills',
+                padding: EdgeInsets.zero,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            SecondaryButton(
+              key: const Key('add-skill-button'),
+              label: 'Add Skill',
+              icon: Icons.add,
+              height: 40,
+              onPressed: onAddSkill,
+            ),
+          ],
         ),
         const SizedBox(height: AppSpacing.xs),
         AppSearchField(
@@ -1038,6 +1073,312 @@ class _SkillsLibrarySkeleton extends StatelessWidget {
           SizedBox(height: AppSpacing.lg),
           AppSkeletonList(count: 4),
         ],
+      ),
+    );
+  }
+}
+
+/// The real, persisted Manual Add Skill flow (Phase 8A-6.3/UI Phase 7.2):
+/// search the real catalog (`GET /student/skills/catalog`), pick one real
+/// Skill and one real level, and submit through the exact same
+/// `POST /student/skills` endpoint every other skill-add path already
+/// uses. The backend is the sole authority on `source` (always `manual`
+/// here), duplicate rejection, and every other business rule — this sheet
+/// never fabricates local state ahead of a real 201.
+class _AddSkillSheet extends StatefulWidget {
+  const _AddSkillSheet();
+
+  @override
+  State<_AddSkillSheet> createState() => _AddSkillSheetState();
+}
+
+class _AddSkillSheetState extends State<_AddSkillSheet> {
+  final _searchController = TextEditingController();
+  int? _selectedSkillId;
+  String? _selectedLevel;
+  bool _justAdded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<StudentSkillProvider>().loadCatalog();
+    });
+    _searchController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<SkillModel> _filteredCatalog(List<SkillModel> catalog) {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query.isEmpty) return catalog;
+    return catalog.where((skill) => skill.name.toLowerCase().contains(query)).toList();
+  }
+
+  Future<void> _submit(StudentSkillProvider provider) async {
+    final skillId = _selectedSkillId;
+    final level = _selectedLevel;
+    if (skillId == null || level == null || provider.isAddingSkill) return;
+
+    final success = await provider.addSkill(skillId: skillId, level: level);
+    if (!mounted || !success) return;
+
+    setState(() => _justAdded = true);
+    await Future.delayed(AppMotion.reduced(context, const Duration(milliseconds: 500)));
+    if (!mounted) return;
+    Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<StudentSkillProvider>();
+    final textTheme = Theme.of(context).textTheme;
+    final catalog = _filteredCatalog(provider.catalogSkills);
+    final canSubmit = _selectedSkillId != null &&
+        _selectedLevel != null &&
+        !provider.isAddingSkill;
+    final mediaQuery = MediaQuery.of(context);
+    final maxSheetHeight = mediaQuery.size.height * 0.85;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: AppSpacing.screenHorizontal,
+        right: AppSpacing.screenHorizontal,
+        top: AppSpacing.md,
+        bottom: mediaQuery.viewInsets.bottom + AppSpacing.md,
+      ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxSheetHeight),
+        child: AnimatedSwitcher(
+          duration: AppMotion.reduced(context, AppMotion.normal),
+          transitionBuilder: (child, animation) =>
+              FadeTransition(opacity: animation, child: child),
+          child: _justAdded
+              ? const Padding(
+                  key: ValueKey('add-skill-success'),
+                  padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
+                  child: AppSuccessView(
+                    compact: true,
+                    title: 'Skill Added',
+                    message: 'Added to your profile as Self-Declared.',
+                  ),
+                )
+              : Column(
+                  key: const ValueKey('add-skill-form'),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: AppColors.primaryContainer,
+                          ),
+                          child: Icon(
+                            Icons.add_circle_outline,
+                            color: AppColors.primaryDark,
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        const Expanded(
+                          child: SectionHeader(title: 'Add Skill', padding: EdgeInsets.zero),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    AppSearchField(controller: _searchController, hint: 'Search skills'),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Available Skills',
+                      style: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: AppSpacing.xxs),
+                    Expanded(child: _CatalogList(provider: provider, catalog: catalog, selectedSkillId: _selectedSkillId, onSelect: (id) => setState(() => _selectedSkillId = id))),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Proficiency Level',
+                      style: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: AppSpacing.xxs),
+                    Wrap(
+                      spacing: AppSpacing.xs,
+                      runSpacing: AppSpacing.xs,
+                      children: [
+                        for (final level in _levels)
+                          _FilterChip(
+                            key: Key('add-skill-level-$level'),
+                            label: _levelLabel(level),
+                            selected: _selectedLevel == level,
+                            onTap: () => setState(() => _selectedLevel = level),
+                          ),
+                      ],
+                    ),
+                    if (provider.addErrorMessage != null) ...[
+                      const SizedBox(height: AppSpacing.xs),
+                      AppErrorView(message: provider.addErrorMessage!, compact: true),
+                    ],
+                    const SizedBox(height: AppSpacing.md),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SecondaryButton(
+                            label: 'Cancel',
+                            onPressed: provider.isAddingSkill
+                                ? null
+                                : () => Navigator.of(context).pop(false),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        Expanded(
+                          child: PrimaryButton(
+                            label: 'Add Skill',
+                            isLoading: provider.isAddingSkill,
+                            onPressed: canSubmit ? () => _submit(provider) : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The scrollable catalog area inside [_AddSkillSheet] — real loading,
+/// error/retry, empty-search, and selectable-row states.
+class _CatalogList extends StatelessWidget {
+  const _CatalogList({
+    required this.provider,
+    required this.catalog,
+    required this.selectedSkillId,
+    required this.onSelect,
+  });
+
+  final StudentSkillProvider provider;
+  final List<SkillModel> catalog;
+  final int? selectedSkillId;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    if (provider.isLoadingCatalog && provider.catalogSkills.isEmpty) {
+      return const AppLoading(compact: true);
+    }
+
+    if (provider.catalogErrorMessage != null && provider.catalogSkills.isEmpty) {
+      return AppErrorView(
+        message: provider.catalogErrorMessage!,
+        compact: true,
+        onRetry: () => provider.loadCatalog(forceRefresh: true),
+      );
+    }
+
+    if (catalog.isEmpty) {
+      return const AppEmptyView(
+        icon: Icons.search_off_rounded,
+        message: 'No skills match your search.',
+        compact: true,
+      );
+    }
+
+    return ListView.builder(
+      itemCount: catalog.length,
+      itemBuilder: (context, index) {
+        final skill = catalog[index];
+        return _CatalogSkillRow(
+          skill: skill,
+          selected: skill.id == selectedSkillId,
+          onTap: () => onSelect(skill.id),
+        );
+      },
+    );
+  }
+}
+
+class _CatalogSkillRow extends StatelessWidget {
+  const _CatalogSkillRow({
+    required this.skill,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final SkillModel skill;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final duration = AppMotion.reduced(context, AppMotion.fast);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
+      child: Material(
+        color: AppColors.transparent,
+        child: InkWell(
+          key: Key('catalog-skill-${skill.id}'),
+          onTap: onTap,
+          borderRadius: AppRadius.smallRadius,
+          child: AnimatedContainer(
+            duration: duration,
+            curve: AppMotion.standard,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.xs,
+              vertical: AppSpacing.xs,
+            ),
+            decoration: BoxDecoration(
+              color: selected
+                  ? AppColors.primaryContainer.withValues(alpha: 0.4)
+                  : AppColors.transparent,
+              borderRadius: AppRadius.smallRadius,
+              border: Border.all(
+                color: selected ? AppColors.primary : AppColors.border,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+                  size: 18,
+                  color: selected ? AppColors.primary : AppColors.textMuted,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        skill.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      if (skill.category != null)
+                        Text(
+                          skill.category!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

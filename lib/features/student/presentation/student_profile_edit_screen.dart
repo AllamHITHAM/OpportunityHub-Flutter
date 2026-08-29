@@ -3,14 +3,19 @@ import 'package:flutter/scheduler.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_widgets.dart';
+import '../../../providers/location_catalog_provider.dart';
 import '../../../providers/student_profile_provider.dart';
+import 'interested_in_field.dart';
+import 'work_location_fields.dart';
 
 /// A real, backend-confirmed edit form for the student's own profile
 /// (`PUT /api/student/profile`) — university, major, graduation year,
-/// phone, and bio, the only fields this endpoint accepts. No GPA, city,
+/// phone, bio, current location, and available work locations (Student
+/// Location Profile Patch), the only fields this endpoint accepts. No GPA,
 /// availability, hours/week, or profile photo field exists on the backend
 /// record's editable surface, so none are offered here.
 class StudentProfileEditScreen extends StatefulWidget {
@@ -29,6 +34,10 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
   late final TextEditingController _phoneController;
   late final TextEditingController _bioController;
   int? _graduationYear;
+  int? _currentLocationId;
+  late Set<int> _selectedLocationIds;
+  late Set<String> _interestedIn;
+  String? _interestedInError;
 
   bool _justSaved = false;
 
@@ -44,6 +53,17 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
     _phoneController = TextEditingController(text: profile?.phone);
     _bioController = TextEditingController(text: profile?.bio);
     _graduationYear = profile?.graduationYear;
+    _currentLocationId = profile?.currentLocation?.id;
+    _selectedLocationIds = {
+      for (final location in profile?.availableLocations ?? const [])
+        location.id,
+    };
+    _interestedIn = {...?profile?.interestedIn};
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<LocationCatalogProvider>().load();
+    });
   }
 
   @override
@@ -104,16 +124,24 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
     FocusScope.of(context).unfocus();
 
     final isValid = _formKey.currentState?.validate() ?? false;
-    if (!isValid) return;
+    setState(() {
+      _interestedInError = _interestedIn.isEmpty
+          ? 'Select at least one opportunity type you\'re interested in'
+          : null;
+    });
+    if (!isValid || _interestedInError != null) return;
 
     final success = await provider.updateProfile(
       university: _universityController.text.trim(),
       major: _majorController.text.trim(),
       graduationYear: _graduationYear!,
+      interestedIn: _interestedIn.toList(),
       phone: _phoneController.text.trim().isEmpty
           ? null
           : _phoneController.text.trim(),
       bio: _bioController.text.trim().isEmpty ? null : _bioController.text.trim(),
+      currentLocationId: _currentLocationId,
+      availableLocationIds: _selectedLocationIds.toList(),
     );
     if (!mounted) return;
 
@@ -217,6 +245,46 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            const SectionHeader(title: 'Career Interests'),
+                            const SizedBox(height: AppSpacing.xxs),
+                            Text(
+                              'Which types of opportunities are you '
+                              'interested in? Select at least one — you '
+                              'can choose more than one.',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: AppColors.textSecondary),
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                            InterestedInField(
+                              selected: _interestedIn,
+                              enabled: !isSubmitting,
+                              onToggle: (type) => setState(() {
+                                if (_interestedIn.contains(type)) {
+                                  _interestedIn.remove(type);
+                                } else {
+                                  _interestedIn.add(type);
+                                }
+                                if (_interestedIn.isNotEmpty) {
+                                  _interestedInError = null;
+                                }
+                              }),
+                            ),
+                            if (_interestedInError != null) ...[
+                              const SizedBox(height: AppSpacing.xxs),
+                              Text(
+                                _interestedInError!,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: AppColors.error),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      AppCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
                             const SectionHeader(title: 'Contact & Bio'),
                             const SizedBox(height: AppSpacing.xs),
                             AppTextField(
@@ -242,6 +310,53 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
                               minLines: 3,
                               maxLength: _bioMaxLength,
                               validator: (_) => _backendFieldError(provider, 'bio'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      AppCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const SectionHeader(title: 'Work Location Preferences'),
+                            const SizedBox(height: AppSpacing.xxs),
+                            Text(
+                              'Choose the locations where you are available '
+                              'to work. You can select more than one.',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: AppColors.textSecondary),
+                            ),
+                            const SizedBox(height: AppSpacing.xxs),
+                            Text(
+                              'Remote opportunities are not restricted by '
+                              'these locations.',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: AppColors.textMuted),
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                            CurrentLocationField(
+                              selectedId: _currentLocationId,
+                              enabled: !isSubmitting,
+                              onChanged: (value) =>
+                                  setState(() => _currentLocationId = value),
+                            ),
+                            const SizedBox(height: AppSpacing.inputSpacing),
+                            Text(
+                              'Available Work Locations',
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                            const SizedBox(height: AppSpacing.xs),
+                            AvailableLocationsField(
+                              selectedIds: _selectedLocationIds,
+                              enabled: !isSubmitting,
+                              onToggle: (id) => setState(() {
+                                if (_selectedLocationIds.contains(id)) {
+                                  _selectedLocationIds.remove(id);
+                                } else {
+                                  _selectedLocationIds.add(id);
+                                }
+                              }),
                             ),
                           ],
                         ),

@@ -5,6 +5,22 @@ import 'package:dio/dio.dart';
 import '../../../core/api/api_client.dart';
 import '../../../models/admin_education_verification_model.dart';
 
+/// The document's raw bytes plus its real `Content-Type`, as reported by
+/// the backend (which infers it from actual file bytes via
+/// `Storage::disk('local')->response()`, never from a stored filename) —
+/// the preview flow needs the real MIME type to decide whether to render
+/// a PDF, an image, or fall back to a plain download, and never assumes a
+/// type from context.
+class EducationVerificationDocument {
+  const EducationVerificationDocument({
+    required this.bytes,
+    required this.contentType,
+  });
+
+  final Uint8List bytes;
+  final String contentType;
+}
+
 /// Talks to the Laravel Admin education-verification review endpoints
 /// (Phase 8B-1). Mirrors `AdminSkillSuggestionsRepository`'s shape.
 class AdminEducationVerificationsRepository {
@@ -32,15 +48,25 @@ class AdminEducationVerificationsRepository {
     }
   }
 
-  /// Downloads the submission's PDF for review with
-  /// `GET /api/admin/education-verifications/{id}/document`.
-  Future<Uint8List> downloadDocument(int verificationId) async {
+  /// Downloads the submission's proof document for review with
+  /// `GET /api/admin/education-verifications/{id}/document`, along with
+  /// its real `Content-Type` — the caller decides how to preview it based
+  /// on that, never on a filename or an assumption.
+  Future<EducationVerificationDocument> downloadDocument(
+    int verificationId,
+  ) async {
     try {
       final response = await apiClient.dio.get<List<int>>(
         '/admin/education-verifications/$verificationId/document',
         options: Options(responseType: ResponseType.bytes),
       );
-      return Uint8List.fromList(response.data ?? const []);
+      final contentType =
+          response.headers.value(Headers.contentTypeHeader) ??
+          'application/octet-stream';
+      return EducationVerificationDocument(
+        bytes: Uint8List.fromList(response.data ?? const []),
+        contentType: contentType,
+      );
     } on DioException catch (error) {
       throw apiClient.handleBytesError(error);
     }

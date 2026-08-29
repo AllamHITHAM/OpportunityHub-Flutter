@@ -25,6 +25,7 @@ import 'package:opportunityhub_flutter/features/student/data/student_profile_rep
 import 'package:opportunityhub_flutter/features/student/presentation/student_profile_screen.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/education_verification_model.dart';
+import 'package:opportunityhub_flutter/models/location_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
@@ -258,6 +259,46 @@ void main() {
       expect(find.textContaining('2027'), findsWidgets);
     },
   );
+
+  group('Career Interests (Candidate Opportunity Preferences)', () {
+    testWidgets('renders the real Interested In selections as chips', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        studentProfile: const StudentProfileModel(
+          id: 1,
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+          interestedIn: ['job', 'internship'],
+        ),
+      );
+
+      expect(find.text('Career Interests'), findsOneWidget);
+      expect(find.text('Job'), findsOneWidget);
+      expect(find.text('Internship'), findsOneWidget);
+    });
+
+    testWidgets(
+      'shows a truthful "Not added yet" state for a profile from before '
+      'this patch, never a fabricated default',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          studentProfile: const StudentProfileModel(
+            id: 1,
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+          ),
+        );
+
+        expect(find.text('Career Interests'), findsOneWidget);
+        expect(find.text('Not added yet'), findsOneWidget);
+      },
+    );
+  });
 
   testWidgets('renders gracefully with no student profile yet (partial data)', (
     tester,
@@ -796,5 +837,137 @@ void main() {
         findsOneWidget,
       );
     });
+  });
+
+  group('Work Preferences (Student Location Profile Patch)', () {
+    testWidgets('renders the real current location', (tester) async {
+      await _pumpScreen(
+        tester,
+        studentProfile: const StudentProfileModel(
+          id: 1,
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+          currentLocation: LocationModel(id: 1, canonicalName: 'Jenin'),
+        ),
+      );
+
+      expect(find.text('Work Preferences'), findsOneWidget);
+      // _InfoTile renders its label uppercased.
+      expect(find.text('CURRENT LOCATION'), findsOneWidget);
+      expect(find.text('Jenin'), findsOneWidget);
+    });
+
+    testWidgets('renders every available work location as a chip', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        studentProfile: const StudentProfileModel(
+          id: 1,
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+          currentLocation: LocationModel(id: 1, canonicalName: 'Jenin'),
+          availableLocations: [
+            LocationModel(id: 2, canonicalName: 'Nablus'),
+            LocationModel(id: 3, canonicalName: 'Ramallah'),
+          ],
+        ),
+      );
+
+      expect(find.widgetWithText(StatusChip, 'Nablus'), findsOneWidget);
+      expect(find.widgetWithText(StatusChip, 'Ramallah'), findsOneWidget);
+    });
+
+    testWidgets(
+      'shows a truthful "not added" state when no locations are set -- '
+      'never a guessed default',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          studentProfile: const StudentProfileModel(
+            id: 1,
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+          ),
+        );
+
+        expect(find.text('Not specified'), findsOneWidget);
+        expect(find.text('Work locations not added'), findsWidgets);
+      },
+    );
+
+    testWidgets(
+      'an existing user with no profile at all still renders without '
+      'crashing or fabricating a location',
+      (tester) async {
+        await _pumpScreen(tester);
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('Work Preferences'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Profile Readiness shows "Work locations added" as pending when '
+      'empty, done once at least one exists',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          studentProfile: const StudentProfileModel(
+            id: 1,
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+          ),
+        );
+        expect(find.text('Work locations added'), findsOneWidget);
+
+        await _pumpScreen(
+          tester,
+          studentProfile: const StudentProfileModel(
+            id: 1,
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+            availableLocations: [LocationModel(id: 1, canonicalName: 'Nablus')],
+          ),
+        );
+        expect(find.text('Work locations added'), findsOneWidget);
+      },
+    );
+
+    for (final width in [375.0, 390.0, 430.0]) {
+      testWidgets(
+        'mobile ${width.toInt()} — many available-location chips wrap '
+        'without overflow',
+        (tester) async {
+          await _pumpScreen(
+            tester,
+            studentProfile: const StudentProfileModel(
+              id: 1,
+              university: 'State University',
+              major: 'Computer Science',
+              graduationYear: 2027,
+              currentLocation: LocationModel(id: 1, canonicalName: 'Jenin'),
+              availableLocations: [
+                LocationModel(id: 2, canonicalName: 'Nablus'),
+                LocationModel(id: 3, canonicalName: 'Ramallah'),
+                LocationModel(id: 4, canonicalName: 'Hebron'),
+                LocationModel(id: 5, canonicalName: 'Bethlehem'),
+                LocationModel(id: 6, canonicalName: 'Jerusalem'),
+                LocationModel(id: 7, canonicalName: 'Gaza'),
+              ],
+            ),
+            surfaceSize: Size(width, 1400),
+          );
+
+          expect(tester.takeException(), isNull);
+          expect(find.widgetWithText(StatusChip, 'Gaza'), findsOneWidget);
+        },
+      );
+    }
   });
 }

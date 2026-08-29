@@ -3,7 +3,9 @@ import 'package:flutter/foundation.dart';
 import '../core/api/api_client.dart';
 import '../features/assessments/data/assessment_repository.dart';
 import '../features/assessments/data/question_input.dart';
+import '../features/assessments/data/quiz_create_input.dart';
 import '../models/question_model.dart';
+import '../models/quiz_candidate_result_model.dart';
 import '../models/quiz_model.dart';
 import 'auth_provider.dart';
 
@@ -42,10 +44,80 @@ class OrganizationQuizProvider extends ChangeNotifier {
   /// requested.
   int? loadedAssessmentId;
 
+  /// Phase 10A.4B — mirrors [loadedAssessmentId] for the shared Opportunity
+  /// Quiz template flow (`loadQuizForOpportunity()`). Exactly one of
+  /// [loadedAssessmentId]/[loadedOpportunityId] is ever non-null at a time
+  /// — whichever `load...()` was called most recently resets the other to
+  /// `null`, since a single screen only ever manages one Quiz "identity" at
+  /// once. [isTemplateMode] is the single source of truth question CRUD/
+  /// publish branch on for which underlying endpoint to call.
+  int? loadedOpportunityId;
+
+  /// True once a shared Opportunity Quiz template load/create has happened
+  /// — [publish]/[createOrUpdateSettings] use this to call the
+  /// Opportunity-scoped endpoints instead of the legacy Assessment-scoped
+  /// ones. Question CRUD (`createQuestion`/`updateQuestion`/`deleteQuestion`)
+  /// needs no such branch at all — both flows already address a question
+  /// purely by `quiz.id`, identically.
+  bool get isTemplateMode => loadedOpportunityId != null;
+
   bool isLoading = false;
   String? errorMessage;
 
   String? actionErrorMessage;
+
+  bool isSavingSettings = false;
+
+  // ---- Phase 10A.4B: candidate results dashboard -------------------------
+
+  QuizResultsModel? results;
+  int? loadedResultsOpportunityId;
+  bool isLoadingResults = false;
+  String? resultsErrorMessage;
+
+  Future<void>? _pendingResultsFetch;
+
+  /// Loads every candidate's score/result/decision for the Opportunity's
+  /// shared Quiz. Same in-flight-request-reuse/staleness-guard pattern as
+  /// [loadQuiz]/[loadQuizForOpportunity].
+  Future<void> loadResults(int opportunityId, {bool forceRefresh = false}) {
+    if (forceRefresh || loadedResultsOpportunityId != opportunityId) {
+      _pendingResultsFetch = null;
+    }
+    loadedResultsOpportunityId = opportunityId;
+    return _pendingResultsFetch ??= _performResultsLoad(opportunityId);
+  }
+
+  Future<void> _performResultsLoad(int opportunityId) async {
+    isLoadingResults = true;
+    resultsErrorMessage = null;
+    notifyListeners();
+
+    bool stillCurrent() => loadedResultsOpportunityId == opportunityId;
+
+    try {
+      final result = await repository.getOpportunityQuizResults(
+        opportunityId,
+      );
+      if (stillCurrent()) {
+        results = result;
+      }
+    } on ApiException catch (error) {
+      if (stillCurrent()) {
+        resultsErrorMessage = error.message;
+      }
+    } catch (_) {
+      if (stillCurrent()) {
+        resultsErrorMessage = 'Something went wrong. Please try again.';
+      }
+    } finally {
+      if (stillCurrent()) {
+        isLoadingResults = false;
+        _pendingResultsFetch = null;
+      }
+      notifyListeners();
+    }
+  }
 
   /// Raw field-validation errors from the most recent failed
   /// create/update-question attempt, keyed exactly as the backend sent them
@@ -88,7 +160,93 @@ class OrganizationQuizProvider extends ChangeNotifier {
       _pendingLoadFetch = null;
     }
     loadedAssessmentId = assessmentId;
+    loadedOpportunityId = null;
     return _pendingLoadFetch ??= _performLoad(assessmentId);
+  }
+
+  /// Phase 10A.4B — mirrors [loadQuiz] for the shared Opportunity Quiz
+  /// template. `quiz` stays `null` (not an error) when the Opportunity has
+  /// no template yet — the screen renders a "Not configured" state for
+  /// that, the same way a legacy Assessment with no Quiz yet already does.
+  Future<void> loadQuizForOpportunity(
+    int opportunityId, {
+    bool forceRefresh = false,
+  }) {
+    if (forceRefresh || loadedOpportunityId != opportunityId) {
+      _pendingLoadFetch = null;
+    }
+    loadedOpportunityId = opportunityId;
+    loadedAssessmentId = null;
+    return _pendingLoadFetch ??= _performTemplateLoad(opportunityId);
+  }
+
+  Future<void> _performTemplateLoad(int opportunityId) async {
+    isLoading = true;
+    errorMessage = null;
+    notifyListeners();
+
+    bool stillCurrent() => loadedOpportunityId == opportunityId;
+
+    try {
+      final result = await repository.getOpportunityQuiz(opportunityId);
+      if (stillCurrent()) {
+        quiz = result;
+      }
+    } on ApiException catch (error) {
+      if (stillCurrent()) {
+        errorMessage = error.message;
+      }
+    } catch (_) {
+      if (stillCurrent()) {
+        errorMessage = 'Something went wrong. Please try again.';
+      }
+    } finally {
+      if (stillCurrent()) {
+        isLoading = false;
+        _pendingLoadFetch = null;
+      }
+      notifyListeners();
+    }
+  }
+
+  /// Phase 10A.4B — creates the shared Quiz template (no template yet) or
+  /// updates its settings in place (a draft template already exists) — the
+  /// same "one action, the state decides which request" pattern the rest
+  /// of this app's forms use. Returns `true` only on success. Requires
+  /// [loadQuizForOpportunity] to have been called first (asserts
+  /// [isTemplateMode]).
+  Future<bool> createOrUpdateSettings(QuizCreateInput input) async {
+    assert(isTemplateMode, 'createOrUpdateSettings() requires template mode');
+    final opportunityId = loadedOpportunityId;
+    if (opportunityId == null || isSavingSettings) return false;
+
+    isSavingSettings = true;
+    actionErrorMessage = null;
+    fieldErrors = {};
+    notifyListeners();
+
+    var success = false;
+    try {
+      quiz = quiz == null
+          ? await repository.createOpportunityQuiz(
+              opportunityId: opportunityId,
+              input: input,
+            )
+          : await repository.updateOpportunityQuiz(
+              opportunityId: opportunityId,
+              input: input,
+            );
+      success = true;
+    } on ApiException catch (error) {
+      actionErrorMessage = error.message;
+      fieldErrors = error.errors ?? {};
+    } catch (_) {
+      actionErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isSavingSettings = false;
+      notifyListeners();
+    }
+    return success;
   }
 
   Future<void> _performLoad(int assessmentId) async {
@@ -283,7 +441,9 @@ class OrganizationQuizProvider extends ChangeNotifier {
 
     var success = false;
     try {
-      quiz = await repository.publishQuiz(currentQuiz.id);
+      quiz = isTemplateMode
+          ? await repository.publishOpportunityQuiz(loadedOpportunityId!)
+          : await repository.publishQuiz(currentQuiz.id);
       success = true;
     } on ApiException catch (error) {
       // Preserves the draft `quiz` exactly as it was -- in particular for
@@ -309,6 +469,7 @@ class OrganizationQuizProvider extends ChangeNotifier {
     return QuizModel(
       id: base.id,
       assessmentId: base.assessmentId,
+      opportunityId: base.opportunityId,
       title: base.title,
       instructions: base.instructions,
       timeLimitMinutes: base.timeLimitMinutes,
@@ -331,6 +492,7 @@ class OrganizationQuizProvider extends ChangeNotifier {
   void reset() {
     quiz = null;
     loadedAssessmentId = null;
+    loadedOpportunityId = null;
     isLoading = false;
     errorMessage = null;
     actionErrorMessage = null;
@@ -338,7 +500,13 @@ class OrganizationQuizProvider extends ChangeNotifier {
     busyQuestionIds.clear();
     isCreatingQuestion = false;
     isPublishing = false;
+    isSavingSettings = false;
     _pendingLoadFetch = null;
+    results = null;
+    loadedResultsOpportunityId = null;
+    isLoadingResults = false;
+    resultsErrorMessage = null;
+    _pendingResultsFetch = null;
     notifyListeners();
   }
 

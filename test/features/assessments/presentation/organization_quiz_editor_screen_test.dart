@@ -83,6 +83,13 @@ class _FakeAssessmentRepository extends AssessmentRepository {
   ApiException? publishError;
   int publishCallCount = 0;
 
+  // Phase 10A.4B — shared Opportunity Quiz template.
+  QuizModel? templateLoadResult;
+  ApiException? templateLoadError;
+  int templateLoadCallCount = 0;
+  QuizModel? templatePublishResult;
+  int templatePublishCallCount = 0;
+
   @override
   Future<QuizModel?> getOrganizationQuiz(int assessmentId) async {
     if (loadDelay > Duration.zero) {
@@ -90,6 +97,19 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     }
     if (loadError != null) throw loadError!;
     return loadResult;
+  }
+
+  @override
+  Future<QuizModel?> getOpportunityQuiz(int opportunityId) async {
+    templateLoadCallCount++;
+    if (templateLoadError != null) throw templateLoadError!;
+    return templateLoadResult;
+  }
+
+  @override
+  Future<QuizModel> publishOpportunityQuiz(int opportunityId) async {
+    templatePublishCallCount++;
+    return templatePublishResult ?? publishResult!;
   }
 
   @override
@@ -600,5 +620,127 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
+  });
+
+  group('Shared Opportunity Quiz template mode (Phase 10A.4B)', () {
+    Future<void> pumpTemplate(
+      WidgetTester tester, {
+      required _FakeAssessmentRepository repository,
+    }) async {
+      tester.view.physicalSize = const Size(420, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
+      final quizProvider = OrganizationQuizProvider(
+        repository: repository,
+        authProvider: authProvider,
+      );
+
+      final router = GoRouter(
+        initialLocation: '/editor',
+        routes: [
+          GoRoute(
+            path: '/editor',
+            builder: (_, _) =>
+                const OrganizationQuizEditorScreen(opportunityId: 9),
+          ),
+          GoRoute(
+            path: '/organization/opportunities/9/quiz/new',
+            builder: (_, _) =>
+                const Scaffold(body: Text('CREATE_QUIZ_PLACEHOLDER')),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<OrganizationQuizProvider>.value(
+              value: quizProvider,
+            ),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.lightTheme,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'no template yet shows Quiz Not Configured with a Configure Quiz '
+      'action, not the legacy No Quiz Found state',
+      (tester) async {
+        final repository = _FakeAssessmentRepository()
+          ..templateLoadResult = null;
+        await pumpTemplate(tester, repository: repository);
+
+        expect(repository.templateLoadCallCount, 1);
+        expect(find.text('Quiz Not Configured'), findsOneWidget);
+        expect(find.text('No Quiz Found'), findsNothing);
+
+        await tester.tap(find.text('Configure Quiz'));
+        await tester.pumpAndSettle();
+        expect(find.text('CREATE_QUIZ_PLACEHOLDER'), findsOneWidget);
+      },
+    );
+
+    testWidgets('a draft template renders questions and Publish', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..templateLoadResult = _quiz(
+          status: 'draft',
+          questions: [_question()],
+        );
+      await pumpTemplate(tester, repository: repository);
+
+      expect(find.text('Backend Fundamentals'), findsWidgets);
+      expect(find.text('Publish Quiz'), findsOneWidget);
+    });
+
+    testWidgets('publishing a template calls the opportunity-scoped '
+        'publish endpoint, not the legacy one', (tester) async {
+      final repository = _FakeAssessmentRepository()
+        ..templateLoadResult = _quiz(
+          status: 'draft',
+          questions: [_question()],
+        )
+        ..templatePublishResult = _quiz(
+          status: 'published',
+          questions: [_question()],
+        );
+      await pumpTemplate(tester, repository: repository);
+
+      await tester.tap(find.text('Publish Quiz'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Publish'));
+      await tester.pumpAndSettle();
+
+      expect(repository.templatePublishCallCount, 1);
+      expect(repository.publishCallCount, 0);
+      expect(find.text('Published'), findsWidgets);
+    });
+
+    testWidgets('a load error shows a retry that reloads the template', (
+      tester,
+    ) async {
+      final repository = _FakeAssessmentRepository()
+        ..templateLoadError = ApiException('Opportunity not found');
+      await pumpTemplate(tester, repository: repository);
+
+      expect(find.text('Opportunity not found'), findsOneWidget);
+
+      repository.templateLoadError = null;
+      repository.templateLoadResult = _quiz(status: 'draft');
+      await tester.tap(find.text('Try Again'));
+      await tester.pumpAndSettle();
+
+      expect(repository.templateLoadCallCount, 2);
+      expect(find.text('Backend Fundamentals'), findsWidgets);
+    });
   });
 }

@@ -17,6 +17,7 @@ import 'package:opportunityhub_flutter/features/assessments/data/quiz_create_inp
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/education_verification/data/education_verification_repository.dart';
+import 'package:opportunityhub_flutter/features/messaging/data/conversation_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/offers/data/offer_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
@@ -26,6 +27,7 @@ import 'package:opportunityhub_flutter/features/student/data/student_profile_rep
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
 import 'package:opportunityhub_flutter/models/assessment_model.dart';
+import 'package:opportunityhub_flutter/models/conversation_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/education_verification_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
@@ -38,6 +40,7 @@ import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/conversations_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_assessment_provider.dart';
@@ -112,10 +115,10 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   @override
-  Future<AssessmentModel?> getAssessmentForApplication(
+  Future<List<AssessmentModel>> getAssessmentsForApplication(
     int applicationId,
   ) async {
-    return null;
+    return [];
   }
 
   @override
@@ -162,6 +165,14 @@ class _FakeNotificationRepository extends NotificationRepository {
   Future<List<NotificationModel>> getNotifications() async => [];
 }
 
+class _FakeConversationRepository extends ConversationRepository {
+  _FakeConversationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<ConversationSummaryModel>> getConversations() async => [];
+}
+
 /// StudentHomeScreen now reads these 5 providers unconditionally in
 /// initState — required whenever a denied user is redirected there.
 class _FakeStudentApplicationRepository extends ApplicationRepository {
@@ -185,6 +196,7 @@ class _FakeStudentOpportunityRepository extends OpportunityRepository {
     String? location,
     String? fieldOfStudy,
     String? keyword,
+    int? organizationId,
     int page = 1,
     int perPage = 15,
   }) async {
@@ -305,6 +317,13 @@ Future<void> _pumpAsRole(
     repository: _FakeNotificationRepository(),
     authProvider: authProvider,
   );
+  // See the AdminDashboardProvider comment above — the same reasoning
+  // applies here: MessagesBellAction now renders unconditionally next to
+  // NotificationBellAction on Student/Organization Home.
+  final conversationsProvider = ConversationsProvider(
+    repository: _FakeConversationRepository(),
+    authProvider: authProvider,
+  );
   final studentApplicationsProvider = StudentApplicationsProvider(
     repository: _FakeStudentApplicationRepository(),
     authProvider: authProvider,
@@ -363,6 +382,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
+        ),
+        ChangeNotifierProvider<ConversationsProvider>.value(
+          value: conversationsProvider,
         ),
         ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ChangeNotifierProvider<StudentApplicationsProvider>.value(

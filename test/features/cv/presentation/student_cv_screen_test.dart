@@ -20,6 +20,7 @@ import 'package:opportunityhub_flutter/features/cv/presentation/student_cv_scree
 import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/cv_skill_suggestion_model.dart';
+import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
 import 'package:opportunityhub_flutter/providers/theme_provider.dart';
@@ -204,7 +205,7 @@ class _FakeStudentSkillRepository extends StudentSkillRepository {
   ApiException? addSkillError;
 
   @override
-  Future<void> addSkill({
+  Future<StudentSkillModel> addSkill({
     required int skillId,
     String level = 'intermediate',
     String source = 'manual',
@@ -214,6 +215,13 @@ class _FakeStudentSkillRepository extends StudentSkillRepository {
     addedSources.add(source);
     addedCvIds.add(cvId);
     if (addSkillError != null) throw addSkillError!;
+    return StudentSkillModel(
+      id: addedSkillIds.length,
+      skillId: skillId,
+      skillName: 'Added Skill',
+      level: level,
+      source: source,
+    );
   }
 }
 

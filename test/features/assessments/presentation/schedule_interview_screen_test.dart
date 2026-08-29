@@ -90,10 +90,10 @@ class _FakeAssessmentRepository extends AssessmentRepository {
   InterviewCreateInput? lastInterviewInput;
 
   @override
-  Future<AssessmentModel?> getAssessmentForApplication(
+  Future<List<AssessmentModel>> getAssessmentsForApplication(
     int applicationId,
   ) async {
-    return null;
+    return [];
   }
 
   @override
@@ -780,10 +780,10 @@ class _ThrowingAssessmentRepository extends AssessmentRepository {
   int createCallCount = 0;
 
   @override
-  Future<AssessmentModel?> getAssessmentForApplication(
+  Future<List<AssessmentModel>> getAssessmentsForApplication(
     int applicationId,
   ) async {
-    return null;
+    return [];
   }
 
   @override

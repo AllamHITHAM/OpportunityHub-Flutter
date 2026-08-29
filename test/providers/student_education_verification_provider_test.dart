@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
+import 'package:opportunityhub_flutter/core/utils/cv_file_open_result.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/picked_cv_file.dart';
 import 'package:opportunityhub_flutter/features/education_verification/data/education_verification_repository.dart';
@@ -105,15 +106,52 @@ class _FakeEducationVerificationRepository
   }
 }
 
+/// A fake, injectable platform file action (view or download) — mirrors
+/// `test/providers/student_cv_provider_test.dart`'s own fake, since both
+/// providers share the exact same `DocumentFileAction`/`CvFileAction`
+/// signature.
+class _FakeFileAction {
+  _FakeFileAction();
+  CvFileOpenResult result = const CvFileOpenResult(success: true);
+  Duration delay = Duration.zero;
+  int callCount = 0;
+  Uint8List? lastBytes;
+  String? lastFileName;
+
+  Future<CvFileOpenResult> call(Uint8List bytes, String fileName) async {
+    callCount++;
+    lastBytes = bytes;
+    lastFileName = fileName;
+    if (delay > Duration.zero) await Future<void>.delayed(delay);
+    return result;
+  }
+}
+
 void main() {
+  late _FakeFileAction fakeViewDocumentFile;
+  late _FakeFileAction fakeDownloadDocumentFile;
+
+  StudentEducationVerificationProvider buildProvider(
+    _FakeEducationVerificationRepository repository,
+  ) {
+    return StudentEducationVerificationProvider(
+      repository: repository,
+      authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      viewDocumentFile: fakeViewDocumentFile.call,
+      downloadDocumentFile: fakeDownloadDocumentFile.call,
+    );
+  }
+
+  setUp(() {
+    fakeViewDocumentFile = _FakeFileAction();
+    fakeDownloadDocumentFile = _FakeFileAction();
+  });
+
   group('load', () {
     test('populates verification on success', () async {
       final repository = _FakeEducationVerificationRepository()
         ..statusResult = _verification(status: 'pending');
-      final provider = StudentEducationVerificationProvider(
-        repository: repository,
-        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
-      );
+      final provider = buildProvider(repository);
 
       await provider.load();
 
@@ -125,10 +163,7 @@ void main() {
     test('sets errorMessage on ApiException failure', () async {
       final repository = _FakeEducationVerificationRepository()
         ..statusError = ApiException('Server error, please try again later.');
-      final provider = StudentEducationVerificationProvider(
-        repository: repository,
-        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
-      );
+      final provider = buildProvider(repository);
 
       await provider.load();
 
@@ -139,10 +174,7 @@ void main() {
     test('concurrent calls share a single in-flight request', () async {
       final repository = _FakeEducationVerificationRepository()
         ..statusDelay = const Duration(milliseconds: 50);
-      final provider = StudentEducationVerificationProvider(
-        repository: repository,
-        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
-      );
+      final provider = buildProvider(repository);
 
       await Future.wait([provider.load(), provider.load()]);
 
@@ -154,10 +186,7 @@ void main() {
     test('updates verification immediately on success', () async {
       final repository = _FakeEducationVerificationRepository()
         ..submitResult = _verification(status: 'pending');
-      final provider = StudentEducationVerificationProvider(
-        repository: repository,
-        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
-      );
+      final provider = buildProvider(repository);
 
       final success = await provider.submit(
         institutionName: 'State University',
@@ -183,10 +212,7 @@ void main() {
             'Your education has already been verified and cannot be resubmitted.',
             statusCode: 409,
           );
-        final provider = StudentEducationVerificationProvider(
-          repository: repository,
-          authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
-        );
+        final provider = buildProvider(repository);
         await provider.load();
 
         final success = await provider.submit(
@@ -205,31 +231,109 @@ void main() {
     );
   });
 
-  group('downloadDocument', () {
-    test('returns bytes on success', () async {
+  group('viewDocument (Phase 8)', () {
+    test(
+      'fetches the real bytes and triggers the real platform viewer, with no false success',
+      () async {
+        final repository = _FakeEducationVerificationRepository()
+          ..downloadResult = Uint8List(2048);
+        final provider = buildProvider(repository);
+
+        final success = await provider.viewDocument('State University - Education Verification.pdf');
+
+        expect(success, isTrue);
+        expect(repository.downloadCallCount, 1);
+        expect(fakeViewDocumentFile.callCount, 1);
+        expect(
+          fakeViewDocumentFile.lastFileName,
+          'State University - Education Verification.pdf',
+        );
+        expect(fakeDownloadDocumentFile.callCount, 0);
+        expect(provider.isViewingDocument, isFalse);
+        expect(provider.viewErrorMessage, isNull);
+      },
+    );
+
+    test('never claims success merely because bytes were fetched', () async {
       final repository = _FakeEducationVerificationRepository();
-      final provider = StudentEducationVerificationProvider(
-        repository: repository,
-        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      fakeViewDocumentFile.result = const CvFileOpenResult(
+        success: false,
+        errorMessage: "Couldn't open the document.",
       );
+      final provider = buildProvider(repository);
 
-      final bytes = await provider.downloadDocument();
+      final success = await provider.viewDocument('doc.pdf');
 
-      expect(bytes, isNotNull);
-      expect(provider.downloadErrorMessage, isNull);
+      expect(success, isFalse);
+      expect(provider.viewErrorMessage, "Couldn't open the document.");
     });
+
+    test('a backend fetch failure exposes the backend message', () async {
+      final repository = _FakeEducationVerificationRepository()
+        ..downloadError = ApiException('Server error, please try again later.');
+      final provider = buildProvider(repository);
+
+      final success = await provider.viewDocument('doc.pdf');
+
+      expect(success, isFalse);
+      expect(provider.viewErrorMessage, 'Server error, please try again later.');
+      expect(fakeViewDocumentFile.callCount, 0);
+    });
+
+    test('isViewingDocument is true only during an in-flight view', () async {
+      final repository = _FakeEducationVerificationRepository()
+        ..downloadDelay = const Duration(milliseconds: 50);
+      final provider = buildProvider(repository);
+
+      expect(provider.isViewingDocument, isFalse);
+      final future = provider.viewDocument('doc.pdf');
+      expect(provider.isViewingDocument, isTrue);
+
+      await future;
+      expect(provider.isViewingDocument, isFalse);
+    });
+
+    test('a duplicate view while in flight is blocked', () async {
+      final repository = _FakeEducationVerificationRepository()
+        ..downloadDelay = const Duration(milliseconds: 50);
+      final provider = buildProvider(repository);
+
+      final results = await Future.wait([
+        provider.viewDocument('doc.pdf'),
+        provider.viewDocument('doc.pdf'),
+      ]);
+
+      expect(repository.downloadCallCount, 1);
+      expect(results.where((r) => r).length, 1);
+    });
+  });
+
+  group('downloadDocumentFile (Phase 8)', () {
+    test(
+      'fetches the real bytes and triggers the real platform download, distinct from view',
+      () async {
+        final repository = _FakeEducationVerificationRepository()
+          ..downloadResult = Uint8List(2048);
+        final provider = buildProvider(repository);
+
+        final success = await provider.downloadDocumentFile('doc.pdf');
+
+        expect(success, isTrue);
+        expect(fakeDownloadDocumentFile.callCount, 1);
+        expect(fakeViewDocumentFile.callCount, 0);
+        expect(provider.isDownloading, isFalse);
+        expect(provider.downloadErrorMessage, isNull);
+      },
+    );
 
     test('sets downloadErrorMessage on failure', () async {
       final repository = _FakeEducationVerificationRepository()
         ..downloadError = ApiException('Server error, please try again later.');
-      final provider = StudentEducationVerificationProvider(
-        repository: repository,
-        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
-      );
+      final provider = buildProvider(repository);
 
-      final bytes = await provider.downloadDocument();
+      final success = await provider.downloadDocumentFile('doc.pdf');
 
-      expect(bytes, isNull);
+      expect(success, isFalse);
       expect(
         provider.downloadErrorMessage,
         'Server error, please try again later.',
@@ -239,18 +343,15 @@ void main() {
     test('a duplicate in-flight download is ignored', () async {
       final repository = _FakeEducationVerificationRepository()
         ..downloadDelay = const Duration(milliseconds: 50);
-      final provider = StudentEducationVerificationProvider(
-        repository: repository,
-        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
-      );
+      final provider = buildProvider(repository);
 
       final results = await Future.wait([
-        provider.downloadDocument(),
-        provider.downloadDocument(),
+        provider.downloadDocumentFile('doc.pdf'),
+        provider.downloadDocumentFile('doc.pdf'),
       ]);
 
       expect(repository.downloadCallCount, 1);
-      expect(results.where((bytes) => bytes != null), hasLength(1));
+      expect(results.where((r) => r).length, 1);
     });
   });
 
@@ -261,6 +362,8 @@ void main() {
     final provider = StudentEducationVerificationProvider(
       repository: repository,
       authProvider: authProvider,
+      viewDocumentFile: fakeViewDocumentFile.call,
+      downloadDocumentFile: fakeDownloadDocumentFile.call,
     );
 
     await provider.load();
@@ -273,6 +376,8 @@ void main() {
     expect(provider.errorMessage, isNull);
     expect(provider.isSubmitting, isFalse);
     expect(provider.formErrorMessage, isNull);
+    expect(provider.isViewingDocument, isFalse);
+    expect(provider.viewErrorMessage, isNull);
     expect(provider.isDownloading, isFalse);
     expect(provider.downloadErrorMessage, isNull);
   });

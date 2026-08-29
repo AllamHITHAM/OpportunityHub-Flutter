@@ -73,32 +73,45 @@ void main() {
   });
 
   group('createProfile', () {
-    test('sends exactly university, major, and graduation_year', () async {
-      final adapter = _FakeHttpClientAdapter((options) {
-        return _jsonResponse({
-          'data': {
-            'id': 1,
-            'university': 'State University',
-            'major': 'Computer Science',
-            'graduation_year': 2027,
-          },
-        }, 201);
-      });
-      final repository = _repositoryWithAdapter(adapter);
+    test(
+      'sends exactly university, major, graduation_year, interested_in, and '
+      'current_location_id when locations are not provided',
+      () async {
+        final adapter = _FakeHttpClientAdapter((options) {
+          return _jsonResponse({
+            'data': {
+              'id': 1,
+              'university': 'State University',
+              'major': 'Computer Science',
+              'graduation_year': 2027,
+            },
+          }, 201);
+        });
+        final repository = _repositoryWithAdapter(adapter);
 
-      await repository.createProfile(
-        university: 'State University',
-        major: 'Computer Science',
-        graduationYear: 2027,
-      );
+        await repository.createProfile(
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+          interestedIn: const ['job'],
+        );
 
-      expect(adapter.lastRequest?.path, '/student/profile');
-      final sentBody = adapter.lastRequest?.data as Map<String, dynamic>;
-      expect(sentBody.keys.toSet(), {'university', 'major', 'graduation_year'});
-      expect(sentBody['university'], 'State University');
-      expect(sentBody['major'], 'Computer Science');
-      expect(sentBody['graduation_year'], 2027);
-    });
+        expect(adapter.lastRequest?.path, '/student/profile');
+        final sentBody = adapter.lastRequest?.data as Map<String, dynamic>;
+        expect(sentBody.keys.toSet(), {
+          'university',
+          'major',
+          'graduation_year',
+          'interested_in',
+          'current_location_id',
+        });
+        expect(sentBody['university'], 'State University');
+        expect(sentBody['major'], 'Computer Science');
+        expect(sentBody['graduation_year'], 2027);
+        expect(sentBody['interested_in'], ['job']);
+        expect(sentBody['current_location_id'], isNull);
+      },
+    );
 
     test('never sends name, email, password, or gpa', () async {
       final adapter = _FakeHttpClientAdapter((options) {
@@ -117,6 +130,7 @@ void main() {
         university: 'State University',
         major: 'Computer Science',
         graduationYear: 2027,
+        interestedIn: const ['job'],
       );
 
       final sentBody = adapter.lastRequest?.data as Map<String, dynamic>;
@@ -143,6 +157,7 @@ void main() {
         university: 'State University',
         major: 'Computer Science',
         graduationYear: 2027,
+        interestedIn: const ['job'],
       );
 
       expect(profile.id, 42);
@@ -168,6 +183,7 @@ void main() {
             university: 'State University',
             major: 'Computer Science',
             graduationYear: 2027,
+          interestedIn: const ['job'],
           ),
           throwsA(
             isA<ApiException>()
@@ -194,6 +210,7 @@ void main() {
           university: 'State University',
           major: 'Computer Science',
           graduationYear: 2027,
+          interestedIn: const ['job'],
         ),
         throwsA(
           isA<ApiException>().having(
@@ -220,6 +237,7 @@ void main() {
           university: 'State University',
           major: 'Computer Science',
           graduationYear: 2027,
+          interestedIn: const ['job'],
         ),
         throwsA(
           isA<ApiException>().having(
@@ -245,6 +263,7 @@ void main() {
           university: 'State University',
           major: 'Computer Science',
           graduationYear: 2027,
+          interestedIn: const ['job'],
         ),
         throwsA(
           isA<ApiException>().having(
@@ -326,6 +345,7 @@ void main() {
         university: 'New University',
         major: 'Computer Science',
         graduationYear: 2028,
+        interestedIn: const ['job'],
         phone: '0791234567',
         bio: 'Updated bio.',
       );
@@ -357,6 +377,7 @@ void main() {
         university: 'New University',
         major: 'Computer Science',
         graduationYear: 2028,
+        interestedIn: const ['job'],
       );
 
       final sentBody = adapter.lastRequest?.data as Map<String, dynamic>;
@@ -385,6 +406,7 @@ void main() {
         university: 'New University',
         major: 'Computer Science',
         graduationYear: 2028,
+        interestedIn: const ['job'],
         phone: '0791234567',
         bio: 'Updated bio.',
       );
@@ -411,6 +433,7 @@ void main() {
           university: 'New University',
           major: 'Computer Science',
           graduationYear: 1800,
+          interestedIn: const ['job'],
         ),
         throwsA(
           isA<ApiException>().having(
@@ -437,6 +460,7 @@ void main() {
           university: 'New University',
           major: 'Computer Science',
           graduationYear: 2028,
+        interestedIn: const ['job'],
         ),
         throwsA(
           isA<ApiException>().having(

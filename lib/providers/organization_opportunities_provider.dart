@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../core/api/api_client.dart';
 import '../features/opportunities/data/opportunity_repository.dart';
 import '../models/opportunity_model.dart';
+import '../models/skill_model.dart';
 import 'auth_provider.dart';
 
 /// Holds the authenticated organization's opportunity list and detail
@@ -36,6 +37,17 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
 
   final Set<int> _deletingIds = {};
   String? deleteErrorMessage;
+
+  /// The real, full Skill catalog (Phase O8.2) for Create/Edit
+  /// Opportunity's Required Skills multi-select -- mirrors
+  /// `StudentSkillProvider`'s own catalog-loading shape.
+  List<SkillModel> catalogSkills = [];
+  bool isLoadingCatalog = false;
+  String? catalogErrorMessage;
+  Future<void>? _pendingCatalogFetch;
+
+  bool isSyncingSkills = false;
+  String? skillsSyncErrorMessage;
 
   /// The in-flight list fetch, if any — guards against concurrent duplicate
   /// requests (e.g. a rebuild triggering another `loadOpportunities()` call
@@ -120,14 +132,15 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
     required String workMode,
     required String experienceLevel,
     String? educationLevel,
-    String? fieldOfStudy,
-    String? location,
+    int? locationId,
     double? salaryMin,
     double? salaryMax,
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
     List<String>? eligibleMajors,
+    Map<int, bool>? skills,
+    String? recruitmentProcess,
   }) async {
     isSubmitting = true;
     formErrorMessage = null;
@@ -143,14 +156,15 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
         workMode: workMode,
         experienceLevel: experienceLevel,
         educationLevel: educationLevel,
-        fieldOfStudy: fieldOfStudy,
-        location: location,
+        locationId: locationId,
         salaryMin: salaryMin,
         salaryMax: salaryMax,
         applicationDeadline: applicationDeadline,
         positionsAvailable: positionsAvailable,
         status: status,
         eligibleMajors: eligibleMajors,
+        skills: skills,
+        recruitmentProcess: recruitmentProcess,
       );
       opportunities = [...opportunities, created];
     } on ApiException catch (error) {
@@ -171,14 +185,15 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
     required String workMode,
     required String experienceLevel,
     String? educationLevel,
-    String? fieldOfStudy,
-    String? location,
+    int? locationId,
     double? salaryMin,
     double? salaryMax,
     DateTime? applicationDeadline,
     int? positionsAvailable,
     String? status,
     List<String>? eligibleMajors,
+    Map<int, bool>? skills,
+    String? recruitmentProcess,
   }) async {
     isSubmitting = true;
     formErrorMessage = null;
@@ -195,14 +210,15 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
         workMode: workMode,
         experienceLevel: experienceLevel,
         educationLevel: educationLevel,
-        fieldOfStudy: fieldOfStudy,
-        location: location,
+        locationId: locationId,
         salaryMin: salaryMin,
         salaryMax: salaryMax,
         applicationDeadline: applicationDeadline,
         positionsAvailable: positionsAvailable,
         status: status,
         eligibleMajors: eligibleMajors,
+        skills: skills,
+        recruitmentProcess: recruitmentProcess,
       );
       opportunities = [
         for (final existing in opportunities)
@@ -242,6 +258,62 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
     return success;
   }
 
+  /// Fetches the real Skill catalog for the Required Skills multi-select
+  /// (Phase O8.2). Mirrors `StudentSkillProvider.loadCatalog()`'s single-
+  /// in-flight-request, cached-by-default pattern.
+  Future<void> loadSkillCatalog({bool forceRefresh = false}) {
+    if (forceRefresh) {
+      _pendingCatalogFetch = null;
+    }
+    if (!forceRefresh && catalogSkills.isNotEmpty) {
+      return _pendingCatalogFetch ?? Future.value();
+    }
+    return _pendingCatalogFetch ??= _performLoadSkillCatalog();
+  }
+
+  Future<void> _performLoadSkillCatalog() async {
+    isLoadingCatalog = true;
+    catalogErrorMessage = null;
+    notifyListeners();
+
+    try {
+      catalogSkills = await repository.getSkillCatalog();
+    } on ApiException catch (error) {
+      catalogErrorMessage = error.message;
+    } finally {
+      isLoadingCatalog = false;
+      _pendingCatalogFetch = null;
+      notifyListeners();
+    }
+  }
+
+  /// Replaces [opportunityId]'s entire Required/Preferred Skill set in one
+  /// call (Phase O8.2) -- real canonical Skill IDs only. Returns `true`
+  /// only on success.
+  Future<bool> syncSkills(
+    int opportunityId,
+    Map<int, bool> skillIdToIsRequired,
+  ) async {
+    isSyncingSkills = true;
+    skillsSyncErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      await repository.syncOpportunitySkills(
+        opportunityId,
+        skillIdToIsRequired,
+      );
+      success = true;
+    } on ApiException catch (error) {
+      skillsSyncErrorMessage = error.message;
+    }
+
+    isSyncingSkills = false;
+    notifyListeners();
+    return success;
+  }
+
   void clearFormError() {
     formErrorMessage = null;
     notifyListeners();
@@ -265,6 +337,12 @@ class OrganizationOpportunitiesProvider extends ChangeNotifier {
     formErrorMessage = null;
     _deletingIds.clear();
     deleteErrorMessage = null;
+    catalogSkills = [];
+    isLoadingCatalog = false;
+    catalogErrorMessage = null;
+    _pendingCatalogFetch = null;
+    isSyncingSkills = false;
+    skillsSyncErrorMessage = null;
     _pendingListFetch = null;
     _pendingDetailsFetch = null;
     notifyListeners();

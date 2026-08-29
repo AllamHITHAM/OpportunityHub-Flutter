@@ -10,6 +10,12 @@ import '../../../models/skill_suggestion_model.dart';
 import '../../../providers/admin_skill_suggestions_provider.dart';
 import '../../../providers/admin_skills_provider.dart';
 
+/// Admin Manage Skills Final UI + Responsive Fix: the same centered
+/// desktop max-width and breakpoint already established on the polished
+/// Admin Dashboard — not a new, competing value invented for this screen.
+const _desktopBreakpoint = 900.0;
+const _maxContentWidth = 900.0;
+
 /// Lists every platform skill and lets an admin create, rename, or delete
 /// one. `category` exists on the backend record but isn't collected or
 /// shown here — this phase's UI only manages `name`.
@@ -21,25 +27,174 @@ class AdminSkillsScreen extends StatefulWidget {
 }
 
 class _AdminSkillsScreenState extends State<AdminSkillsScreen> {
-  final _searchController = TextEditingController();
-  String _query = '';
-
   @override
   void initState() {
     super.initState();
     // Deferred to the post-frame callback — see
     // StudentOpportunitiesScreen.initState for why calling this directly
-    // here would violate Flutter's build-phase constraints.
+    // here would violate Flutter's build-phase constraints. Called
+    // exactly once here, regardless of which tab is active or how many
+    // times the admin switches between them -- see the class doc comment
+    // below for why switching tabs never re-fetches.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<AdminSkillsProvider>().load();
       // Independent of the catalog load above — a pending-suggestions
       // failure must never block the rest of this screen (see
-      // _PendingSuggestionsSection, which renders its own section-level
+      // _PendingSuggestionsTab, which renders its own tab-level
       // loading/error state).
       context.read<AdminSkillSuggestionsProvider>().load();
     });
   }
+
+  Future<void> _openAddSheet() async {
+    final provider = context.read<AdminSkillsProvider>();
+    final created = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: provider,
+        child: const _SkillFormSheet(),
+      ),
+    );
+    if (created == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Skill created successfully')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final suggestionsProvider = context.watch<AdminSkillSuggestionsProvider>();
+    final skillsProvider = context.watch<AdminSkillsProvider>();
+
+    // Admin Manage Skills — UX Polish: two real tabs, not one long page
+    // with Pending Suggestions stacked above the Skill Catalog — with
+    // many pending suggestions, the admin previously had to scroll past
+    // all of them just to reach the catalog. `DefaultTabController`
+    // (the standard Flutter/Material tab mechanism, styled with this
+    // app's own tokens below) is what drives both `TabBar` and
+    // `TabBarView` here; neither tab's own `load()` is ever called on a
+    // tab switch (only once, in `initState` above), so switching tabs
+    // never re-fetches — each tab just shows whatever its own provider
+    // already holds. The overflow fix itself (`CustomScrollView` +
+    // genuine `SliverList`s) is unchanged and now lives inside each of
+    // the two tabs below, one real dataset per tab instead of both
+    // concatenated into one scroll region.
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Manage Skills'),
+          actions: [
+            // Deliberately global (both tabs), not swapped based on the
+            // active tab — the simpler of the two options the spec
+            // allows, and already how every other AppBar action in this
+            // app behaves.
+            IconButton(
+              onPressed: _openAddSheet,
+              icon: const Icon(Icons.add),
+              tooltip: 'Add Skill',
+            ),
+          ],
+          bottom: TabBar(
+            labelColor: AppColors.primaryDark,
+            unselectedLabelColor: AppColors.textSecondary,
+            indicatorColor: AppColors.primary,
+            tabs: [
+              Tab(
+                text:
+                    'Pending Suggestions (${suggestionsProvider.suggestions.length})',
+              ),
+              // Never "Accepted" -- this tab holds every official Skill,
+              // both AI-suggestion-approved and Admin-created directly.
+              Tab(text: 'Skill Catalog (${skillsProvider.skills.length})'),
+            ],
+          ),
+        ),
+        body: const SafeArea(
+          child: TabBarView(
+            children: [_PendingSuggestionsTab(), _SkillCatalogTab()],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The "Pending Suggestions" tab -- exactly the same real data/actions
+/// (Approve/Reject, loading/error/busy states) as before this phase, now
+/// as its own full tab instead of a section stacked above the catalog.
+/// `AutomaticKeepAliveClientMixin` keeps this tab's own scroll position
+/// intact when the admin switches to Skill Catalog and back, rather than
+/// resetting to the top every time.
+class _PendingSuggestionsTab extends StatefulWidget {
+  const _PendingSuggestionsTab();
+
+  @override
+  State<_PendingSuggestionsTab> createState() =>
+      _PendingSuggestionsTabState();
+}
+
+class _PendingSuggestionsTabState extends State<_PendingSuggestionsTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final provider = context.watch<AdminSkillSuggestionsProvider>();
+
+    return RefreshIndicator(
+      onRefresh: () => provider.load(forceRefresh: true),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final horizontalPadding = width >= _desktopBreakpoint
+              ? AppSpacing.xl
+              : AppSpacing.screenHorizontal;
+
+          return CustomScrollView(
+            // Keyed so tests can target this tab's own `Scrollable`
+            // precisely -- with `AutomaticKeepAliveClientMixin` on both
+            // tabs, more than one `Scrollable` (this one, the Skill
+            // Catalog tab's, and the `TabBarView`'s own horizontal
+            // `PageView`) can coexist in the tree at once.
+            key: const ValueKey('pending-suggestions-scroll'),
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              const _PendingSuggestionsStateSliver(),
+              _PendingSuggestionsSliverList(
+                horizontalPadding: horizontalPadding,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// The Skill Catalog tab -- Search, the skill list itself, and Add/Edit/
+/// Delete, all exactly as before this phase, now scoped to its own tab.
+/// `AutomaticKeepAliveClientMixin` keeps the entered search text and
+/// scroll position intact across a tab switch.
+class _SkillCatalogTab extends StatefulWidget {
+  const _SkillCatalogTab();
+
+  @override
+  State<_SkillCatalogTab> createState() => _SkillCatalogTabState();
+}
+
+class _SkillCatalogTabState extends State<_SkillCatalogTab>
+    with AutomaticKeepAliveClientMixin {
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void dispose() {
@@ -119,24 +274,9 @@ class _AdminSkillsScreenState extends State<AdminSkillsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final provider = context.watch<AdminSkillsProvider>();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Manage Skills'),
-        actions: [
-          IconButton(
-            onPressed: _openAddSheet,
-            icon: const Icon(Icons.add),
-            tooltip: 'Add Skill',
-          ),
-        ],
-      ),
-      body: SafeArea(child: _buildBody(provider)),
-    );
-  }
-
-  Widget _buildBody(AdminSkillsProvider provider) {
     if (provider.isLoading && provider.skills.isEmpty) {
       return const AppSkeletonList();
     }
@@ -150,8 +290,7 @@ class _AdminSkillsScreenState extends State<AdminSkillsScreen> {
 
     if (provider.skills.isEmpty) {
       return AppEmptyView(
-        title: 'No Skills Yet',
-        message: 'There are no skills on the platform yet.',
+        message: 'No skills available.',
         icon: Icons.psychology_outlined,
         actionLabel: 'Add Skill',
         onAction: _openAddSheet,
@@ -160,91 +299,195 @@ class _AdminSkillsScreenState extends State<AdminSkillsScreen> {
 
     final filtered = _filtered(provider.skills);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(
-            AppSpacing.screenHorizontal,
-            AppSpacing.screenHorizontal,
-            AppSpacing.screenHorizontal,
-            0,
-          ),
-          child: _PendingSuggestionsSection(),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.screenHorizontal,
-            AppSpacing.screenHorizontal,
-            AppSpacing.screenHorizontal,
-            0,
-          ),
-          child: AppSearchField(
-            controller: _searchController,
-            hint: 'Search by name',
-            onChanged: (value) => setState(() => _query = value),
-          ),
-        ),
-        if (provider.errorMessage != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.screenHorizontal,
-              AppSpacing.sm,
-              AppSpacing.screenHorizontal,
-              0,
-            ),
-            child: AppErrorView(
-              compact: true,
-              title: 'Refresh Failed',
-              message: provider.errorMessage!,
-              onRetry: () => provider.load(forceRefresh: true),
-            ),
-          ),
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: () => provider.load(forceRefresh: true),
-            child: filtered.isEmpty
-                ? ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    children: const [
-                      SizedBox(height: AppSpacing.xxl),
-                      AppEmptyView(
+    return RefreshIndicator(
+      onRefresh: () => provider.load(forceRefresh: true),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final horizontalPadding = width >= _desktopBreakpoint
+              ? AppSpacing.xl
+              : AppSpacing.screenHorizontal;
+
+          return CustomScrollView(
+            // See the matching key on the Pending Suggestions tab's own
+            // `CustomScrollView` for why this is keyed.
+            key: const ValueKey('skill-catalog-scroll'),
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  AppSpacing.screenHorizontal,
+                  horizontalPadding,
+                  0,
+                ),
+                sliver: SliverToBoxAdapter(
+                  child: _Centered(
+                    child: AppSearchField(
+                      controller: _searchController,
+                      hint: 'Search by name',
+                      onChanged: (value) => setState(() => _query = value),
+                    ),
+                  ),
+                ),
+              ),
+              if (provider.errorMessage != null)
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    AppSpacing.sm,
+                    horizontalPadding,
+                    0,
+                  ),
+                  sliver: SliverToBoxAdapter(
+                    child: _Centered(
+                      child: AppErrorView(
+                        compact: true,
+                        title: 'Refresh Failed',
+                        message: provider.errorMessage!,
+                        onRetry: () => provider.load(forceRefresh: true),
+                      ),
+                    ),
+                  ),
+                ),
+              if (filtered.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Padding(
+                    padding: EdgeInsets.only(top: AppSpacing.xxl),
+                    child: _Centered(
+                      child: AppEmptyView(
                         title: 'No Matches',
                         message: 'No skills match your search.',
                         icon: Icons.search_off_rounded,
                       ),
-                    ],
-                  )
-                : ListView.separated(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
+                    ),
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    AppSpacing.screenHorizontal,
+                    horizontalPadding,
+                    AppSpacing.screenHorizontal,
+                  ),
+                  sliver: SliverList.separated(
                     itemCount: filtered.length,
                     separatorBuilder: (_, _) =>
                         const SizedBox(height: AppSpacing.sm),
                     itemBuilder: (context, index) {
                       final skill = filtered[index];
-                      return _SkillCard(
-                        skill: skill,
-                        isBusy: provider.isBusy(skill.id),
-                        onEdit: () => _openEditSheet(skill),
-                        onDelete: () => _confirmDelete(skill),
+                      return _Centered(
+                        child: _SkillCard(
+                          skill: skill,
+                          isBusy: provider.isBusy(skill.id),
+                          onEdit: () => _openEditSheet(skill),
+                          onDelete: () => _confirmDelete(skill),
+                        ),
                       );
                     },
                   ),
-          ),
-        ),
-      ],
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
 
-/// Phase 8A-6.1: pending AI-derived Skill catalog suggestions awaiting
-/// Admin review. Renders nothing when there are none and nothing is
-/// loading/erroring, so it never adds empty chrome to a catalog with no
-/// suggestions outstanding — the same posture other section-level widgets
-/// in this app already take (e.g. Organization's `_AssessmentSection`).
-class _PendingSuggestionsSection extends StatelessWidget {
-  const _PendingSuggestionsSection();
+/// Caps content at [_maxContentWidth] on a wide desktop viewport (matching
+/// the polished Admin Dashboard's own centered-content treatment) while
+/// leaving the sliver it's used inside at its full natural width -- so a
+/// `RefreshIndicator`'s pull gesture, and each `SliverPadding`'s own
+/// horizontal inset, still span the entire scrollable area rather than
+/// shrinking to the capped column too. Mirrors
+/// `organization_quiz_results_screen.dart`'s own private `_Centered`
+/// exactly (not shared between files -- this app's own established
+/// convention for this kind of small, screen-local layout helper).
+class _Centered extends StatelessWidget {
+  const _Centered({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Admin Manage Skills — UX Polish: the Pending Suggestions tab's own
+/// loading/error/empty state, as a sliver so it composes directly with
+/// [_PendingSuggestionsSliverList] inside the same `CustomScrollView`
+/// (see `_PendingSuggestionsTab`). Now that Pending Suggestions is its
+/// own full tab (previously a section stacked above the catalog on one
+/// long page), a genuinely empty list shows an explicit "No pending
+/// skill suggestions." message instead of rendering nothing — an empty
+/// tab with literally no content would otherwise look broken, and the
+/// spec's own empty-state text calls for this explicitly.
+class _PendingSuggestionsStateSliver extends StatelessWidget {
+  const _PendingSuggestionsStateSliver();
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<AdminSkillSuggestionsProvider>();
+
+    if (provider.isLoading && provider.suggestions.isEmpty) {
+      return const SliverFillRemaining(
+        hasScrollBody: false,
+        child: AppSkeletonList(),
+      );
+    }
+
+    if (provider.errorMessage != null && provider.suggestions.isEmpty) {
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: AppErrorView(
+          title: 'Could Not Load Suggestions',
+          message: provider.errorMessage!,
+          onRetry: () => provider.load(forceRefresh: true),
+        ),
+      );
+    }
+
+    if (provider.suggestions.isEmpty) {
+      return const SliverFillRemaining(
+        hasScrollBody: false,
+        child: AppEmptyView(
+          message: 'No pending skill suggestions.',
+          icon: Icons.psychology_outlined,
+        ),
+      );
+    }
+
+    return const SliverToBoxAdapter(child: SizedBox.shrink());
+  }
+}
+
+/// The Pending Suggestions rows themselves, as a genuine `SliverList`
+/// (never an eagerly-built `Column` of every row at once) — this,
+/// combined with [_PendingSuggestionsStateSliver] above never living
+/// inside a fixed-height, non-scrolling `Column`, is the actual overflow
+/// fix: a real dataset of 100+ suggestions now lays out and scrolls
+/// exactly like any other list, instead of forcing the Skill Catalog
+/// beneath it into negative available height (back when both lived on
+/// one page — now each has its own full tab either way).
+///
+/// A widget whose `build()` returns a sliver (`SliverList`/
+/// `SliverToBoxAdapter`) is valid Flutter as long as it's only ever
+/// placed directly inside a `CustomScrollView`'s own `slivers` list, the
+/// same way [_PendingSuggestionsStateSliver] above and [_Centered]
+/// elsewhere in this file are both plain box widgets used the same way.
+class _PendingSuggestionsSliverList extends StatelessWidget {
+  const _PendingSuggestionsSliverList({required this.horizontalPadding});
+
+  final double horizontalPadding;
 
   Future<void> _approve(BuildContext context, int suggestionId) async {
     final provider = context.read<AdminSkillSuggestionsProvider>();
@@ -282,56 +525,43 @@ class _PendingSuggestionsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = context.watch<AdminSkillSuggestionsProvider>();
 
-    if (provider.isLoading && provider.suggestions.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.only(bottom: AppSpacing.sm),
-        child: AppLoading(compact: true),
-      );
-    }
-
-    if (provider.errorMessage != null && provider.suggestions.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-        child: AppErrorView(
-          compact: true,
-          title: 'Could Not Load Suggestions',
-          message: provider.errorMessage!,
-          onRetry: () => provider.load(forceRefresh: true),
-        ),
-      );
-    }
-
     if (provider.suggestions.isEmpty) {
-      return const SizedBox.shrink();
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SectionHeader(title: 'Pending Skill Suggestions'),
-            const SizedBox(height: AppSpacing.xs),
-            for (final suggestion in provider.suggestions)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                child: _SuggestionRow(
-                  suggestion: suggestion,
-                  isBusy: provider.isBusy(suggestion.id),
-                  onApprove: () => _approve(context, suggestion.id),
-                  onReject: () => _reject(context, suggestion.id),
-                ),
-              ),
-          ],
-        ),
+    return SliverPadding(
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        0,
+        horizontalPadding,
+        AppSpacing.screenHorizontal,
+      ),
+      sliver: SliverList.separated(
+        itemCount: provider.suggestions.length,
+        separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.xs),
+        itemBuilder: (context, index) {
+          final suggestion = provider.suggestions[index];
+          return _Centered(
+            child: _SuggestionCard(
+              suggestion: suggestion,
+              isBusy: provider.isBusy(suggestion.id),
+              onApprove: () => _approve(context, suggestion.id),
+              onReject: () => _reject(context, suggestion.id),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
-class _SuggestionRow extends StatelessWidget {
-  const _SuggestionRow({
+/// One pending suggestion, as its own compact card — mirrors [_SkillCard]
+/// below (name/action row) so the Pending Suggestions and Skill Catalog
+/// sections read as one consistent visual language, and so both scale to
+/// a large real dataset the same way (a `SliverList` of individually
+/// bordered cards, not one unbounded card containing every row).
+class _SuggestionCard extends StatelessWidget {
+  const _SuggestionCard({
     required this.suggestion,
     required this.isBusy,
     required this.onApprove,
@@ -347,45 +577,58 @@ class _SuggestionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(suggestion.name, style: textTheme.bodyMedium),
-              Text(
-                'From AI CV extraction',
-                style: textTheme.bodySmall?.copyWith(
-                  color: AppColors.textSecondary,
+    return AppCard(
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // No `overflow`/`maxLines` cap -- a long skill name must
+                // wrap onto more lines, never truncate or push the
+                // Approve/Reject actions off-card.
+                Text(suggestion.name, style: textTheme.bodyMedium),
+                Text(
+                  'From AI CV extraction',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
                 ),
+              ],
+            ),
+          ),
+          if (isBusy)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              child: AppLoading(compact: true),
+            )
+          else ...[
+            Semantics(
+              label: 'Approve suggestion: ${suggestion.name}',
+              button: true,
+              child: IconButton(
+                key: Key('approve-suggestion-${suggestion.id}'),
+                onPressed: onApprove,
+                icon: const Icon(Icons.check_circle_outline),
+                color: AppColors.success,
+                tooltip: 'Approve suggestion',
               ),
-            ],
-          ),
-        ),
-        if (isBusy)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-            child: AppLoading(compact: true),
-          )
-        else ...[
-          IconButton(
-            key: Key('approve-suggestion-${suggestion.id}'),
-            onPressed: onApprove,
-            icon: const Icon(Icons.check_circle_outline),
-            color: AppColors.success,
-            tooltip: 'Approve',
-          ),
-          IconButton(
-            key: Key('reject-suggestion-${suggestion.id}'),
-            onPressed: onReject,
-            icon: const Icon(Icons.cancel_outlined),
-            color: AppColors.error,
-            tooltip: 'Reject',
-          ),
+            ),
+            Semantics(
+              label: 'Reject suggestion: ${suggestion.name}',
+              button: true,
+              child: IconButton(
+                key: Key('reject-suggestion-${suggestion.id}'),
+                onPressed: onReject,
+                icon: const Icon(Icons.cancel_outlined),
+                color: AppColors.error,
+                tooltip: 'Reject suggestion',
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }

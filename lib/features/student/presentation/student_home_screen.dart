@@ -18,6 +18,7 @@ import '../../../providers/student_applications_provider.dart';
 import '../../../providers/student_cv_provider.dart';
 import '../../../providers/student_opportunities_provider.dart';
 import '../../../routes/app_routes.dart';
+import '../../messaging/presentation/messages_bell_action.dart';
 import '../../notifications/presentation/notification_bell_action.dart';
 import '../../opportunities/presentation/opportunity_card.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
@@ -159,6 +160,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen>
         title: const Text('OpportunityHub'),
         actions: [
           const ThemeToggleButton(),
+          const MessagesBellAction(),
           const NotificationBellAction(),
           _ProfileNavButton(user: authProvider.user),
           const SizedBox(width: AppSpacing.xs),

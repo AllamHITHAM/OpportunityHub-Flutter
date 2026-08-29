@@ -167,7 +167,6 @@ Map<String, dynamic> _applicationJson({
 Map<String, dynamic> _analysisJson({
   dynamic overallMatchScore = 87,
   dynamic skillsMatchScore = 90,
-  dynamic fieldMatchScore = 100,
   dynamic experienceMatchScore = 66.67,
   dynamic strengths = const ['Matches required skill: Laravel'],
   dynamic weaknesses = const ['Missing preferred skill: Docker'],
@@ -176,7 +175,6 @@ Map<String, dynamic> _analysisJson({
   return {
     'overall_match_score': overallMatchScore,
     'skills_match_score': skillsMatchScore,
-    'field_match_score': fieldMatchScore,
     'experience_match_score': experienceMatchScore,
     'strengths': strengths,
     'weaknesses': weaknesses,
@@ -861,14 +859,14 @@ void main() {
     test('a null factor score parses correctly', () async {
       final adapter = _FakeHttpClientAdapter((options) {
         return _jsonResponse({
-          'data': _analysisJson(fieldMatchScore: null),
+          'data': _analysisJson(skillsMatchScore: null),
         }, 200);
       });
       final repository = _repositoryWithAdapter(adapter);
 
       final result = await repository.getApplicationAnalysis(1);
 
-      expect(result.fieldMatchScore, isNull);
+      expect(result.skillsMatchScore, isNull);
     });
 
     test('throws ApiException on a 404 (never analyzed / not owned)', () async {

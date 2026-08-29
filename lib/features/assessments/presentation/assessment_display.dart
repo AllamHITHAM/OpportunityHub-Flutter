@@ -1,5 +1,6 @@
 import '../../../core/widgets/status_chip.dart';
 import '../../../models/interview_model.dart';
+import '../../../models/quiz_model.dart';
 import '../../applications/presentation/application_display.dart'
     show cleanDisplayText;
 
@@ -117,6 +118,56 @@ AppStatusType quizStatusChipType(String status) {
     default:
       return AppStatusType.warning;
   }
+}
+
+/// Phase 10A.4B addendum (section 12) — labels for
+/// `AssessmentModel.quizTimingStatus`/`QuizCandidateResultModel.timingStatus`,
+/// a derived-only value the backend computes fresh on every request (never
+/// a stored enum — see `Assessment::quizTimingStatus()`, backend).
+const quizTimingStatusLabels = {
+  'upcoming': 'Upcoming',
+  'available': 'Available',
+  'in_progress': 'In Progress',
+  'submitted': 'Submitted',
+  'deadline_passed': 'Deadline Passed',
+};
+
+/// Phase 10A.4B addendum — a human-readable summary of a shared Quiz
+/// template's candidate-availability policy (e.g. "2 days after
+/// assignment at 10:00, 48-hour window"), for the Organization's own quiz
+/// management UI. `quiz.availabilityDelayDays`/`availabilityTime`/
+/// `submissionWindowHours` are only ever set on a template Quiz — this is
+/// never called for a legacy per-candidate Quiz.
+String describeAvailabilityPolicy(QuizModel quiz) {
+  final delayDays = quiz.availabilityDelayDays;
+  final time = quiz.availabilityTime;
+  final windowHours = quiz.submissionWindowHours;
+  if (delayDays == null || time == null || windowHours == null) {
+    return 'Not configured yet';
+  }
+
+  final displayTime = _describeTimeOfDay(time);
+  final delayLabel = delayDays == 0
+      ? 'the day of assignment'
+      : '$delayDays day${delayDays == 1 ? '' : 's'} after assignment';
+
+  return '$delayLabel at $displayTime, $windowHours-hour window';
+}
+
+/// `"HH:MM"` (24-hour, as stored) into a friendlier `"h:mm AM/PM"` label.
+/// Falls back to the raw value if it doesn't parse as expected — this is
+/// display-only, never used for any real time computation.
+String _describeTimeOfDay(String time) {
+  final parts = time.split(':');
+  if (parts.length < 2) return time;
+  final hour = int.tryParse(parts[0]);
+  final minute = int.tryParse(parts[1]);
+  if (hour == null || minute == null) return time;
+
+  final period = hour >= 12 ? 'PM' : 'AM';
+  final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+  final displayMinute = minute.toString().padLeft(2, '0');
+  return '$displayHour:$displayMinute $period';
 }
 
 /// User-facing labels for every documented `question.type` value.

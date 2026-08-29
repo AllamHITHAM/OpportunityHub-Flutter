@@ -58,6 +58,18 @@ class AppCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // UI Phase O4.1: `AppColors.x` below are plain statics, not derived
+    // from `Theme.of(context)` — so unlike widgets that read
+    // `Theme.of(context).textTheme` (which *do* register a real rebuild
+    // dependency and thus refresh immediately on a theme toggle, per
+    // AppColors's own doc comment), this card had no dependency of its
+    // own. A caller whose build method never happens to touch
+    // `Theme.of(context)` elsewhere (e.g. no text needing textTheme in the
+    // same build) kept rendering the palette from its last incidental
+    // rebuild — visible as a card stuck in the old theme's color after
+    // toggling. This call exists purely to register that dependency.
+    Theme.of(context);
+
     final radius = borderRadius ?? AppRadius.largeRadius;
     final resolvedBorderColor = borderColor ?? AppColors.border;
     final resolvedBackgroundColor = backgroundColor ?? AppColors.card;

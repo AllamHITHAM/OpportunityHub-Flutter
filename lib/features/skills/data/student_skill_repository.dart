@@ -1,12 +1,13 @@
 import 'package:dio/dio.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../models/skill_model.dart';
 import '../../../models/student_skill_model.dart';
 
 /// Talks to the Laravel student-skill endpoints: listing the student's own
-/// skills, adding one (manually or an accepted AI CV suggestion, Phase
-/// 8A-6/8A-6.1), and removing one from the student's own profile (Phase
-/// 8A-6.1's My Skills delete action).
+/// skills, browsing the real Skill catalog (Phase 8A-6.3), adding one
+/// (manually or an accepted AI CV suggestion), and removing one from the
+/// student's own profile (Phase 8A-6.1's My Skills delete action).
 class StudentSkillRepository {
   StudentSkillRepository({required this.apiClient});
 
@@ -30,11 +31,33 @@ class StudentSkillRepository {
     }
   }
 
+  /// Fetches the real, full Skill catalog with
+  /// `GET /api/student/skills/catalog` (Phase 8A-6.3) -- every entry is
+  /// Admin-owned/approved by construction, ordered by name by the backend.
+  /// Powers the real Manual Add Skill picker; never a partial,
+  /// opportunity-derived, or hardcoded list.
+  ///
+  /// Errors: 401, 403.
+  Future<List<SkillModel>> getSkillCatalog() async {
+    try {
+      final response = await apiClient.dio.get('/student/skills/catalog');
+      final data = apiClient.parseData(response) as List;
+      return data
+          .map((json) => SkillModel.fromJson(json as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
   /// Adds a skill to the authenticated student's profile with
-  /// `POST /api/student/skills`. [level] defaults to `intermediate` --
-  /// the AI extraction endpoint only ever produces a confidence score,
-  /// never a proficiency level, so this is a reasonable starting value
-  /// rather than a value derived from the AI in any way.
+  /// `POST /api/student/skills`, returning the real, backend-persisted
+  /// `StudentSkill` row (including the source the backend actually
+  /// assigned). [level] defaults to `intermediate` -- the AI extraction
+  /// endpoint only ever produces a confidence score, never a proficiency
+  /// level, so this is a reasonable starting value for an accepted AI
+  /// suggestion; the real Manual Add Skill flow always passes the
+  /// student's own explicit choice instead.
   ///
   /// [source] defaults to `manual` -- the ordinary Add Skill flow. Pass
   /// `source: 'cv_ai'` with the [cvId] the AI extraction ran against only
@@ -44,15 +67,16 @@ class StudentSkillRepository {
   /// own.
   ///
   /// Errors: 401, 403, 404, 409 (already added), 422 (invalid skill_id,
-  /// or a `cv_ai` claim that fails backend evidence verification).
-  Future<void> addSkill({
+  /// invalid level, or a `cv_ai` claim that fails backend evidence
+  /// verification).
+  Future<StudentSkillModel> addSkill({
     required int skillId,
     String level = 'intermediate',
     String source = 'manual',
     int? cvId,
   }) async {
     try {
-      await apiClient.dio.post(
+      final response = await apiClient.dio.post(
         '/student/skills',
         data: {
           'skill_id': skillId,
@@ -61,6 +85,8 @@ class StudentSkillRepository {
           'cv_id': cvId,
         },
       );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return StudentSkillModel.fromJson(data);
     } on DioException catch (error) {
       throw apiClient.handleError(error);
     }

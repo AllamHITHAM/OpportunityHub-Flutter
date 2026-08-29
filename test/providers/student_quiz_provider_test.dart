@@ -54,6 +54,8 @@ QuizModel _quiz({
   int? timeLimitMinutes,
   int passingScore = 70,
   List<QuestionModel> questions = const [],
+  DateTime? availableAt,
+  DateTime? dueAt,
 }) {
   return QuizModel(
     id: id,
@@ -63,6 +65,8 @@ QuizModel _quiz({
     passingScore: passingScore,
     status: 'published',
     questions: questions,
+    availableAt: availableAt,
+    dueAt: dueAt,
   );
 }
 
@@ -691,6 +695,135 @@ void main() {
       expect(provider.remainingTime, remainingBefore);
     });
   });
+
+  group(
+    'isUpcoming / isDeadlinePassed / effective cutoff (Phase 10A.4B addendum)',
+    () {
+      test('a future available_at makes isUpcoming true', () async {
+        repository.loadResult = _quiz(
+          assessmentId: 7,
+          availableAt: DateTime.now().add(const Duration(days: 2)),
+        );
+        await provider.loadQuiz(7);
+
+        expect(provider.isUpcoming, isTrue);
+        expect(provider.isDeadlinePassed, isFalse);
+
+        provider.dispose();
+      });
+
+      test('a past available_at makes isUpcoming false', () async {
+        repository.loadResult = _quiz(
+          assessmentId: 7,
+          availableAt: DateTime.now().subtract(const Duration(hours: 1)),
+        );
+        await provider.loadQuiz(7);
+
+        expect(provider.isUpcoming, isFalse);
+      });
+
+      test('a null available_at is never upcoming (legacy quiz)', () async {
+        repository.loadResult = _quiz(assessmentId: 7);
+        await provider.loadQuiz(7);
+
+        expect(provider.isUpcoming, isFalse);
+      });
+
+      test(
+        'a past due_at with no attempt makes isDeadlinePassed true',
+        () async {
+          repository.loadResult = _quiz(
+            assessmentId: 7,
+            availableAt: DateTime.now().subtract(const Duration(days: 3)),
+            dueAt: DateTime.now().subtract(const Duration(hours: 1)),
+          );
+          await provider.loadQuiz(7);
+
+          expect(provider.isDeadlinePassed, isTrue);
+        },
+      );
+
+      test('a future due_at is not yet deadline-passed', () async {
+        repository.loadResult = _quiz(
+          assessmentId: 7,
+          availableAt: DateTime.now().subtract(const Duration(hours: 1)),
+          dueAt: DateTime.now().add(const Duration(days: 1)),
+        );
+        await provider.loadQuiz(7);
+
+        expect(provider.isDeadlinePassed, isFalse);
+
+        provider.dispose();
+      });
+
+      test(
+        'a null due_at is never deadline-passed regardless of the clock',
+        () async {
+          repository.loadResult = _quiz(assessmentId: 7);
+          await provider.loadQuiz(7);
+
+          expect(provider.isDeadlinePassed, isFalse);
+        },
+      );
+
+      test(
+        'a due_at earlier than the personal timer binds the effective cutoff '
+        '(the addendum\'s own 18:00/17:50/30-minute worked example)',
+        () async {
+          final dueAt = DateTime.now().add(const Duration(minutes: 10));
+          repository.loadResult = _quiz(
+            assessmentId: 7,
+            timeLimitMinutes: 30,
+            dueAt: dueAt,
+          );
+          await provider.loadQuiz(7);
+          repository.startResult = _attempt(startedAt: DateTime.now());
+
+          await provider.start();
+
+          // The personal timer alone would allow ~30 minutes; due_at cuts
+          // it to ~10 -- remainingTime must reflect the earlier one.
+          expect(provider.remainingTime!.inMinutes, lessThanOrEqualTo(10));
+          expect(provider.isDeadlineBindingOnExpiry, isTrue);
+        },
+      );
+
+      test(
+        'a personal timer earlier than due_at binds the effective cutoff',
+        () async {
+          final dueAt = DateTime.now().add(const Duration(days: 1));
+          repository.loadResult = _quiz(
+            assessmentId: 7,
+            timeLimitMinutes: 10,
+            dueAt: dueAt,
+          );
+          await provider.loadQuiz(7);
+          repository.startResult = _attempt(startedAt: DateTime.now());
+
+          await provider.start();
+
+          expect(provider.remainingTime!.inMinutes, lessThanOrEqualTo(10));
+          expect(provider.isDeadlineBindingOnExpiry, isFalse);
+        },
+      );
+
+      test(
+        'a due_at with no personal time limit still drives the countdown',
+        () async {
+          final dueAt = DateTime.now().add(const Duration(minutes: 15));
+          repository.loadResult = _quiz(assessmentId: 7, dueAt: dueAt);
+          await provider.loadQuiz(7);
+          repository.startResult = _attempt(startedAt: DateTime.now());
+
+          await provider.start();
+
+          expect(provider.remainingTime, isNotNull);
+          expect(provider.remainingTime!.inMinutes, lessThanOrEqualTo(15));
+          expect(provider.isDeadlineBindingOnExpiry, isTrue);
+        },
+      );
+    },
+  );
 
   test('reset clears all state (called on logout)', () async {
     repository.loadResult = _quiz(

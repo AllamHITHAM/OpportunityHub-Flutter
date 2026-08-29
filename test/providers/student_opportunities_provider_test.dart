@@ -79,6 +79,7 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     String? location,
     String? fieldOfStudy,
     String? keyword,
+    int? organizationId,
     int page = 1,
     int perPage = 15,
   }) async {
@@ -253,7 +254,8 @@ void main() {
   });
 
   test(
-    'loadOpportunityDetails reuses an already-loaded list item without a new GET',
+    'loadOpportunityDetails paints instantly from a cached list item, then '
+    'a background fetch still runs and its fresh result wins',
     () async {
       repository.listResult = PaginatedResult(
         items: [_opportunity(id: 1, title: 'Cached Title')],
@@ -263,10 +265,71 @@ void main() {
       );
       await provider.loadOpportunities();
 
+      repository.getResult = _opportunity(id: 1, title: 'Fresh Title');
+      final future = provider.loadOpportunityDetails(1);
+
+      // Instant paint from the list cache, before the background fetch
+      // has had a chance to resolve.
+      expect(provider.selectedOpportunity?.title, 'Cached Title');
+
+      await future;
+
+      // The background fetch always runs (even on a cache hit) and its
+      // result always wins once it lands -- Apply-gating fields must
+      // never stay pinned to a stale list-cache copy.
+      expect(provider.selectedOpportunity?.title, 'Fresh Title');
+      expect(repository.getPublicOpportunityCallCount, 1);
+    },
+  );
+
+  test(
+    'a stale cached copy with no eligible-majors restriction is replaced by '
+    'a fresh copy that has one -- regression test for the reported bug',
+    () async {
+      // The list was fetched before the Organization added an Eligible
+      // Majors restriction -- the cached copy still shows unrestricted.
+      repository.listResult = PaginatedResult(
+        items: [
+          OpportunityModel(
+            id: 1,
+            title: 'Backend Developer',
+            description: 'A great opportunity.',
+            opportunityType: 'job',
+            employmentType: 'full_time',
+            workMode: 'remote',
+            experienceLevel: 'junior',
+            positionsAvailable: 1,
+            status: 'open',
+            eligibleMajors: const [],
+          ),
+        ],
+        currentPage: 1,
+        lastPage: 1,
+        total: 1,
+      );
+      await provider.loadOpportunities();
+      expect(provider.selectedOpportunity, isNull);
+
+      // The backend's current truth now has an explicit restriction.
+      repository.getResult = OpportunityModel(
+        id: 1,
+        title: 'Backend Developer',
+        description: 'A great opportunity.',
+        opportunityType: 'job',
+        employmentType: 'full_time',
+        workMode: 'remote',
+        experienceLevel: 'junior',
+        positionsAvailable: 1,
+        status: 'open',
+        eligibleMajors: const ['Computer Engineering'],
+      );
+
       await provider.loadOpportunityDetails(1);
 
-      expect(provider.selectedOpportunity?.title, 'Cached Title');
-      expect(repository.getPublicOpportunityCallCount, 0);
+      expect(
+        provider.selectedOpportunity?.eligibleMajors,
+        ['Computer Engineering'],
+      );
     },
   );
 

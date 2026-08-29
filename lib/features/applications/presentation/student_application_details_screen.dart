@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_motion.dart';
@@ -21,6 +20,8 @@ import '../../../providers/student_assessment_provider.dart';
 import '../../../providers/student_offer_provider.dart';
 import '../../../routes/app_routes.dart';
 import '../../assessments/presentation/assessment_display.dart';
+import '../../assessments/presentation/assessment_info_tile.dart';
+import '../../assessments/presentation/meeting_link_cta.dart';
 import '../../offers/presentation/offer_display.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
 import 'application_display.dart';
@@ -1348,6 +1349,14 @@ class _DetailsSkeleton extends StatelessWidget {
 /// yet (`pending`/`reviewed`), hasn't necessarily reached that stage
 /// (`shortlisted`), or has already moved past it with nothing on record
 /// (`accepted`/`rejected`/`withdrawn`) — none of those are errors.
+///
+/// **Phase 10A.3**: renders the full Assessment history, one card per
+/// entry, oldest first — a completed Quiz stage and a later Interview
+/// stage are both shown, sequentially, never one replacing the other. A
+/// student must never be left thinking a completed Quiz "disappeared"
+/// once the organization advances them to an Interview; each stage keeps
+/// its own card, its own status, and (for a Quiz) its own hidden/released
+/// result exactly as Phase 10A.2 already governs.
 class _StudentAssessmentSection extends StatelessWidget {
   const _StudentAssessmentSection({required this.application});
 
@@ -1358,11 +1367,21 @@ class _StudentAssessmentSection extends StatelessWidget {
     final provider = context.watch<StudentAssessmentProvider>();
 
     if (provider.hasAssessmentFor(application.id)) {
+      final assessments = provider.assessments;
       return Padding(
         padding: const EdgeInsets.only(bottom: AppSpacing.md),
-        child: _StudentAssessmentDetailsCard(
-          assessment: provider.assessment!,
-          applicationId: application.id,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final assessment in assessments) ...[
+              _StudentAssessmentDetailsCard(
+                assessment: assessment,
+                applicationId: application.id,
+              ),
+              if (assessment != assessments.last)
+                const SizedBox(height: AppSpacing.sm),
+            ],
+          ],
         ),
       );
     }
@@ -1560,102 +1579,6 @@ class _AssessmentTypeHeader extends StatelessWidget {
   }
 }
 
-/// A compact icon + label + value tile — the shared building block for
-/// both the Interview (Date/Time/Duration/attendance-detail) and Quiz
-/// (Quiz Title/Passing Score/Time Limit/Questions) summaries, replacing
-/// the old plain label/value row throughout this section.
-class _AssessmentInfoTile extends StatelessWidget {
-  const _AssessmentInfoTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: AppRadius.mediumRadius,
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: AppColors.primary),
-          const SizedBox(width: AppSpacing.xs),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label,
-                  style: textTheme.labelSmall?.copyWith(
-                    color: AppColors.textMuted,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  value,
-                  style: textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Arranges [_AssessmentInfoTile]s in a responsive grid (up to 3 columns
-/// on wide layouts, fewer on narrow ones) — reflows without overflow at
-/// any of this app's breakpoints, matching the pattern already
-/// established by `StudentProfileScreen`'s own academic-info tiles.
-class _AssessmentTileGrid extends StatelessWidget {
-  const _AssessmentTileGrid({required this.tiles});
-
-  final List<Widget> tiles;
-
-  @override
-  Widget build(BuildContext context) {
-    if (tiles.isEmpty) return const SizedBox.shrink();
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 420
-            ? 3
-            : constraints.maxWidth >= 260
-            ? 2
-            : 1;
-        const spacing = AppSpacing.sm;
-        final tileWidth =
-            (constraints.maxWidth - spacing * (columns - 1)) / columns;
-
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: [
-            for (final tile in tiles) SizedBox(width: tileWidth, child: tile),
-          ],
-        );
-      },
-    );
-  }
-}
-
 /// Interview-specific detail — student-safe fields only. Deliberately never
 /// reads [InterviewModel.interviewerEmail], [InterviewModel.companyFeedback],
 /// [InterviewModel.rating], or [InterviewModel.decision]: those exist on the
@@ -1679,26 +1602,26 @@ class _StudentInterviewDetails extends StatelessWidget {
     final notes = cleanDisplayText(interview.notes);
     final isOnline = interview.interviewType == 'online';
     final validMeetingUri = isOnline && meetingLink != null
-        ? _validHttpUri(meetingLink)
+        ? validHttpUri(meetingLink)
         : null;
 
     // Date/Time/Duration are genuinely optional — omitted entirely (not
     // "Not specified") when absent, per this phase's own tile guidance.
     final infoTiles = <Widget>[
       if (interview.scheduledAt != null) ...[
-        _AssessmentInfoTile(
+        AssessmentInfoTile(
           icon: Icons.calendar_today_outlined,
           label: 'Date',
           value: formatDate(interview.scheduledAt!),
         ),
-        _AssessmentInfoTile(
+        AssessmentInfoTile(
           icon: Icons.access_time_rounded,
           label: 'Time',
           value: formatTime(interview.scheduledAt!),
         ),
       ],
       if (interview.durationMinutes != null)
-        _AssessmentInfoTile(
+        AssessmentInfoTile(
           icon: Icons.timer_outlined,
           label: 'Duration',
           value: '${interview.durationMinutes} minutes',
@@ -1709,7 +1632,7 @@ class _StudentInterviewDetails extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (infoTiles.isNotEmpty) ...[
-          _AssessmentTileGrid(tiles: infoTiles),
+          AssessmentTileGrid(tiles: infoTiles),
           const SizedBox(height: AppSpacing.sm),
         ],
         // Exactly one attendance-detail element, matching whichever field
@@ -1720,10 +1643,10 @@ class _StudentInterviewDetails extends StatelessWidget {
         // placeholder — never fabricate a URL that isn't there.
         if (isOnline)
           validMeetingUri != null
-              ? _MeetingLinkCta(uri: validMeetingUri, rawLink: meetingLink!)
-              : const _MeetingLinkPlaceholder()
+              ? MeetingLinkCta(uri: validMeetingUri, rawLink: meetingLink!)
+              : const MeetingLinkPlaceholder()
         else
-          _AssessmentInfoTile(
+          AssessmentInfoTile(
             icon: interview.interviewType == 'phone'
                 ? Icons.phone_outlined
                 : Icons.location_on_outlined,
@@ -1812,183 +1735,6 @@ class _StudentInterviewDetails extends StatelessWidget {
   }
 }
 
-/// Parses [link] into a launchable `http`/`https` [Uri], or `null` if it's
-/// malformed/legacy data that can't safely be opened — the caller falls
-/// back to a plain, non-clickable tile instead of crashing or offering a
-/// dead CTA. `Uri.tryParse` alone is too permissive (it happily parses
-/// almost any string), so scheme and host are checked explicitly.
-Uri? _validHttpUri(String link) {
-  final uri = Uri.tryParse(link);
-  if (uri == null) return null;
-  if (uri.scheme != 'http' && uri.scheme != 'https') return null;
-  if (uri.host.isEmpty) return null;
-  return uri;
-}
-
-/// Shown instead of [_MeetingLinkCta] whenever an Online interview has no
-/// safely-launchable meeting link — missing, empty, or malformed. Never
-/// renders the raw field value (it may be garbage legacy data) and never
-/// invents a URL; just a calm, honest placeholder message.
-class _MeetingLinkPlaceholder extends StatelessWidget {
-  const _MeetingLinkPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: AppRadius.mediumRadius,
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.videocam_outlined, size: 18, color: AppColors.textMuted),
-          const SizedBox(width: AppSpacing.xs),
-          Expanded(
-            child: Text(
-              'Meeting link will appear here once provided.',
-              style: textTheme.bodySmall?.copyWith(
-                color: AppColors.textSecondary,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A real, working "Open Meeting Link" action for Online interviews —
-/// launches [uri] via `url_launcher` (UI Phase 4.3; no other URL-launch
-/// capability existed anywhere in this app before this phase). The raw
-/// link stays visible underneath as small, selectable/copyable text — the
-/// CTA is the primary interaction, never a naked URL, but the real value
-/// is never hidden either.
-class _MeetingLinkCta extends StatefulWidget {
-  const _MeetingLinkCta({required this.uri, required this.rawLink});
-
-  final Uri uri;
-  final String rawLink;
-
-  @override
-  State<_MeetingLinkCta> createState() => _MeetingLinkCtaState();
-}
-
-class _MeetingLinkCtaState extends State<_MeetingLinkCta> {
-  bool _hovered = false;
-  bool _launching = false;
-
-  Future<void> _open() async {
-    setState(() => _launching = true);
-    var launched = false;
-    try {
-      launched = await launchUrl(
-        widget.uri,
-        mode: LaunchMode.externalApplication,
-      );
-    } catch (_) {
-      launched = false;
-    }
-    if (!mounted) return;
-    setState(() => _launching = false);
-    if (!launched) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open the meeting link.')),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Meeting Link',
-          style: textTheme.labelSmall?.copyWith(
-            color: AppColors.textMuted,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xxs),
-        MouseRegion(
-          onEnter: (_) => setState(() => _hovered = true),
-          onExit: (_) => setState(() => _hovered = false),
-          child: Semantics(
-            button: true,
-            label: 'Open Meeting Link',
-            child: InkWell(
-              onTap: _launching ? null : _open,
-              borderRadius: AppRadius.mediumRadius,
-              child: AnimatedContainer(
-                duration: AppMotion.reduced(context, AppMotion.fast),
-                curve: AppMotion.standard,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md,
-                  vertical: AppSpacing.sm,
-                ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [AppColors.primary, AppColors.primaryDark],
-                  ),
-                  borderRadius: AppRadius.mediumRadius,
-                  boxShadow: _hovered ? AppShadows.card : const [],
-                ),
-                transform: Matrix4.translationValues(0, _hovered ? -1 : 0, 0),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.videocam_outlined,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    const Expanded(
-                      child: Text(
-                        'Open Meeting Link',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (_launching)
-                      const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    else
-                      const Icon(
-                        Icons.north_east_rounded,
-                        color: Colors.white,
-                        size: 16,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xxs),
-        SelectableText(
-          widget.rawLink,
-          style: textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
-        ),
-      ],
-    );
-  }
-}
-
 /// Quiz-specific detail for `assessment.type == 'quiz'` — a compact quiz
 /// summary (title, passing score, time limit, question count) plus a
 /// single Open Quiz action while the quiz is published and not yet
@@ -2046,38 +1792,125 @@ class _StudentQuizDetails extends StatelessWidget {
       );
     }
 
+    // Phase 10A.4B addendum — this candidate's own frozen window, real and
+    // truthful the moment they're advanced (never merely "the quiz was
+    // published"). `null`/`null` means no gating at all (legacy quiz),
+    // which falls straight through to the normal Open Quiz card below,
+    // exactly matching pre-addendum behavior.
+    final availableAt = assessment.availableAt;
+    final dueAt = assessment.dueAt;
+    final now = DateTime.now();
+
+    if (availableAt != null && now.isBefore(availableAt)) {
+      return _QuizTimingCard(
+        icon: Icons.hourglass_top_outlined,
+        title: 'Assessment Upcoming',
+        message:
+            'You have been selected for "${quiz.title}". It becomes '
+            'available on ${formatDateTime(availableAt)}'
+            '${dueAt != null ? ', with a deadline of ${formatDateTime(dueAt)}' : ''}.',
+      );
+    }
+
+    if (dueAt != null && now.isAfter(dueAt)) {
+      return _QuizTimingCard(
+        icon: Icons.event_busy_outlined,
+        title: 'Assessment Deadline Passed',
+        message:
+            'The submission deadline for "${quiz.title}" '
+            '(${formatDateTime(dueAt)}) has passed.',
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _AssessmentTileGrid(
+        AssessmentTileGrid(
           tiles: [
-            _AssessmentInfoTile(
+            AssessmentInfoTile(
               icon: Icons.quiz_outlined,
               label: 'Quiz Title',
               value: quiz.title,
             ),
-            _AssessmentInfoTile(
+            AssessmentInfoTile(
               icon: Icons.flag_outlined,
               label: 'Passing Score',
               value: '${quiz.passingScore}%',
             ),
-            _AssessmentInfoTile(
+            AssessmentInfoTile(
               icon: Icons.timer_outlined,
               label: 'Time Limit',
               value: quiz.timeLimitMinutes != null
                   ? '${quiz.timeLimitMinutes} minutes'
                   : 'No time limit',
             ),
-            _AssessmentInfoTile(
+            AssessmentInfoTile(
               icon: Icons.checklist_outlined,
               label: 'Questions',
               value: '${quiz.questions.length}',
             ),
+            if (dueAt != null)
+              AssessmentInfoTile(
+                icon: Icons.event_outlined,
+                label: 'Deadline',
+                value: formatDateTime(dueAt),
+              ),
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
         PrimaryButton(label: 'Open Quiz', onPressed: () => _openQuiz(context)),
       ],
+    );
+  }
+}
+
+/// Phase 10A.4B addendum — the Upcoming/Deadline Passed states of
+/// [_StudentQuizDetails], both of which show real, truthful timing instead
+/// of the normal quiz-summary tiles + Open Quiz action. Never offers an
+/// action of its own — a Student who taps into a card in either state has
+/// nothing to do yet (or nothing left to do); [StudentQuizScreen] itself
+/// independently re-derives and enforces the same state if reached
+/// directly (e.g. via a stale link), so this card is a truthful preview,
+/// not the real gate.
+class _QuizTimingCard extends StatelessWidget {
+  const _QuizTimingCard({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: AppColors.textSecondary),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: textTheme.titleSmall),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  message,
+                  style: textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

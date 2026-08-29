@@ -28,3 +28,11 @@ String formatTime(DateTime date) {
   final minute = date.minute.toString().padLeft(2, '0');
   return '$hour12:$minute $period';
 }
+
+/// Formats a [DateTime] as e.g. "Jan 15, 2027 at 2:05 PM" — [formatDate]
+/// and [formatTime] combined, for the one-line timestamps the Phase
+/// 10A.4B addendum's availability/deadline UI needs (e.g. "Available Aug
+/// 28, 2026 at 10:00 AM").
+String formatDateTime(DateTime date) {
+  return '${formatDate(date)} at ${formatTime(date)}';
+}

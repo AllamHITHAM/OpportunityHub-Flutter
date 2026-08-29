@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
+import 'package:opportunityhub_flutter/core/utils/document_file_open_result.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_education_verifications_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_education_verification_model.dart';
@@ -65,8 +66,9 @@ class _FakeAdminEducationVerificationsRepository
   final List<int> rejectedIds = [];
   final List<String> rejectReasons = [];
 
-  Uint8List? downloadResult;
+  EducationVerificationDocument? downloadResult;
   ApiException? downloadError;
+  Duration downloadDelay = Duration.zero;
   int downloadCallCount = 0;
 
   @override
@@ -96,10 +98,46 @@ class _FakeAdminEducationVerificationsRepository
   }
 
   @override
-  Future<Uint8List> downloadDocument(int verificationId) async {
+  Future<EducationVerificationDocument> downloadDocument(
+    int verificationId,
+  ) async {
     downloadCallCount++;
+    if (downloadDelay > Duration.zero) {
+      await Future<void>.delayed(downloadDelay);
+    }
     if (downloadError != null) throw downloadError!;
-    return downloadResult ?? Uint8List.fromList([0x25, 0x50, 0x44, 0x46]);
+    return downloadResult ??
+        EducationVerificationDocument(
+          bytes: Uint8List.fromList([0x25, 0x50, 0x44, 0x46]),
+          contentType: 'application/pdf',
+        );
+  }
+}
+
+/// A fake platform document opener (Web blob-tab / native `open_filex`) —
+/// injected in place of the real `document_file_opener.dart` so these
+/// tests can assert the real orchestration (fetch bytes → classify →
+/// hand off → real success/failure) without a real browser or device.
+/// Configurable to simulate the platform reporting a real failure.
+class _FakeDocumentFileAction {
+  _FakeDocumentFileAction();
+
+  DocumentFileOpenResult result = const DocumentFileOpenResult(success: true);
+  int callCount = 0;
+  Uint8List? lastBytes;
+  String? lastFileName;
+  String? lastMimeType;
+
+  Future<DocumentFileOpenResult> call(
+    Uint8List bytes,
+    String fileName,
+    String mimeType,
+  ) async {
+    callCount++;
+    lastBytes = bytes;
+    lastFileName = fileName;
+    lastMimeType = mimeType;
+    return result;
   }
 }
 
@@ -237,21 +275,173 @@ void main() {
     });
   });
 
-  group('downloadDocument', () {
-    test('returns bytes on success', () async {
-      final repository = _FakeAdminEducationVerificationsRepository();
+  group('viewDocument', () {
+    test('a PDF is handed to the platform opener; success reports opened, '
+        'no image bytes', () async {
+      final repository = _FakeAdminEducationVerificationsRepository()
+        ..downloadResult = EducationVerificationDocument(
+          bytes: Uint8List.fromList([1, 2, 3]),
+          contentType: 'application/pdf',
+        );
+      final fakeView = _FakeDocumentFileAction();
+      final provider = AdminEducationVerificationsProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+        viewDocumentFile: fakeView.call,
+      );
+
+      final result = await provider.viewDocument(1);
+
+      expect(result.success, isTrue);
+      expect(result.imageBytes, isNull);
+      expect(fakeView.callCount, 1);
+      expect(fakeView.lastBytes, [1, 2, 3]);
+      expect(fakeView.lastMimeType, 'application/pdf');
+    });
+
+    test(
+      'never claims success merely because bytes were fetched — a blocked '
+      'popup/no viewer app is reported honestly',
+      () async {
+        final repository = _FakeAdminEducationVerificationsRepository()
+          ..downloadResult = EducationVerificationDocument(
+            bytes: Uint8List.fromList([1, 2, 3]),
+            contentType: 'application/pdf',
+          );
+        final fakeView = _FakeDocumentFileAction()
+          ..result = const DocumentFileOpenResult(
+            success: false,
+            errorMessage:
+                "Couldn't open the document — your browser may have "
+                'blocked the new tab.',
+          );
+        final provider = AdminEducationVerificationsProvider(
+          repository: repository,
+          authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+          viewDocumentFile: fakeView.call,
+        );
+
+        final result = await provider.viewDocument(1);
+
+        expect(result.success, isFalse);
+        expect(
+          result.errorMessage,
+          "Couldn't open the document — your browser may have blocked "
+          'the new tab.',
+        );
+      },
+    );
+
+    test(
+      'an image content-type hands the bytes back for an in-app preview, '
+      'without invoking the platform opener at all',
+      () async {
+        final imageBytes = Uint8List.fromList([0x89, 0x50, 0x4e, 0x47]);
+        final repository = _FakeAdminEducationVerificationsRepository()
+          ..downloadResult = EducationVerificationDocument(
+            bytes: imageBytes,
+            contentType: 'image/png',
+          );
+        final fakeView = _FakeDocumentFileAction();
+        final provider = AdminEducationVerificationsProvider(
+          repository: repository,
+          authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+          viewDocumentFile: fakeView.call,
+        );
+
+        final result = await provider.viewDocument(1);
+
+        expect(result.success, isTrue);
+        expect(result.imageBytes, imageBytes);
+        expect(fakeView.callCount, 0);
+      },
+    );
+
+    test('an unsupported content-type reports it, without attempting to '
+        'open anything', () async {
+      final repository = _FakeAdminEducationVerificationsRepository()
+        ..downloadResult = EducationVerificationDocument(
+          bytes: Uint8List.fromList([1, 2, 3]),
+          contentType: 'application/msword',
+        );
+      final fakeView = _FakeDocumentFileAction();
+      final provider = AdminEducationVerificationsProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+        viewDocumentFile: fakeView.call,
+      );
+
+      final result = await provider.viewDocument(1);
+
+      expect(result.success, isFalse);
+      expect(result.imageBytes, isNull);
+      expect(result.unsupportedContentType, 'application/msword');
+      expect(fakeView.callCount, 0);
+    });
+
+    test('a missing document (404) reports the backend message, no crash', () async {
+      final repository = _FakeAdminEducationVerificationsRepository()
+        ..downloadError = ApiException(
+          'Education verification document not found',
+          statusCode: 404,
+        );
       final provider = AdminEducationVerificationsProvider(
         repository: repository,
         authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
       );
 
-      final bytes = await provider.downloadDocument(1);
+      final result = await provider.viewDocument(1);
 
-      expect(bytes, isNotNull);
-      expect(repository.downloadCallCount, 1);
+      expect(result.success, isFalse);
+      expect(result.errorMessage, 'Education verification document not found');
     });
 
-    test('sets downloadErrorMessage on failure', () async {
+    test('a duplicate in-flight view for the same id is ignored', () async {
+      final repository = _FakeAdminEducationVerificationsRepository()
+        ..downloadResult = EducationVerificationDocument(
+          bytes: Uint8List.fromList([1, 2, 3]),
+          contentType: 'application/pdf',
+        )
+        ..downloadDelay = const Duration(milliseconds: 50);
+      final provider = AdminEducationVerificationsProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+        viewDocumentFile: _FakeDocumentFileAction().call,
+      );
+
+      final results = await Future.wait([
+        provider.viewDocument(1),
+        provider.viewDocument(1),
+      ]);
+
+      expect(repository.downloadCallCount, 1);
+      expect(results.where((r) => r.success), hasLength(1));
+    });
+  });
+
+  group('downloadDocument (fallback)', () {
+    test('returns true and invokes the platform download action on success', () async {
+      final repository = _FakeAdminEducationVerificationsRepository()
+        ..downloadResult = EducationVerificationDocument(
+          bytes: Uint8List.fromList([1, 2, 3]),
+          contentType: 'application/msword',
+        );
+      final fakeDownload = _FakeDocumentFileAction();
+      final provider = AdminEducationVerificationsProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+        downloadDocumentFile: fakeDownload.call,
+      );
+
+      final success = await provider.downloadDocument(1);
+
+      expect(success, isTrue);
+      expect(repository.downloadCallCount, 1);
+      expect(fakeDownload.callCount, 1);
+      expect(fakeDownload.lastFileName, 'education-verification-1.bin');
+    });
+
+    test('sets downloadErrorMessage on a backend failure', () async {
       final repository = _FakeAdminEducationVerificationsRepository()
         ..downloadError = ApiException('Document not found.', statusCode: 404);
       final provider = AdminEducationVerificationsProvider(
@@ -259,10 +449,33 @@ void main() {
         authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
       );
 
-      final bytes = await provider.downloadDocument(1);
+      final success = await provider.downloadDocument(1);
 
-      expect(bytes, isNull);
+      expect(success, isFalse);
       expect(provider.downloadErrorMessage, 'Document not found.');
+    });
+
+    test('never claims success merely because bytes were fetched', () async {
+      final repository = _FakeAdminEducationVerificationsRepository()
+        ..downloadResult = EducationVerificationDocument(
+          bytes: Uint8List.fromList([1, 2, 3]),
+          contentType: 'application/pdf',
+        );
+      final fakeDownload = _FakeDocumentFileAction()
+        ..result = const DocumentFileOpenResult(
+          success: false,
+          errorMessage: "Couldn't download the document.",
+        );
+      final provider = AdminEducationVerificationsProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+        downloadDocumentFile: fakeDownload.call,
+      );
+
+      final success = await provider.downloadDocument(1);
+
+      expect(success, isFalse);
+      expect(provider.downloadErrorMessage, "Couldn't download the document.");
     });
   });
 
@@ -284,6 +497,7 @@ void main() {
     expect(provider.isLoading, isFalse);
     expect(provider.errorMessage, isNull);
     expect(provider.actionErrorMessage, isNull);
+    expect(provider.viewErrorMessage, isNull);
     expect(provider.downloadErrorMessage, isNull);
     expect(provider.busyIds, isEmpty);
   });

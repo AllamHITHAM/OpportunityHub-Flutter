@@ -10,11 +10,14 @@ import 'package:provider/provider.dart';
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
+import 'package:opportunityhub_flutter/core/theme/app_colors.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
+import 'package:opportunityhub_flutter/features/admin/data/admin_education_verifications_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_organizations_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_skill_suggestions_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_skills_repository.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_users_repository.dart';
+import 'package:opportunityhub_flutter/features/admin/presentation/admin_education_verifications_screen.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_home_screen.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_organizations_screen.dart';
 import 'package:opportunityhub_flutter/features/admin/presentation/admin_skills_screen.dart';
@@ -22,12 +25,14 @@ import 'package:opportunityhub_flutter/features/admin/presentation/admin_users_s
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
+import 'package:opportunityhub_flutter/models/admin_education_verification_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/models/skill_suggestion_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
+import 'package:opportunityhub_flutter/providers/admin_education_verifications_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_organizations_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_skill_suggestions_provider.dart';
 import 'package:opportunityhub_flutter/providers/admin_skills_provider.dart';
@@ -45,6 +50,8 @@ class _FakeAuthRepository extends AuthRepository {
       );
 
   int logoutCallCount = 0;
+  int resendVerificationCallCount = 0;
+  ApiException? resendVerificationError;
 
   @override
   Future<String?> getSavedToken() async => null;
@@ -52,6 +59,12 @@ class _FakeAuthRepository extends AuthRepository {
   @override
   Future<void> logout() async {
     logoutCallCount++;
+  }
+
+  @override
+  Future<void> resendVerificationEmail() async {
+    resendVerificationCallCount++;
+    if (resendVerificationError != null) throw resendVerificationError!;
   }
 }
 
@@ -154,6 +167,16 @@ class _FakeNotificationRepository extends NotificationRepository {
   Future<List<NotificationModel>> getNotifications() async => listResult;
 }
 
+class _FakeAdminEducationVerificationsRepository
+    extends AdminEducationVerificationsRepository {
+  _FakeAdminEducationVerificationsRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<AdminEducationVerificationModel>> getVerifications() async =>
+      [];
+}
+
 class _Providers {
   _Providers({
     required this.auth,
@@ -166,10 +189,10 @@ class _Providers {
   final NotificationProvider notifications;
 }
 
-/// A router with /admin, /admin/users, /admin/organizations, and
-/// /admin/skills registered, matching the real AppRouter's route table —
-/// needed now that "Manage Users", "Manage Organizations", and "Manage
-/// Skills" all actually navigate.
+/// A router with /admin, /admin/users, /admin/organizations, /admin/skills,
+/// and /admin/education-verifications registered, matching the real
+/// AppRouter's route table — needed now that every "Manage"/"Education
+/// Verifications" entry actually navigates.
 GoRouter _adminRouter() {
   return GoRouter(
     initialLocation: '/admin',
@@ -188,6 +211,10 @@ GoRouter _adminRouter() {
         builder: (_, _) => const AdminSkillsScreen(),
       ),
       GoRoute(
+        path: AppRoutes.adminEducationVerifications,
+        builder: (_, _) => const AdminEducationVerificationsScreen(),
+      ),
+      GoRoute(
         path: AppRoutes.notifications,
         builder: (_, _) => const Scaffold(body: Text('NOTIFICATIONS_SCREEN')),
       ),
@@ -200,14 +227,21 @@ Future<_Providers> _pumpScreen(
   required AdminDashboardRepository repository,
   Size size = const Size(420, 1200),
   List<NotificationModel> notificationListResult = const [],
+  bool dark = false,
+  UserModel adminUser = _adminUser,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
 
+  if (dark) {
+    AppColors.updateBrightness(Brightness.dark);
+    addTearDown(() => AppColors.updateBrightness(Brightness.light));
+  }
+
   final authProvider = AuthProvider(authRepository: _FakeAuthRepository())
-    ..user = _adminUser;
+    ..user = adminUser;
   final dashboardProvider = AdminDashboardProvider(
     repository: repository,
     authProvider: authProvider,
@@ -230,6 +264,10 @@ Future<_Providers> _pumpScreen(
   );
   final notificationProvider = NotificationProvider(
     repository: _FakeNotificationRepository(listResult: notificationListResult),
+    authProvider: authProvider,
+  );
+  final educationVerificationsProvider = AdminEducationVerificationsProvider(
+    repository: _FakeAdminEducationVerificationsRepository(),
     authProvider: authProvider,
   );
 
@@ -255,10 +293,13 @@ Future<_Providers> _pumpScreen(
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
         ),
+        ChangeNotifierProvider<AdminEducationVerificationsProvider>.value(
+          value: educationVerificationsProvider,
+        ),
         ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
       ],
       child: MaterialApp.router(
-        theme: AppTheme.lightTheme,
+        theme: dark ? AppTheme.darkTheme : AppTheme.lightTheme,
         routerConfig: router,
       ),
     ),
@@ -423,8 +464,12 @@ void main() {
     final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
     final providers = await _pumpScreen(tester, repository: repository);
 
-    await tester.ensureVisible(find.widgetWithText(OutlinedButton, 'Logout'));
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Logout'));
+    // Admin Dashboard Final UI Polish: Logout is now a restrained
+    // `TextButton.icon` (matching OrganizationHomeScreen's own logout
+    // treatment), not a full-width button -- the underlying behavior
+    // this test verifies is unchanged.
+    await tester.ensureVisible(find.widgetWithText(TextButton, 'Logout'));
+    await tester.tap(find.widgetWithText(TextButton, 'Logout'));
     // Not `pumpAndSettle()`: logging out resets AdminDashboardProvider
     // (via its AuthProvider listener), and with no stats left to show and
     // no redirect logic in this isolated router (the real AppRouter would
@@ -642,5 +687,234 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('NOTIFICATIONS_SCREEN'), findsOneWidget);
+  });
+
+  testWidgets(
+    'Education Verifications is enabled and navigates to '
+    '/admin/education-verifications',
+    (tester) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.text('Education Verifications'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Education Verifications'));
+      await tester.tap(find.text('Education Verifications'));
+      await tester.pumpAndSettle();
+
+      // Now on AdminEducationVerificationsScreen -- its own AppBar title
+      // is also "Education Verifications", so this only proves
+      // navigation happened when combined with the dashboard's own title
+      // being gone.
+      expect(find.text('Education Verifications'), findsOneWidget);
+      expect(find.text('Admin Dashboard'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  group('Email verification banner (Admin Dashboard Final UI Polish)', () {
+    testWidgets(
+      'shows for a genuinely unverified Admin, and Resend works',
+      (tester) async {
+        final repository = _FakeAdminDashboardRepository()
+          ..loadResult = _stats();
+        // `_adminUser` has no `emailVerified: true` override -- a real,
+        // supported unverified-Admin state, not a special case invented
+        // for this test.
+        final providers = await _pumpScreen(tester, repository: repository);
+
+        expect(find.text('Email not verified'), findsOneWidget);
+        expect(find.text('Resend'), findsOneWidget);
+
+        await tester.tap(find.text('Resend'));
+        await tester.pumpAndSettle();
+
+        expect(
+          (providers.auth.authRepository as _FakeAuthRepository)
+              .resendVerificationCallCount,
+          1,
+        );
+        expect(providers.auth.resendVerificationSucceeded, isTrue);
+      },
+    );
+
+    testWidgets('never shows for a verified Admin', (tester) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        adminUser: const UserModel(
+          id: 1,
+          name: 'Ada Admin',
+          email: 'ada@example.com',
+          role: 'admin',
+          status: 'active',
+          emailVerified: true,
+        ),
+      );
+
+      expect(find.text('Email not verified'), findsNothing);
+    });
+
+    testWidgets('a failed resend shows a real error, not a silent failure', (
+      tester,
+    ) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+      final providers = await _pumpScreen(tester, repository: repository);
+
+      (providers.auth.authRepository as _FakeAuthRepository)
+              .resendVerificationError =
+          ApiException('Could not send the email right now');
+
+      await tester.tap(find.text('Resend'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Could not send the email right now'),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('responsive / theming / motion (Admin Dashboard Final UI Polish)', () {
+    testWidgets('desktop viewport (>=1200) renders without overflow', (
+      tester,
+    ) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(1400, 900),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('900-1199 viewport renders without overflow', (tester) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(1000, 900),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('600-899 (tablet) viewport renders without overflow', (
+      tester,
+    ) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(700, 900),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a long Admin email wraps safely at a narrow phone width', (
+      tester,
+    ) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(320, 900),
+        adminUser: const UserModel(
+          id: 1,
+          name: 'Administrator With A Fairly Long Display Name',
+          email: 'administrator.with.a.very.long.email.address@example.com',
+          role: 'admin',
+          status: 'active',
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('renders correctly in Dark Mode', (tester) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+
+      await _pumpScreen(tester, repository: repository, dark: true);
+
+      expect(tester.takeException(), isNull);
+      // Semantic status is never color-only -- the real text labels are
+      // still present in Dark Mode too.
+      expect(find.text('Pending'), findsOneWidget);
+      expect(find.text('Approved'), findsOneWidget);
+      expect(find.text('Rejected'), findsOneWidget);
+    });
+
+    testWidgets('honors reduced motion without throwing', (tester) async {
+      final repository = _FakeAdminDashboardRepository()..loadResult = _stats();
+
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+
+      await _pumpScreen(tester, repository: repository);
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Overview'), findsOneWidget);
+    });
+  });
+
+  group('semantic status (Admin Dashboard Final UI Polish)', () {
+    testWidgets(
+      'every metric exposes a screen-reader label pairing its name and '
+      'real value',
+      (tester) async {
+        final repository = _FakeAdminDashboardRepository()
+          ..loadResult = _stats(pendingOrganizations: 3);
+        await _pumpScreen(tester, repository: repository);
+
+        // Asserts on the `Semantics` widget's own declared `label`
+        // property directly, rather than the rendered/merged
+        // `SemanticsNode` tree (which combines a `Semantics` label with
+        // its Text children's own auto-generated semantics in ways that
+        // are an unrelated implementation detail, not what this test
+        // cares about).
+        final labels = tester
+            .widgetList<Semantics>(find.byType(Semantics))
+            .map((s) => s.properties.label)
+            .whereType<String>()
+            .toSet();
+
+        expect(labels, contains('Pending, 3'));
+        expect(labels, contains('Approved, 4'));
+        expect(labels, contains('Rejected, 1'));
+      },
+    );
+
+    testWidgets(
+      'a nonzero Pending Organizations count still shows the real text '
+      'label, not color alone',
+      (tester) async {
+        final repository = _FakeAdminDashboardRepository()
+          ..loadResult = _stats(pendingOrganizations: 5);
+        await _pumpScreen(tester, repository: repository);
+
+        expect(find.text('Pending'), findsOneWidget);
+        expect(find.text('5'), findsOneWidget);
+      },
+    );
+
+    testWidgets('a zero Pending Organizations count renders normally too', (
+      tester,
+    ) async {
+      final repository = _FakeAdminDashboardRepository()
+        ..loadResult = _stats(pendingOrganizations: 0);
+      await _pumpScreen(tester, repository: repository);
+
+      expect(find.text('Pending'), findsOneWidget);
+      expect(find.text('0'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 }

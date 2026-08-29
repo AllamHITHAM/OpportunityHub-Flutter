@@ -97,6 +97,45 @@ void main() {
 
       expect(model.user, isNull);
     });
+
+    // Final Company Profile Manual-E2E Bug Fix: `logo_url` parsing --
+    // regression coverage for the real fix (the backend now returns
+    // `/api/media/...`, routed through Laravel/CORS, never the raw
+    // `/storage/...` symlink path that never actually rendered in a real
+    // browser). This model must parse and pass through *whatever* real
+    // URL the backend returns, verbatim -- never rebuild, re-host, or
+    // hardcode any part of it.
+    test('a real logo_url in the current /api/media/ shape parses through '
+        'unmodified', () {
+      final json = {
+        'id': 1,
+        'organization_name': 'Acme Corp',
+        'organization_type': 'company',
+        'approval_status': 'approved',
+        'logo_url':
+            'http://127.0.0.1:8000/api/media/organization-logos/7/f57795a6-c133-45b4-9f8e-101d81aee7ea.jpg',
+      };
+
+      final model = OrganizationProfileModel.fromJson(json);
+
+      expect(
+        model.logoUrl,
+        'http://127.0.0.1:8000/api/media/organization-logos/7/f57795a6-c133-45b4-9f8e-101d81aee7ea.jpg',
+      );
+    });
+
+    test('a missing logo_url remains null (no logo uploaded yet)', () {
+      final json = {
+        'id': 1,
+        'organization_name': 'Acme Corp',
+        'organization_type': 'company',
+        'approval_status': 'approved',
+      };
+
+      final model = OrganizationProfileModel.fromJson(json);
+
+      expect(model.logoUrl, isNull);
+    });
   });
 
   group('constructor', () {

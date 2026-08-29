@@ -18,9 +18,12 @@ import 'features/candidates/data/candidate_repository.dart';
 import 'features/cv/data/cv_repository.dart';
 import 'features/education_verification/data/education_verification_repository.dart';
 import 'features/invitations/data/invitation_repository.dart';
+import 'features/locations/data/location_repository.dart';
+import 'features/messaging/data/conversation_repository.dart';
 import 'features/notifications/data/notification_repository.dart';
 import 'features/offers/data/offer_repository.dart';
 import 'features/opportunities/data/opportunity_repository.dart';
+import 'features/organization/data/organization_dashboard_repository.dart';
 import 'features/organization/data/organization_profile_repository.dart';
 import 'features/skills/data/student_skill_repository.dart';
 import 'features/student/data/student_profile_repository.dart';
@@ -32,13 +35,18 @@ import 'providers/admin_skills_provider.dart';
 import 'providers/admin_users_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/candidate_search_provider.dart';
+import 'providers/conversations_provider.dart';
+import 'providers/location_catalog_provider.dart';
 import 'providers/notification_provider.dart';
+import 'providers/opportunity_recommendations_provider.dart';
 import 'providers/organization_applications_provider.dart';
 import 'providers/organization_assessment_provider.dart';
+import 'providers/organization_dashboard_provider.dart';
 import 'providers/organization_match_analysis_provider.dart';
 import 'providers/organization_offer_provider.dart';
 import 'providers/organization_opportunities_provider.dart';
 import 'providers/organization_profile_provider.dart';
+import 'providers/organization_public_profile_provider.dart';
 import 'providers/organization_quiz_provider.dart';
 import 'providers/student_applications_provider.dart';
 import 'providers/student_assessment_provider.dart';
@@ -125,6 +133,18 @@ class MyApp extends StatelessWidget {
         ProxyProvider<ApiClient, OpportunityRepository>(
           update: (_, apiClient, _) =>
               OpportunityRepository(apiClient: apiClient),
+        ),
+        // Organization Public Profile phase: deliberately a plain
+        // ChangeNotifierProvider, not auth-proxied like the two Provider
+        // above -- it holds whichever organization's public profile is
+        // currently being *viewed* (by ID, reset explicitly when leaving
+        // that screen), never the signed-in user's own session state, so
+        // there's nothing here that needs to reset on sign-out.
+        ChangeNotifierProvider<OrganizationPublicProfileProvider>(
+          create: (context) => OrganizationPublicProfileProvider(
+            repository: context.read<OrganizationProfileRepository>(),
+            opportunityRepository: context.read<OpportunityRepository>(),
+          ),
         ),
         ChangeNotifierProxyProvider<
           AuthProvider,
@@ -227,6 +247,20 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, OrganizationOfferProvider>(
           create: (context) => OrganizationOfferProvider(
             repository: context.read<OfferRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, OrganizationDashboardRepository>(
+          update: (_, apiClient, _) =>
+              OrganizationDashboardRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<
+          AuthProvider,
+          OrganizationDashboardProvider
+        >(
+          create: (context) => OrganizationDashboardProvider(
+            repository: context.read<OrganizationDashboardRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,
@@ -341,8 +375,28 @@ class MyApp extends StatelessWidget {
           update: (_, apiClient, _) =>
               InvitationRepository(apiClient: apiClient),
         ),
+        ProxyProvider<ApiClient, LocationRepository>(
+          update: (_, apiClient, _) => LocationRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<LocationRepository, LocationCatalogProvider>(
+          create: (context) => LocationCatalogProvider(
+            repository: context.read<LocationRepository>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
         ChangeNotifierProxyProvider<AuthProvider, CandidateSearchProvider>(
           create: (context) => CandidateSearchProvider(
+            repository: context.read<CandidateRepository>(),
+            invitationRepository: context.read<InvitationRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ChangeNotifierProxyProvider<
+          AuthProvider,
+          OpportunityRecommendationsProvider
+        >(
+          create: (context) => OpportunityRecommendationsProvider(
             repository: context.read<CandidateRepository>(),
             invitationRepository: context.read<InvitationRepository>(),
             authProvider: context.read<AuthProvider>(),
@@ -363,6 +417,17 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProxyProvider<AuthProvider, NotificationProvider>(
           create: (context) => NotificationProvider(
             repository: context.read<NotificationRepository>(),
+            authProvider: context.read<AuthProvider>(),
+          ),
+          update: (_, _, previous) => previous!,
+        ),
+        ProxyProvider<ApiClient, ConversationRepository>(
+          update: (_, apiClient, _) =>
+              ConversationRepository(apiClient: apiClient),
+        ),
+        ChangeNotifierProxyProvider<AuthProvider, ConversationsProvider>(
+          create: (context) => ConversationsProvider(
+            repository: context.read<ConversationRepository>(),
             authProvider: context.read<AuthProvider>(),
           ),
           update: (_, _, previous) => previous!,

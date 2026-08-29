@@ -707,14 +707,14 @@ void main() {
     });
   });
 
-  group('getAssessmentForApplication', () {
-    test('uses the exact documented singular method and path', () async {
+  group('getAssessmentsForApplication', () {
+    test('uses the exact documented method and path', () async {
       final adapter = _FakeHttpClientAdapter((options) {
-        return _jsonResponse({'data': null}, 200);
+        return _jsonResponse({'data': <dynamic>[]}, 200);
       });
       final repository = _repositoryWithAdapter(adapter);
 
-      await repository.getAssessmentForApplication(5);
+      await repository.getAssessmentsForApplication(5);
 
       expect(adapter.lastRequest?.method, 'GET');
       expect(
@@ -723,40 +723,55 @@ void main() {
       );
     });
 
-    test('parses an existing assessment', () async {
+    test('parses the full assessment history, in the order returned', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': [_assessmentJson(), _assessmentJson(id: 2)],
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getAssessmentsForApplication(5);
+
+      expect(result, hasLength(2));
+      expect(result[0].id, 1);
+      expect(result[0].interview?.interviewType, 'online');
+      expect(result[1].id, 2);
+    });
+
+    test('returns an empty list when data is empty (no assessment yet)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({'data': <dynamic>[]}, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final result = await repository.getAssessmentsForApplication(5);
+
+      expect(result, isEmpty);
+    });
+
+    test('a non-list response never silently becomes an empty list', () async {
       final adapter = _FakeHttpClientAdapter((options) {
         return _jsonResponse({'data': _assessmentJson()}, 200);
       });
       final repository = _repositoryWithAdapter(adapter);
 
-      final result = await repository.getAssessmentForApplication(5);
-
-      expect(result, isNotNull);
-      expect(result!.id, 1);
-      expect(result.interview?.interviewType, 'online');
+      await expectLater(
+        repository.getAssessmentsForApplication(5),
+        throwsA(isA<TypeError>()),
+      );
     });
 
-    test('returns null when data is null (no assessment yet)', () async {
-      final adapter = _FakeHttpClientAdapter((options) {
-        return _jsonResponse({'data': null}, 200);
-      });
-      final repository = _repositoryWithAdapter(adapter);
-
-      final result = await repository.getAssessmentForApplication(5);
-
-      expect(result, isNull);
-    });
-
-    test('a non-null malformed response never silently becomes null', () async {
+    test('a malformed element never silently disappears from the list', () async {
       final adapter = _FakeHttpClientAdapter((options) {
         return _jsonResponse({
-          'data': ['not', 'an', 'object'],
+          'data': ['not an object'],
         }, 200);
       });
       final repository = _repositoryWithAdapter(adapter);
 
       await expectLater(
-        repository.getAssessmentForApplication(5),
+        repository.getAssessmentsForApplication(5),
         throwsA(isA<TypeError>()),
       );
     });
@@ -772,7 +787,7 @@ void main() {
       final repository = _repositoryWithAdapter(adapter);
 
       await expectLater(
-        repository.getAssessmentForApplication(5),
+        repository.getAssessmentsForApplication(5),
         throwsA(
           isA<ApiException>().having((e) => e.statusCode, 'statusCode', 401),
         ),
@@ -790,7 +805,7 @@ void main() {
       final repository = _repositoryWithAdapter(adapter);
 
       await expectLater(
-        repository.getAssessmentForApplication(5),
+        repository.getAssessmentsForApplication(5),
         throwsA(
           isA<ApiException>().having((e) => e.statusCode, 'statusCode', 403),
         ),
@@ -808,7 +823,7 @@ void main() {
       final repository = _repositoryWithAdapter(adapter);
 
       await expectLater(
-        repository.getAssessmentForApplication(5),
+        repository.getAssessmentsForApplication(5),
         throwsA(
           isA<ApiException>()
               .having((e) => e.statusCode, 'statusCode', 404)
@@ -1188,23 +1203,25 @@ void main() {
     );
   });
 
-  group('getStudentAssessmentForApplication', () {
-    test('finds the correct assessment by applicationId', () async {
+  group('getStudentAssessmentsForApplication', () {
+    test('finds every assessment matching applicationId, in order', () async {
       final adapter = _FakeHttpClientAdapter((options) {
         return _jsonResponse({
           'data': [
             _studentAssessmentJson(id: 1, applicationId: 5),
             _studentAssessmentJson(id: 2, applicationId: 9),
+            _studentAssessmentJson(id: 3, applicationId: 9),
           ],
         }, 200);
       });
       final repository = _repositoryWithAdapter(adapter);
 
-      final result = await repository.getStudentAssessmentForApplication(9);
+      final result = await repository.getStudentAssessmentsForApplication(9);
 
-      expect(result, isNotNull);
-      expect(result!.id, 2);
-      expect(result.applicationId, 9);
+      expect(result, hasLength(2));
+      expect(result[0].id, 2);
+      expect(result[1].id, 3);
+      expect(result.every((a) => a.applicationId == 9), isTrue);
     });
 
     test('multiple assessments across different applications each resolve to '
@@ -1220,11 +1237,19 @@ void main() {
       });
       final repository = _repositoryWithAdapter(adapter);
 
-      expect((await repository.getStudentAssessmentForApplication(5))?.id, 1);
-      expect((await repository.getStudentAssessmentForApplication(12))?.id, 3);
+      expect(
+        (await repository.getStudentAssessmentsForApplication(5))
+            .map((a) => a.id),
+        [1],
+      );
+      expect(
+        (await repository.getStudentAssessmentsForApplication(12))
+            .map((a) => a.id),
+        [3],
+      );
     });
 
-    test('returns null when no assessment matches the applicationId', () async {
+    test('returns an empty list when no assessment matches the applicationId', () async {
       final adapter = _FakeHttpClientAdapter((options) {
         return _jsonResponse({
           'data': [_studentAssessmentJson(id: 1, applicationId: 5)],
@@ -1232,12 +1257,14 @@ void main() {
       });
       final repository = _repositoryWithAdapter(adapter);
 
-      final result = await repository.getStudentAssessmentForApplication(999);
+      final result = await repository.getStudentAssessmentsForApplication(
+        999,
+      );
 
-      expect(result, isNull);
+      expect(result, isEmpty);
     });
 
-    test('a malformed list propagates safely, never becomes null', () async {
+    test('a malformed list propagates safely, never becomes an empty list', () async {
       final adapter = _FakeHttpClientAdapter((options) {
         return _jsonResponse({
           'data': {'not': 'a list'},
@@ -1246,7 +1273,7 @@ void main() {
       final repository = _repositoryWithAdapter(adapter);
 
       await expectLater(
-        repository.getStudentAssessmentForApplication(5),
+        repository.getStudentAssessmentsForApplication(5),
         throwsA(isA<TypeError>()),
       );
     });

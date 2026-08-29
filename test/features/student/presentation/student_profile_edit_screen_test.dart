@@ -16,11 +16,14 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_colors.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
+import 'package:opportunityhub_flutter/features/locations/data/location_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/presentation/student_profile_edit_screen.dart';
+import 'package:opportunityhub_flutter/models/location_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/location_catalog_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/theme_provider.dart';
 
@@ -50,6 +53,8 @@ typedef _UpdateHandler =
       required int graduationYear,
       String? phone,
       String? bio,
+      int? currentLocationId,
+      List<int> availableLocationIds,
     });
 
 class _FakeStudentProfileRepository extends StudentProfileRepository {
@@ -59,6 +64,7 @@ class _FakeStudentProfileRepository extends StudentProfileRepository {
   StudentProfileModel? getProfileResult;
   _UpdateHandler? onUpdate;
   int updateCallCount = 0;
+  List<String>? lastInterestedIn;
 
   @override
   Future<StudentProfileModel?> getProfile() async => getProfileResult;
@@ -68,10 +74,14 @@ class _FakeStudentProfileRepository extends StudentProfileRepository {
     required String university,
     required String major,
     required int graduationYear,
+    required List<String> interestedIn,
     String? phone,
     String? bio,
+    int? currentLocationId,
+    List<int> availableLocationIds = const [],
   }) async {
     updateCallCount++;
+    lastInterestedIn = interestedIn;
     final handler = onUpdate;
     if (handler != null) {
       return handler(
@@ -80,16 +90,37 @@ class _FakeStudentProfileRepository extends StudentProfileRepository {
         graduationYear: graduationYear,
         phone: phone,
         bio: bio,
+        currentLocationId: currentLocationId,
+        availableLocationIds: availableLocationIds,
       );
     }
     return StudentProfileModel(
       id: 1,
+      interestedIn: ['job'],
       university: university,
       major: major,
       graduationYear: graduationYear,
       phone: phone,
       bio: bio,
     );
+  }
+}
+
+class _FakeLocationRepository extends LocationRepository {
+  _FakeLocationRepository({this.locations = const [], this.addResult})
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  List<LocationModel> locations;
+  LocationModel? addResult;
+  String? lastAddedName;
+
+  @override
+  Future<List<LocationModel>> getLocations() async => locations;
+
+  @override
+  Future<LocationModel> addLocation(String name) async {
+    lastAddedName = name;
+    return addResult ?? LocationModel(id: 999, canonicalName: name);
   }
 }
 
@@ -104,6 +135,8 @@ _pumpScreen(
   WidgetTester tester, {
   StudentProfileModel? initialProfile,
   _UpdateHandler? onUpdate,
+  List<LocationModel> locations = const [],
+  _FakeLocationRepository? locationRepository,
 }) async {
   addTearDown(() => AppColors.updateBrightness(Brightness.light));
 
@@ -124,6 +157,10 @@ _pumpScreen(
     repository: repository,
     authProvider: authProvider,
   )..profile = initialProfile;
+  final locationCatalogProvider = LocationCatalogProvider(
+    repository:
+        locationRepository ?? _FakeLocationRepository(locations: locations),
+  );
   final themeProvider = ThemeProvider(storage: _FakeThemePreferenceStorage());
   await themeProvider.initialize();
 
@@ -150,6 +187,9 @@ _pumpScreen(
         ChangeNotifierProvider<StudentProfileProvider>.value(
           value: studentProfileProvider,
         ),
+        ChangeNotifierProvider<LocationCatalogProvider>.value(
+          value: locationCatalogProvider,
+        ),
         ChangeNotifierProvider<ThemeProvider>.value(value: themeProvider),
       ],
       child: MaterialApp.router(
@@ -175,6 +215,7 @@ void main() {
       tester,
       initialProfile: const StudentProfileModel(
         id: 1,
+      interestedIn: ['job'],
         university: 'State University',
         major: 'Computer Science',
         graduationYear: 2027,
@@ -195,6 +236,7 @@ void main() {
       tester,
       initialProfile: const StudentProfileModel(
         id: 1,
+      interestedIn: ['job'],
         university: 'State University',
         major: 'Computer Science',
         graduationYear: 2027,
@@ -217,6 +259,7 @@ void main() {
       tester,
       initialProfile: const StudentProfileModel(
         id: 1,
+      interestedIn: ['job'],
         university: 'State University',
         major: 'Computer Science',
         graduationYear: 2027,
@@ -241,6 +284,7 @@ void main() {
       tester,
       initialProfile: const StudentProfileModel(
         id: 1,
+      interestedIn: ['job'],
         university: 'Old University',
         major: 'Old Major',
         graduationYear: 2026,
@@ -252,6 +296,8 @@ void main() {
             required graduationYear,
             phone,
             bio,
+            currentLocationId,
+            availableLocationIds = const [],
           }) async {
             sent = {
               'university': university,
@@ -262,6 +308,7 @@ void main() {
             };
             return StudentProfileModel(
               id: 1,
+      interestedIn: ['job'],
               university: university,
               major: major,
               graduationYear: graduationYear,
@@ -292,6 +339,7 @@ void main() {
         tester,
         initialProfile: const StudentProfileModel(
           id: 1,
+      interestedIn: ['job'],
           university: 'Old University',
           major: 'Old Major',
           graduationYear: 2026,
@@ -318,6 +366,7 @@ void main() {
         tester,
         initialProfile: const StudentProfileModel(
           id: 1,
+      interestedIn: ['job'],
           university: 'Old University',
           major: 'Old Major',
           graduationYear: 2026,
@@ -329,6 +378,8 @@ void main() {
               required graduationYear,
               phone,
               bio,
+              currentLocationId,
+            availableLocationIds = const [],
             }) async {
               throw ApiException(
                 'The given data was invalid.',
@@ -361,6 +412,7 @@ void main() {
         tester,
         initialProfile: const StudentProfileModel(
           id: 1,
+      interestedIn: ['job'],
           university: 'Old University',
           major: 'Old Major',
           graduationYear: 2026,
@@ -372,6 +424,8 @@ void main() {
               required graduationYear,
               phone,
               bio,
+              currentLocationId,
+            availableLocationIds = const [],
             }) async {
               throw ApiException('No internet connection.');
             },
@@ -394,6 +448,7 @@ void main() {
       tester,
       initialProfile: const StudentProfileModel(
         id: 1,
+      interestedIn: ['job'],
         university: 'State University',
         major: 'Computer Science',
         graduationYear: 2027,
@@ -407,10 +462,13 @@ void main() {
             required graduationYear,
             phone,
             bio,
+            currentLocationId,
+            availableLocationIds = const [],
           }) async {
             sent = {'phone': phone, 'bio': bio};
             return StudentProfileModel(
               id: 1,
+      interestedIn: ['job'],
               university: university,
               major: major,
               graduationYear: graduationYear,
@@ -436,6 +494,478 @@ void main() {
     expect(sent!['bio'], isNull);
   });
 
+  group('current location (Student Location Profile Patch)', () {
+    testWidgets('pre-fills the student\'s existing current location', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        initialProfile: const StudentProfileModel(
+          id: 1,
+      interestedIn: ['job'],
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+          currentLocation: LocationModel(id: 1, canonicalName: 'Jenin'),
+        ),
+        locations: const [
+          LocationModel(id: 1, canonicalName: 'Jenin'),
+          LocationModel(id: 2, canonicalName: 'Nablus'),
+        ],
+      );
+
+      expect(find.text('Jenin'), findsOneWidget);
+    });
+
+    testWidgets('changing and submitting sends the new current location', (
+      tester,
+    ) async {
+      int? sentCurrentLocationId;
+      await _pumpScreen(
+        tester,
+        initialProfile: const StudentProfileModel(
+          id: 1,
+      interestedIn: ['job'],
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+        ),
+        locations: const [
+          LocationModel(id: 1, canonicalName: 'Jenin'),
+          LocationModel(id: 2, canonicalName: 'Nablus'),
+        ],
+        onUpdate:
+            ({
+              required university,
+              required major,
+              required graduationYear,
+              phone,
+              bio,
+              currentLocationId,
+              availableLocationIds = const [],
+            }) async {
+              sentCurrentLocationId = currentLocationId;
+              return StudentProfileModel(
+                id: 1,
+      interestedIn: ['job'],
+                university: university,
+                major: major,
+                graduationYear: graduationYear,
+              );
+            },
+      );
+
+      final searchField = find.widgetWithText(
+        TextFormField,
+        'Current Location (optional)',
+      );
+      await tester.ensureVisible(searchField);
+      await tester.enterText(searchField, 'Nablus');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, 'Nablus'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Save Changes'));
+      await tester.tap(find.text('Save Changes'));
+      await tester.pumpAndSettle();
+
+      expect(sentCurrentLocationId, 2);
+    });
+
+    testWidgets(
+      'is independent from Available Work Locations -- setting one never '
+      'touches the other',
+      (tester) async {
+        Map<String, dynamic>? sent;
+        await _pumpScreen(
+          tester,
+          initialProfile: const StudentProfileModel(
+            id: 1,
+      interestedIn: ['job'],
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+            currentLocation: LocationModel(id: 1, canonicalName: 'Jenin'),
+            availableLocations: [LocationModel(id: 2, canonicalName: 'Nablus')],
+          ),
+          locations: const [
+            LocationModel(id: 1, canonicalName: 'Jenin'),
+            LocationModel(id: 2, canonicalName: 'Nablus'),
+          ],
+          onUpdate:
+              ({
+                required university,
+                required major,
+                required graduationYear,
+                phone,
+                bio,
+                currentLocationId,
+                availableLocationIds = const [],
+              }) async {
+                sent = {
+                  'current_location_id': currentLocationId,
+                  'available_location_ids': availableLocationIds,
+                };
+                return StudentProfileModel(
+                  id: 1,
+      interestedIn: ['job'],
+                  university: university,
+                  major: major,
+                  graduationYear: graduationYear,
+                );
+              },
+        );
+
+        await tester.ensureVisible(find.text('Save Changes'));
+        await tester.tap(find.text('Save Changes'));
+        await tester.pumpAndSettle();
+
+        expect(sent?['current_location_id'], 1);
+        expect(sent?['available_location_ids'], [2]);
+      },
+    );
+  });
+
+  group('available work locations (Phase O8.2)', () {
+    testWidgets(
+      'search suggestions come from the real canonical catalog, never '
+      'free text',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          initialProfile: const StudentProfileModel(
+            id: 1,
+      interestedIn: ['job'],
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+          ),
+          locations: const [
+            LocationModel(id: 1, canonicalName: 'Nablus'),
+            LocationModel(id: 2, canonicalName: 'Ramallah'),
+            LocationModel(id: 3, canonicalName: 'Jenin'),
+          ],
+        );
+
+        // Nothing is pre-selected, so no chip renders until the Student
+        // actually searches for and picks a real catalog entry.
+        expect(find.widgetWithText(FilterChip, 'Nablus'), findsNothing);
+
+        final searchField = find.widgetWithText(
+          TextFormField,
+          'Add a work location',
+        );
+        await tester.ensureVisible(searchField);
+        await tester.enterText(searchField, 'Nab');
+        await tester.pumpAndSettle();
+
+        expect(find.widgetWithText(ListTile, 'Nablus'), findsOneWidget);
+      },
+    );
+
+    testWidgets('pre-selects the student\'s existing available locations', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        initialProfile: const StudentProfileModel(
+          id: 1,
+      interestedIn: ['job'],
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+          availableLocations: [LocationModel(id: 1, canonicalName: 'Nablus')],
+        ),
+        locations: const [
+          LocationModel(id: 1, canonicalName: 'Nablus'),
+          LocationModel(id: 2, canonicalName: 'Ramallah'),
+        ],
+      );
+
+      final nablusChip = tester.widget<FilterChip>(
+        find.widgetWithText(FilterChip, 'Nablus'),
+      );
+      expect(nablusChip.selected, isTrue);
+      // Ramallah was never selected, so it isn't rendered as a chip at
+      // all -- only the search results would show it.
+      expect(find.widgetWithText(FilterChip, 'Ramallah'), findsNothing);
+    });
+
+    testWidgets('selecting multiple locations and submitting sends every ID', (
+      tester,
+    ) async {
+      List<int>? sentIds;
+      await _pumpScreen(
+        tester,
+        initialProfile: const StudentProfileModel(
+          id: 1,
+      interestedIn: ['job'],
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+        ),
+        locations: const [
+          LocationModel(id: 1, canonicalName: 'Nablus'),
+          LocationModel(id: 2, canonicalName: 'Ramallah'),
+        ],
+        onUpdate:
+            ({
+              required university,
+              required major,
+              required graduationYear,
+              phone,
+              bio,
+              currentLocationId,
+            availableLocationIds = const [],
+            }) async {
+              sentIds = availableLocationIds;
+              return StudentProfileModel(
+                id: 1,
+      interestedIn: ['job'],
+                university: university,
+                major: major,
+                graduationYear: graduationYear,
+              );
+            },
+      );
+
+      final searchField = find.widgetWithText(
+        TextFormField,
+        'Add a work location',
+      );
+      await tester.ensureVisible(searchField);
+      await tester.enterText(searchField, 'Nablus');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, 'Nablus'));
+      await tester.pumpAndSettle();
+      await tester.enterText(searchField, 'Ramallah');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, 'Ramallah'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Save Changes'));
+      await tester.tap(find.text('Save Changes'));
+      await tester.pumpAndSettle();
+
+      expect(sentIds, unorderedEquals([1, 2]));
+    });
+
+    testWidgets(
+      'an already-selected location is excluded from search suggestions '
+      '-- never offered (or storable) twice',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          initialProfile: const StudentProfileModel(
+            id: 1,
+      interestedIn: ['job'],
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+            availableLocations: [LocationModel(id: 1, canonicalName: 'Nablus')],
+          ),
+          locations: const [
+            LocationModel(id: 1, canonicalName: 'Nablus'),
+            LocationModel(id: 2, canonicalName: 'Nablus City'),
+          ],
+        );
+
+        final searchField = find.widgetWithText(
+          TextFormField,
+          'Add a work location',
+        );
+        await tester.ensureVisible(searchField);
+        await tester.enterText(searchField, 'Nablus');
+        await tester.pumpAndSettle();
+
+        // The already-selected catalog entry (id 1) never appears again in
+        // the suggestion list -- only the distinct catalog entry does.
+        expect(find.widgetWithText(ListTile, 'Nablus City'), findsOneWidget);
+        expect(find.widgetWithText(ListTile, 'Nablus'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'typing a location not in the catalog offers to add it, and adding '
+      'it selects the real resolved location',
+      (tester) async {
+        final locationRepository = _FakeLocationRepository(
+          locations: const [LocationModel(id: 1, canonicalName: 'Nablus')],
+          addResult: const LocationModel(id: 9, canonicalName: 'Salfit'),
+        );
+        List<int>? sentIds;
+        await _pumpScreen(
+          tester,
+          initialProfile: const StudentProfileModel(
+            id: 1,
+      interestedIn: ['job'],
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+          ),
+          locationRepository: locationRepository,
+          onUpdate:
+              ({
+                required university,
+                required major,
+                required graduationYear,
+                phone,
+                bio,
+                currentLocationId,
+                availableLocationIds = const [],
+              }) async {
+                sentIds = availableLocationIds;
+                return StudentProfileModel(
+                  id: 1,
+      interestedIn: ['job'],
+                  university: university,
+                  major: major,
+                  graduationYear: graduationYear,
+                );
+              },
+        );
+
+        final searchField = find.widgetWithText(
+          TextFormField,
+          'Add a work location',
+        );
+        await tester.ensureVisible(searchField);
+        await tester.enterText(searchField, 'Salfit');
+        await tester.pumpAndSettle();
+
+        expect(find.widgetWithText(ListTile, 'Add "Salfit"'), findsOneWidget);
+
+        await tester.tap(find.widgetWithText(ListTile, 'Add "Salfit"'));
+        await tester.pumpAndSettle();
+
+        expect(locationRepository.lastAddedName, 'Salfit');
+        expect(find.widgetWithText(FilterChip, 'Salfit'), findsOneWidget);
+
+        await tester.ensureVisible(find.text('Save Changes'));
+        await tester.tap(find.text('Save Changes'));
+        await tester.pumpAndSettle();
+
+        expect(sentIds, [9]);
+      },
+    );
+
+    testWidgets(
+      'a typed name that already exactly matches a catalog entry never '
+      'shows an Add option',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          initialProfile: const StudentProfileModel(
+            id: 1,
+      interestedIn: ['job'],
+            university: 'State University',
+            major: 'Computer Science',
+            graduationYear: 2027,
+          ),
+          locations: const [LocationModel(id: 1, canonicalName: 'Nablus')],
+        );
+
+        final searchField = find.widgetWithText(
+          TextFormField,
+          'Add a work location',
+        );
+        await tester.ensureVisible(searchField);
+        await tester.enterText(searchField, 'Nablus');
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('Add "'), findsNothing);
+      },
+    );
+
+    testWidgets('deselecting a pre-selected location removes it on submit', (
+      tester,
+    ) async {
+      List<int>? sentIds;
+      await _pumpScreen(
+        tester,
+        initialProfile: const StudentProfileModel(
+          id: 1,
+      interestedIn: ['job'],
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+          availableLocations: [LocationModel(id: 1, canonicalName: 'Nablus')],
+        ),
+        locations: const [LocationModel(id: 1, canonicalName: 'Nablus')],
+        onUpdate:
+            ({
+              required university,
+              required major,
+              required graduationYear,
+              phone,
+              bio,
+              currentLocationId,
+            availableLocationIds = const [],
+            }) async {
+              sentIds = availableLocationIds;
+              return StudentProfileModel(
+                id: 1,
+      interestedIn: ['job'],
+                university: university,
+                major: major,
+                graduationYear: graduationYear,
+              );
+            },
+      );
+
+      await tester.ensureVisible(find.widgetWithText(FilterChip, 'Nablus'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Nablus'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Save Changes'));
+      await tester.tap(find.text('Save Changes'));
+      await tester.pumpAndSettle();
+
+      expect(sentIds, isEmpty);
+    });
+
+    for (final width in [375.0, 390.0, 430.0]) {
+      testWidgets(
+        'mobile ${width.toInt()} — many location chips wrap without '
+        'overflow',
+        (tester) async {
+          tester.view.physicalSize = Size(width, 900);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+
+          await _pumpScreen(
+            tester,
+            initialProfile: const StudentProfileModel(
+              id: 1,
+      interestedIn: ['job'],
+              university: 'State University',
+              major: 'Computer Science',
+              graduationYear: 2027,
+              availableLocations: [
+                LocationModel(id: 1, canonicalName: 'Nablus'),
+                LocationModel(id: 2, canonicalName: 'Ramallah'),
+                LocationModel(id: 3, canonicalName: 'Jenin'),
+              ],
+            ),
+            locations: const [
+              LocationModel(id: 1, canonicalName: 'Nablus'),
+              LocationModel(id: 2, canonicalName: 'Ramallah'),
+              LocationModel(id: 3, canonicalName: 'Jenin'),
+              LocationModel(id: 4, canonicalName: 'Hebron'),
+              LocationModel(id: 5, canonicalName: 'Bethlehem'),
+              LocationModel(id: 6, canonicalName: 'Jerusalem'),
+              LocationModel(id: 7, canonicalName: 'Gaza'),
+              LocationModel(id: 8, canonicalName: 'Tulkarm'),
+            ],
+          );
+
+          expect(tester.takeException(), isNull);
+          expect(find.widgetWithText(FilterChip, 'Nablus'), findsOneWidget);
+          expect(find.widgetWithText(FilterChip, 'Ramallah'), findsOneWidget);
+          expect(find.widgetWithText(FilterChip, 'Jenin'), findsOneWidget);
+        },
+      );
+    }
+  });
+
   testWidgets('does not overflow at a narrow 320x720 viewport', (tester) async {
     tester.view.physicalSize = const Size(320, 720);
     tester.view.devicePixelRatio = 1.0;
@@ -446,6 +976,7 @@ void main() {
       tester,
       initialProfile: const StudentProfileModel(
         id: 1,
+      interestedIn: ['job'],
         university: 'State University',
         major: 'Computer Science',
         graduationYear: 2027,
@@ -471,6 +1002,7 @@ void main() {
             repository: _FakeStudentProfileRepository(
               getProfileResult: const StudentProfileModel(
                 id: 1,
+      interestedIn: ['job'],
                 university: 'State University',
                 major: 'Computer Science',
                 graduationYear: 2027,
@@ -480,6 +1012,7 @@ void main() {
           )
           ..profile = const StudentProfileModel(
             id: 1,
+      interestedIn: ['job'],
             university: 'State University',
             major: 'Computer Science',
             graduationYear: 2027,
@@ -494,6 +1027,11 @@ void main() {
           ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
           ChangeNotifierProvider<StudentProfileProvider>.value(
             value: studentProfileProvider,
+          ),
+          ChangeNotifierProvider<LocationCatalogProvider>.value(
+            value: LocationCatalogProvider(
+              repository: _FakeLocationRepository(),
+            ),
           ),
           ChangeNotifierProvider<ThemeProvider>.value(value: themeProvider),
         ],

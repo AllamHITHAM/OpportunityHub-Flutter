@@ -9,6 +9,7 @@ import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
+import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_skill_provider.dart';
@@ -59,6 +60,19 @@ class _FakeStudentSkillRepository extends StudentSkillRepository {
   Duration deleteDelay = Duration.zero;
   final List<int> deletedIds = [];
 
+  List<SkillModel>? catalogResult;
+  ApiException? catalogError;
+  Duration catalogDelay = Duration.zero;
+  int getSkillCatalogCallCount = 0;
+
+  StudentSkillModel? addResult;
+  ApiException? addError;
+  Object? addRuntimeError;
+  Duration addDelay = Duration.zero;
+  int addSkillCallCount = 0;
+  int? lastAddedSkillId;
+  String? lastAddedLevel;
+
   @override
   Future<List<StudentSkillModel>> getStudentSkills() async {
     getStudentSkillsCallCount++;
@@ -76,6 +90,41 @@ class _FakeStudentSkillRepository extends StudentSkillRepository {
       await Future<void>.delayed(deleteDelay);
     }
     if (deleteError != null) throw deleteError!;
+  }
+
+  @override
+  Future<List<SkillModel>> getSkillCatalog() async {
+    getSkillCatalogCallCount++;
+    if (catalogDelay > Duration.zero) {
+      await Future<void>.delayed(catalogDelay);
+    }
+    if (catalogError != null) throw catalogError!;
+    return catalogResult ?? [];
+  }
+
+  @override
+  Future<StudentSkillModel> addSkill({
+    required int skillId,
+    String level = 'intermediate',
+    String source = 'manual',
+    int? cvId,
+  }) async {
+    addSkillCallCount++;
+    lastAddedSkillId = skillId;
+    lastAddedLevel = level;
+    if (addDelay > Duration.zero) {
+      await Future<void>.delayed(addDelay);
+    }
+    if (addRuntimeError != null) throw addRuntimeError!;
+    if (addError != null) throw addError!;
+    return addResult ??
+        StudentSkillModel(
+          id: 100 + addSkillCallCount,
+          skillId: skillId,
+          skillName: 'Added Skill',
+          level: level,
+          source: source,
+        );
   }
 }
 
@@ -216,8 +265,177 @@ void main() {
     });
   });
 
+  group('loadCatalog (UI Phase 7.2)', () {
+    test('populates catalogSkills on success', () async {
+      final repository = _FakeStudentSkillRepository()
+        ..catalogResult = const [
+          SkillModel(id: 10, name: 'AutoCAD', category: 'Civil Engineering'),
+          SkillModel(id: 11, name: 'Python'),
+        ];
+      final provider = StudentSkillProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      );
+
+      await provider.loadCatalog();
+
+      expect(provider.catalogSkills, hasLength(2));
+      expect(provider.isLoadingCatalog, isFalse);
+      expect(provider.catalogErrorMessage, isNull);
+    });
+
+    test('sets catalogErrorMessage on ApiException failure', () async {
+      final repository = _FakeStudentSkillRepository()
+        ..catalogError = ApiException('Server error, please try again later.');
+      final provider = StudentSkillProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      );
+
+      await provider.loadCatalog();
+
+      expect(provider.catalogSkills, isEmpty);
+      expect(
+        provider.catalogErrorMessage,
+        'Server error, please try again later.',
+      );
+    });
+
+    test('concurrent calls share a single in-flight request', () async {
+      final repository = _FakeStudentSkillRepository()
+        ..catalogResult = const [SkillModel(id: 10, name: 'AutoCAD')]
+        ..catalogDelay = const Duration(milliseconds: 50);
+      final provider = StudentSkillProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      );
+
+      await Future.wait([provider.loadCatalog(), provider.loadCatalog()]);
+
+      expect(repository.getSkillCatalogCallCount, 1);
+    });
+
+    test('a second open reuses the cached catalog, no new request', () async {
+      final repository = _FakeStudentSkillRepository()
+        ..catalogResult = const [SkillModel(id: 10, name: 'AutoCAD')];
+      final provider = StudentSkillProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      );
+
+      await provider.loadCatalog();
+      await provider.loadCatalog();
+
+      expect(repository.getSkillCatalogCallCount, 1);
+    });
+
+    test('forceRefresh triggers a new request even if one already resolved', () async {
+      final repository = _FakeStudentSkillRepository()
+        ..catalogResult = const [SkillModel(id: 10, name: 'AutoCAD')];
+      final provider = StudentSkillProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      );
+
+      await provider.loadCatalog();
+      await provider.loadCatalog(forceRefresh: true);
+
+      expect(repository.getSkillCatalogCallCount, 2);
+    });
+  });
+
+  group('addSkill (UI Phase 7.2 — real Manual Add Skill)', () {
+    test('success appends the real, backend-returned skill to the list', () async {
+      final repository = _FakeStudentSkillRepository()
+        ..addResult = _skill(id: 5, skillId: 20, skillName: 'AutoCAD', level: 'expert');
+      final provider = StudentSkillProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      );
+
+      final success = await provider.addSkill(skillId: 20, level: 'expert');
+
+      expect(success, isTrue);
+      expect(repository.lastAddedSkillId, 20);
+      expect(repository.lastAddedLevel, 'expert');
+      expect(provider.skills, hasLength(1));
+      expect(provider.skills.single.skillName, 'AutoCAD');
+      expect(provider.skills.single.source, 'manual');
+      expect(provider.isAddingSkill, isFalse);
+      expect(provider.addErrorMessage, isNull);
+    });
+
+    test(
+      'never adds a local placeholder before the backend actually confirms success',
+      () async {
+        final repository = _FakeStudentSkillRepository()
+          ..addError = ApiException('You have already added this skill', statusCode: 409);
+        final provider = StudentSkillProvider(
+          repository: repository,
+          authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+        );
+
+        final success = await provider.addSkill(skillId: 20, level: 'expert');
+
+        expect(success, isFalse);
+        expect(provider.skills, isEmpty);
+        expect(provider.addErrorMessage, 'You have already added this skill');
+      },
+    );
+
+    test('an unexpected (non-ApiException) failure exposes a safe message', () async {
+      final repository = _FakeStudentSkillRepository()..addRuntimeError = TypeError();
+      final provider = StudentSkillProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      );
+
+      final success = await provider.addSkill(skillId: 1, level: 'beginner');
+
+      expect(success, isFalse);
+      expect(provider.addErrorMessage, isNotNull);
+      expect(provider.addErrorMessage, isNot(contains('TypeError')));
+      expect(provider.skills, isEmpty);
+    });
+
+    test('isAddingSkill is true only while the request is in flight', () async {
+      final repository = _FakeStudentSkillRepository()
+        ..addDelay = const Duration(milliseconds: 50);
+      final provider = StudentSkillProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      );
+
+      expect(provider.isAddingSkill, isFalse);
+      final future = provider.addSkill(skillId: 1, level: 'beginner');
+      expect(provider.isAddingSkill, isTrue);
+
+      await future;
+      expect(provider.isAddingSkill, isFalse);
+    });
+
+    test('a duplicate in-flight add is ignored, only one request sent', () async {
+      final repository = _FakeStudentSkillRepository()
+        ..addDelay = const Duration(milliseconds: 50);
+      final provider = StudentSkillProvider(
+        repository: repository,
+        authProvider: AuthProvider(authRepository: _FakeAuthRepository()),
+      );
+
+      final results = await Future.wait([
+        provider.addSkill(skillId: 1, level: 'beginner'),
+        provider.addSkill(skillId: 1, level: 'beginner'),
+      ]);
+
+      expect(repository.addSkillCallCount, 1);
+      expect(results.where((success) => success), hasLength(1));
+    });
+  });
+
   test('reset() clears state and is called on logout', () async {
-    final repository = _FakeStudentSkillRepository()..loadResult = [_skill()];
+    final repository = _FakeStudentSkillRepository()
+      ..loadResult = [_skill()]
+      ..catalogResult = const [SkillModel(id: 10, name: 'AutoCAD')];
     final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
     final provider = StudentSkillProvider(
       repository: repository,
@@ -225,7 +443,9 @@ void main() {
     );
 
     await provider.load();
+    await provider.loadCatalog();
     expect(provider.skills, hasLength(1));
+    expect(provider.catalogSkills, hasLength(1));
 
     await authProvider.logout();
 
@@ -234,5 +454,10 @@ void main() {
     expect(provider.errorMessage, isNull);
     expect(provider.actionErrorMessage, isNull);
     expect(provider.busySkillIds, isEmpty);
+    expect(provider.catalogSkills, isEmpty);
+    expect(provider.isLoadingCatalog, isFalse);
+    expect(provider.catalogErrorMessage, isNull);
+    expect(provider.isAddingSkill, isFalse);
+    expect(provider.addErrorMessage, isNull);
   });
 }

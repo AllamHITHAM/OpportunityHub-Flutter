@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
+import 'package:opportunityhub_flutter/core/theme/app_colors.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/core/widgets/app_widgets.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_skill_suggestions_repository.dart';
@@ -176,11 +177,17 @@ Future<_Providers> _pumpScreen(
   required AdminSkillsRepository repository,
   AdminSkillSuggestionsRepository? suggestionsRepository,
   Size size = const Size(420, 1400),
+  bool dark = false,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+
+  if (dark) {
+    AppColors.updateBrightness(Brightness.dark);
+    addTearDown(() => AppColors.updateBrightness(Brightness.light));
+  }
 
   final authProvider = AuthProvider(authRepository: _FakeAuthRepository());
   final skillsProvider = AdminSkillsProvider(
@@ -214,7 +221,7 @@ Future<_Providers> _pumpScreen(
         ),
       ],
       child: MaterialApp.router(
-        theme: AppTheme.lightTheme,
+        theme: dark ? AppTheme.darkTheme : AppTheme.lightTheme,
         routerConfig: router,
       ),
     ),
@@ -226,6 +233,14 @@ Future<_Providers> _pumpScreen(
 
 Future<void> _openAddSheet(WidgetTester tester) async {
   await tester.tap(find.widgetWithIcon(IconButton, Icons.add));
+  await tester.pumpAndSettle();
+}
+
+/// Switches from the default Pending Suggestions tab to the Skill Catalog
+/// tab. Matched by partial text since the tab's own label carries a live
+/// count (e.g. "Skill Catalog (3)") that varies per test's fixture data.
+Future<void> _switchToSkillCatalogTab(WidgetTester tester) async {
+  await tester.tap(find.textContaining('Skill Catalog'));
   await tester.pumpAndSettle();
 }
 
@@ -279,6 +294,11 @@ void main() {
       ),
     );
     await tester.pump();
+
+    // Skill Catalog content only ever renders on its own tab now -- switch
+    // to it (a plain `pump()`, not `pumpAndSettle()`, so the still-pending
+    // 200ms delayed load is not fast-forwarded to completion by this tap).
+    await tester.tap(find.textContaining('Skill Catalog'));
     await tester.pump();
 
     expect(skillsProvider.isLoading, isTrue);
@@ -294,6 +314,7 @@ void main() {
         ..loadError = ApiException('Server error, please try again later.');
 
       final providers = await _pumpScreen(tester, repository: repository);
+      await _switchToSkillCatalogTab(tester);
 
       expect(
         find.text('Server error, please try again later.'),
@@ -317,10 +338,10 @@ void main() {
     final repository = _FakeAdminSkillsRepository()..loadResult = [];
 
     await _pumpScreen(tester, repository: repository);
+    await _switchToSkillCatalogTab(tester);
 
-    expect(find.text('No Skills Yet'), findsOneWidget);
-    // Two: the AppBar icon action plus the empty-state's own action button.
-    expect(find.text('Add Skill'), findsWidgets);
+    expect(find.text('No skills available.'), findsOneWidget);
+    expect(find.text('Add Skill'), findsOneWidget);
   });
 
   testWidgets('Add Skill action is available when the list is populated', (
@@ -330,6 +351,7 @@ void main() {
 
     await _pumpScreen(tester, repository: repository);
 
+    // Global AppBar action -- reachable regardless of the active tab.
     expect(find.widgetWithIcon(IconButton, Icons.add), findsOneWidget);
   });
 
@@ -340,6 +362,7 @@ void main() {
       ];
 
     await _pumpScreen(tester, repository: repository);
+    await _switchToSkillCatalogTab(tester);
 
     expect(find.text('Flutter'), findsOneWidget);
     expect(find.textContaining('Added'), findsOneWidget);
@@ -353,6 +376,7 @@ void main() {
       ];
 
     await _pumpScreen(tester, repository: repository);
+    await _switchToSkillCatalogTab(tester);
 
     await tester.enterText(find.byType(TextFormField), 'LARAVEL');
     await tester.pumpAndSettle();
@@ -368,6 +392,7 @@ void main() {
         ..loadResult = [_skill(id: 1, name: 'Flutter')];
 
       await _pumpScreen(tester, repository: repository);
+      await _switchToSkillCatalogTab(tester);
 
       await tester.enterText(
         find.byType(TextFormField),
@@ -376,7 +401,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('No Matches'), findsOneWidget);
-      expect(find.text('No Skills Yet'), findsNothing);
+      expect(find.text('No skills available.'), findsNothing);
     },
   );
 
@@ -511,10 +536,12 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Add Skill'), findsNothing); // sheet closed
-        expect(find.text('Docker'), findsOneWidget);
         expect(find.text('Skill created successfully'), findsOneWidget);
         // No reload -- still exactly the one initial GET.
         expect(repository.getSkillsCallCount, 1);
+
+        await _switchToSkillCatalogTab(tester);
+        expect(find.text('Docker'), findsOneWidget);
       },
     );
   });
@@ -524,6 +551,7 @@ void main() {
       final repository = _FakeAdminSkillsRepository()
         ..loadResult = [_skill(id: 1, name: 'Flutter')];
       await _pumpScreen(tester, repository: repository);
+      await _switchToSkillCatalogTab(tester);
 
       await tester.tap(find.byKey(const Key('edit-skill-1')));
       await tester.pumpAndSettle();
@@ -546,6 +574,7 @@ void main() {
           ..loadResult = [_skill(id: 1, name: 'Flutter')]
           ..updateResult = _skill(id: 1, name: 'Flutter (Dart)');
         await _pumpScreen(tester, repository: repository);
+        await _switchToSkillCatalogTab(tester);
 
         await tester.tap(find.byKey(const Key('edit-skill-1')));
         await tester.pumpAndSettle();
@@ -572,6 +601,7 @@ void main() {
         ..loadResult = [_skill(id: 1, name: 'Flutter')]
         ..updateError = ApiException('Server error, please retry.');
       await _pumpScreen(tester, repository: repository);
+      await _switchToSkillCatalogTab(tester);
 
       await tester.tap(find.byKey(const Key('edit-skill-1')));
       await tester.pumpAndSettle();
@@ -604,6 +634,7 @@ void main() {
       final repository = _FakeAdminSkillsRepository()
         ..loadResult = [_skill(id: 1, name: 'Flutter')];
       await _pumpScreen(tester, repository: repository);
+      await _switchToSkillCatalogTab(tester);
 
       await tester.tap(find.byKey(const Key('delete-skill-1')));
       await tester.pumpAndSettle();
@@ -627,6 +658,7 @@ void main() {
         final repository = _FakeAdminSkillsRepository()
           ..loadResult = [_skill(id: 1, name: 'Flutter')];
         await _pumpScreen(tester, repository: repository);
+        await _switchToSkillCatalogTab(tester);
 
         await tester.tap(find.byKey(const Key('delete-skill-1')));
         await tester.pumpAndSettle();
@@ -649,6 +681,7 @@ void main() {
             statusCode: 409,
           );
         await _pumpScreen(tester, repository: repository);
+        await _switchToSkillCatalogTab(tester);
 
         await tester.tap(find.byKey(const Key('delete-skill-1')));
         await tester.pumpAndSettle();
@@ -670,6 +703,7 @@ void main() {
         ..loadResult = [_skill(id: 1, name: 'Flutter')]
         ..deleteDelay = const Duration(milliseconds: 2000);
       await _pumpScreen(tester, repository: repository);
+      await _switchToSkillCatalogTab(tester);
 
       await tester.tap(find.byKey(const Key('delete-skill-1')));
       await tester.pumpAndSettle();
@@ -689,9 +723,12 @@ void main() {
     final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
     await _pumpScreen(tester, repository: repository);
     expect(repository.getSkillsCallCount, 1);
+    await _switchToSkillCatalogTab(tester);
 
     unawaited(
-      tester.state<RefreshIndicatorState>(find.byType(RefreshIndicator)).show(),
+      tester
+          .state<RefreshIndicatorState>(find.byType(RefreshIndicator))
+          .show(),
     );
     await tester.pumpAndSettle();
 
@@ -704,6 +741,7 @@ void main() {
       final repository = _FakeAdminSkillsRepository()
         ..loadResult = [_skill(id: 1, name: 'Flutter')];
       await _pumpScreen(tester, repository: repository);
+      await _switchToSkillCatalogTab(tester);
       expect(find.text('Flutter'), findsOneWidget);
 
       repository.loadResult = null;
@@ -736,12 +774,13 @@ void main() {
       repository: repository,
       size: const Size(320, 700),
     );
+    await _switchToSkillCatalogTab(tester);
 
     expect(tester.takeException(), isNull);
   });
 
   group('Pending Skill Suggestions', () {
-    testWidgets('Renders pending suggestions above the search field', (
+    testWidgets('Renders pending suggestions on the default tab', (
       tester,
     ) async {
       final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
@@ -754,26 +793,31 @@ void main() {
         suggestionsRepository: suggestionsRepository,
       );
 
-      expect(find.text('Pending Skill Suggestions'), findsOneWidget);
+      // Pending Suggestions is the tab shown by default, without needing
+      // any tap -- no separate section header text is needed to identify
+      // it, since the tab label itself carries that ("Pending Suggestions
+      // (1)").
+      expect(find.text('Pending Suggestions (1)'), findsOneWidget);
       expect(find.text('Primavera P6'), findsOneWidget);
       expect(find.text('From AI CV extraction'), findsOneWidget);
     });
 
-    testWidgets('Renders nothing when there are no pending suggestions', (
-      tester,
-    ) async {
-      final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
-      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
-        ..loadResult = [];
+    testWidgets(
+      'Shows the exact empty-state text when there are no pending suggestions',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()..loadResult = [_skill()];
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = [];
 
-      await _pumpScreen(
-        tester,
-        repository: repository,
-        suggestionsRepository: suggestionsRepository,
-      );
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+        );
 
-      expect(find.text('Pending Skill Suggestions'), findsNothing);
-    });
+        expect(find.text('No pending skill suggestions.'), findsOneWidget);
+      },
+    );
 
     testWidgets('Loading state shows a compact loading indicator', (
       tester,
@@ -957,6 +1001,368 @@ void main() {
       expect(find.byKey(const Key('reject-suggestion-5')), findsNothing);
 
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('Overflow + responsive fix (Admin Manage Skills Final UI)', () {
+    const veryLongSkillName =
+        'A Very Long Skill Name That Should Wrap Instead Of Overflowing '
+        'Or Being Truncated On Any Realistic Screen Width';
+
+    testWidgets(
+      '100+ pending suggestions render and scroll with no RenderFlex '
+      'overflow',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = [_skill(id: 1, name: 'Flutter')];
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = List.generate(
+            120,
+            (i) => _suggestion(id: i, name: 'Suggestion $i'),
+          );
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+        );
+
+        expect(tester.takeException(), isNull);
+
+        // The list is genuinely lazy (a real `SliverList`) -- the last
+        // suggestion isn't built yet until scrolled into view. Scoped to
+        // this tab's own keyed `Scrollable` -- with keep-alive on both
+        // tabs, more than one `Scrollable` can coexist in the tree
+        // (this tab's, the Skill Catalog tab's, and the `TabBarView`'s
+        // own horizontal `PageView`), so an unscoped `find.byType` isn't
+        // reliably disambiguated by position alone.
+        await tester.scrollUntilVisible(
+          find.text('Suggestion 119'),
+          500,
+          scrollable: find.descendant(
+            of: find.byKey(const ValueKey('pending-suggestions-scroll')),
+            matching: find.byType(Scrollable),
+          ),
+        );
+
+        expect(find.text('Suggestion 119'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'a large Pending list does not require scrolling to reach the Skill '
+      'Catalog -- a single tab tap reaches it directly, and its own list '
+      'still scrolls to its last item',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = List.generate(
+            80,
+            (i) => _skill(id: i + 1, name: 'Catalog Skill $i'),
+          );
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = List.generate(
+            60,
+            (i) => _suggestion(id: i, name: 'Suggestion $i'),
+          );
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+        );
+
+        // No scrolling through 60 pending suggestions -- one tap reaches
+        // the catalog.
+        await _switchToSkillCatalogTab(tester);
+        expect(find.text('Catalog Skill 0'), findsOneWidget);
+
+        // The catalog's own list is still a genuine, scrollable
+        // `SliverList` capable of reaching its final item -- scoped to
+        // its own keyed `Scrollable`, see the equivalent Pending
+        // Suggestions scroll test above for why. `.first`, not the bare
+        // descendant search -- the search field inside this tab is a
+        // `TextField`, which has its own internal `Scrollable` for
+        // cursor movement, nested inside the outer one.
+        await tester.scrollUntilVisible(
+          find.text('Catalog Skill 79'),
+          500,
+          scrollable: find
+              .descendant(
+                of: find.byKey(const ValueKey('skill-catalog-scroll')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+
+        expect(find.text('Catalog Skill 79'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('a very long skill name in the catalog wraps, never '
+        'overflows', (tester) async {
+      final repository = _FakeAdminSkillsRepository()
+        ..loadResult = [_skill(id: 1, name: veryLongSkillName)];
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        size: const Size(320, 700),
+      );
+      await _switchToSkillCatalogTab(tester);
+
+      expect(find.textContaining('A Very Long Skill Name'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'a very long pending suggestion name wraps, never overflows',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = [_skill(id: 1, name: 'Flutter')];
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = [_suggestion(id: 1, name: veryLongSkillName)];
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+          size: const Size(320, 700),
+        );
+
+        expect(find.textContaining('A Very Long Skill Name'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    for (final entry in {
+      'desktop (1400x900)': const Size(1400, 900),
+      'tablet (700x900)': const Size(700, 900),
+      '320px mobile': const Size(320, 700),
+      '375px mobile': const Size(375, 812),
+      '430px mobile': const Size(430, 900),
+    }.entries) {
+      testWidgets(
+        'no overflow with a large real dataset at ${entry.key}, on either '
+        'tab',
+        (tester) async {
+          final repository = _FakeAdminSkillsRepository()
+            ..loadResult = List.generate(
+              40,
+              (i) => _skill(id: i + 1, name: 'Catalog Skill $i'),
+            );
+          final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+            ..loadResult = List.generate(
+              40,
+              (i) => _suggestion(id: i, name: 'Suggestion $i'),
+            );
+
+          await _pumpScreen(
+            tester,
+            repository: repository,
+            suggestionsRepository: suggestionsRepository,
+            size: entry.value,
+          );
+
+          // Pending tab (the default), TabBar included -- the tab bar
+          // itself must fit at every one of these widths without pushing
+          // the page into horizontal scroll.
+          expect(tester.takeException(), isNull);
+
+          await _switchToSkillCatalogTab(tester);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
+    testWidgets('renders correctly in Dark Mode with a populated screen', (
+      tester,
+    ) async {
+      final repository = _FakeAdminSkillsRepository()
+        ..loadResult = [_skill(id: 1, name: 'Flutter')];
+      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+        ..loadResult = [_suggestion(id: 1, name: 'Primavera P6')];
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        suggestionsRepository: suggestionsRepository,
+        dark: true,
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Primavera P6'), findsOneWidget);
+
+      await _switchToSkillCatalogTab(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Flutter'), findsOneWidget);
+    });
+
+    testWidgets(
+      'Approve/Reject expose a distinct semantic label per suggestion, '
+      'not just a bare "Approve"/"Reject"',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = [_skill(id: 1, name: 'Flutter')];
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = [_suggestion(id: 5, name: 'Primavera P6')];
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+        );
+
+        final labels = tester
+            .widgetList<Semantics>(find.byType(Semantics))
+            .map((s) => s.properties.label)
+            .whereType<String>()
+            .toSet();
+
+        expect(labels, contains('Approve suggestion: Primavera P6'));
+        expect(labels, contains('Reject suggestion: Primavera P6'));
+      },
+    );
+
+    testWidgets(
+      'the centered desktop content never exceeds the Admin Dashboard\'s '
+      'own max content width',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = [_skill(id: 1, name: 'Flutter')];
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          size: const Size(1600, 900),
+        );
+        await _switchToSkillCatalogTab(tester);
+
+        final cardBox = tester.getSize(
+          find.ancestor(
+            of: find.text('Flutter'),
+            matching: find.byType(AppCard),
+          ),
+        );
+        expect(cardBox.width, lessThanOrEqualTo(900));
+      },
+    );
+  });
+
+  group('Admin Manage Skills -- UX Polish (tabs)', () {
+    testWidgets('Pending Suggestions is the active tab on initial open', (
+      tester,
+    ) async {
+      final repository = _FakeAdminSkillsRepository()
+        ..loadResult = [_skill(id: 1, name: 'Flutter')];
+      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+        ..loadResult = [_suggestion(id: 1, name: 'Primavera P6')];
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        suggestionsRepository: suggestionsRepository,
+      );
+
+      // The Pending Suggestions content is visible without any tap...
+      expect(find.text('Primavera P6'), findsOneWidget);
+      // ...while the Skill Catalog's own content is not yet rendered.
+      expect(find.text('Flutter'), findsNothing);
+
+      final tabController = DefaultTabController.of(
+        tester.element(find.byType(TabBarView)),
+      );
+      expect(tabController.index, 0);
+    });
+
+    testWidgets(
+      'Switching to the Skill Catalog tab renders catalog content and '
+      'hides the Pending Suggestions list',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = [_skill(id: 1, name: 'Flutter')];
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = [_suggestion(id: 1, name: 'Primavera P6')];
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+        );
+
+        await _switchToSkillCatalogTab(tester);
+
+        expect(find.text('Flutter'), findsOneWidget);
+        expect(find.text('Primavera P6'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'The tab label is exactly "Skill Catalog", never "Accepted"',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = [_skill(id: 1, name: 'Flutter')];
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = [_suggestion(id: 1, name: 'Primavera P6')];
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+        );
+
+        expect(find.textContaining('Skill Catalog'), findsOneWidget);
+        expect(find.textContaining('Accepted'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'Tab labels show live counts for both Pending Suggestions and Skill '
+      'Catalog',
+      (tester) async {
+        final repository = _FakeAdminSkillsRepository()
+          ..loadResult = [
+            _skill(id: 1, name: 'Flutter'),
+            _skill(id: 2, name: 'Laravel'),
+          ];
+        final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+          ..loadResult = [_suggestion(id: 1, name: 'Primavera P6')];
+
+        await _pumpScreen(
+          tester,
+          repository: repository,
+          suggestionsRepository: suggestionsRepository,
+        );
+
+        expect(find.text('Pending Suggestions (1)'), findsOneWidget);
+        expect(find.text('Skill Catalog (2)'), findsOneWidget);
+      },
+    );
+
+    testWidgets('Switching tabs does not trigger another fetch', (
+      tester,
+    ) async {
+      final repository = _FakeAdminSkillsRepository()
+        ..loadResult = [_skill(id: 1, name: 'Flutter')];
+      final suggestionsRepository = _FakeAdminSkillSuggestionsRepository()
+        ..loadResult = [_suggestion(id: 1, name: 'Primavera P6')];
+
+      await _pumpScreen(
+        tester,
+        repository: repository,
+        suggestionsRepository: suggestionsRepository,
+      );
+      expect(repository.getSkillsCallCount, 1);
+      expect(suggestionsRepository.getPendingSuggestionsCallCount, 1);
+
+      await _switchToSkillCatalogTab(tester);
+      await tester.tap(find.textContaining('Pending Suggestions'));
+      await tester.pumpAndSettle();
+      await _switchToSkillCatalogTab(tester);
+
+      expect(repository.getSkillsCallCount, 1);
+      expect(suggestionsRepository.getPendingSuggestionsCallCount, 1);
     });
   });
 }

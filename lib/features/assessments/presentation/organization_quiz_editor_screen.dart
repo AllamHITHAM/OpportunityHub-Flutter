@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_spacing.dart';
@@ -6,6 +7,7 @@ import '../../../core/widgets/app_widgets.dart';
 import '../../../models/question_model.dart';
 import '../../../models/quiz_model.dart';
 import '../../../providers/organization_quiz_provider.dart';
+import '../../../routes/app_routes.dart';
 import '../../opportunities/presentation/opportunity_display.dart';
 import 'assessment_display.dart';
 import 'question_form_sheet.dart';
@@ -18,10 +20,29 @@ import 'question_form_sheet.dart';
 /// Every mutation action is hidden once `quiz.status == 'published'` — see
 /// `OrganizationQuizProvider` for the matching backend-defense-in-depth
 /// guard.
+///
+/// **Phase 10A.4B**: the exact same editor also manages the *shared*
+/// Opportunity Quiz template when [opportunityId] is given instead of
+/// [assessmentId] — question add/edit/delete/publish are already purely
+/// `quiz.id`-keyed (see `OrganizationQuizProvider`), so nothing below
+/// branches on which mode is active except which `load...()` call
+/// establishes the provider's context, and where a "not configured yet"
+/// empty state routes to. Exactly one of the two constructor params is
+/// ever set.
 class OrganizationQuizEditorScreen extends StatefulWidget {
-  const OrganizationQuizEditorScreen({super.key, required this.assessmentId});
+  const OrganizationQuizEditorScreen({
+    super.key,
+    this.assessmentId,
+    this.opportunityId,
+  }) : assert(
+         (assessmentId == null) != (opportunityId == null),
+         'Exactly one of assessmentId/opportunityId must be set',
+       );
 
-  final int assessmentId;
+  final int? assessmentId;
+  final int? opportunityId;
+
+  bool get isTemplateMode => opportunityId != null;
 
   @override
   State<OrganizationQuizEditorScreen> createState() =>
@@ -35,7 +56,12 @@ class _OrganizationQuizEditorScreenState
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<OrganizationQuizProvider>().loadQuiz(widget.assessmentId);
+      final provider = context.read<OrganizationQuizProvider>();
+      if (widget.isTemplateMode) {
+        provider.loadQuizForOpportunity(widget.opportunityId!);
+      } else {
+        provider.loadQuiz(widget.assessmentId!);
+      }
     });
   }
 
@@ -114,7 +140,9 @@ class _OrganizationQuizEditorScreenState
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<OrganizationQuizProvider>();
-    final isThisOne = provider.loadedAssessmentId == widget.assessmentId;
+    final isThisOne = widget.isTemplateMode
+        ? provider.loadedOpportunityId == widget.opportunityId
+        : provider.loadedAssessmentId == widget.assessmentId;
     final quiz = isThisOne ? provider.quiz : null;
 
     return Scaffold(
@@ -130,6 +158,18 @@ class _OrganizationQuizEditorScreenState
     );
   }
 
+  void _reload({bool forceRefresh = false}) {
+    final provider = context.read<OrganizationQuizProvider>();
+    if (widget.isTemplateMode) {
+      provider.loadQuizForOpportunity(
+        widget.opportunityId!,
+        forceRefresh: forceRefresh,
+      );
+    } else {
+      provider.loadQuiz(widget.assessmentId!, forceRefresh: forceRefresh);
+    }
+  }
+
   Widget _buildBody(
     OrganizationQuizProvider provider,
     QuizModel? quiz,
@@ -142,8 +182,29 @@ class _OrganizationQuizEditorScreenState
     if (isThisOne && provider.errorMessage != null && quiz == null) {
       return AppErrorView(
         message: provider.errorMessage!,
-        onRetry: () =>
-            provider.loadQuiz(widget.assessmentId, forceRefresh: true),
+        onRetry: () => _reload(forceRefresh: true),
+      );
+    }
+
+    // Phase 10A.4B: an Opportunity that genuinely has no shared Quiz
+    // template yet is a normal, expected state requiring action -- not an
+    // error -- so it gets its own "Configure Quiz" call to action rather
+    // than the legacy "No Quiz Found" empty state (which stays exactly as
+    // it was for the ad-hoc path, where reaching this screen with no quiz
+    // really would mean something went wrong).
+    if (widget.isTemplateMode && isThisOne && quiz == null) {
+      return AppEmptyView(
+        icon: Icons.quiz_outlined,
+        title: 'Quiz Not Configured',
+        message:
+            'Candidates cannot be advanced to a quiz until one is '
+            'created and published.',
+        actionLabel: 'Configure Quiz',
+        onAction: () => context.push(
+          AppRoutes.organizationCreateQuizForOpportunity(
+            widget.opportunityId!,
+          ),
+        ),
       );
     }
 
@@ -201,6 +262,11 @@ class _OrganizationQuizEditorScreenState
                   label: 'Passing Score',
                   value: '${quiz.passingScore}%',
                 ),
+                if (widget.isTemplateMode)
+                  OpportunityDetailRow(
+                    label: 'Candidate Availability',
+                    value: describeAvailabilityPolicy(quiz),
+                  ),
                 OpportunityDetailRow(
                   label: 'Questions',
                   value: '${quiz.questions.length}',
@@ -229,15 +295,22 @@ class _OrganizationQuizEditorScreenState
               ),
             )
           else
-            for (final question in quiz.questions)
+            for (var i = 0; i < quiz.questions.length; i++)
               Padding(
                 padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                 child: _QuestionCard(
-                  question: question,
+                  question: quiz.questions[i],
+                  // The backend already returns `questions` in real display
+                  // order (`orderBy('position')->orderBy('id')`) -- this is
+                  // that position in the list, human 1-based, never the raw
+                  // `position` field itself (which the authoring form never
+                  // sets explicitly, so real quizzes often have every
+                  // question at the same backend default of 0).
+                  displayNumber: i + 1,
                   isDraft: isDraft,
-                  isBusy: provider.isBusyQuestion(question.id),
-                  onEdit: () => _editQuestion(question),
-                  onDelete: () => _deleteQuestion(provider, question),
+                  isBusy: provider.isBusyQuestion(quiz.questions[i].id),
+                  onEdit: () => _editQuestion(quiz.questions[i]),
+                  onDelete: () => _deleteQuestion(provider, quiz.questions[i]),
                 ),
               ),
           if (isDraft) ...[
@@ -260,6 +333,7 @@ class _OrganizationQuizEditorScreenState
 class _QuestionCard extends StatelessWidget {
   const _QuestionCard({
     required this.question,
+    required this.displayNumber,
     required this.isDraft,
     required this.isBusy,
     required this.onEdit,
@@ -267,6 +341,7 @@ class _QuestionCard extends StatelessWidget {
   });
 
   final QuestionModel question;
+  final int displayNumber;
   final bool isDraft;
   final bool isBusy;
   final VoidCallback onEdit;
@@ -284,7 +359,7 @@ class _QuestionCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              StatusChip(label: '#${question.position}', compact: true),
+              StatusChip(label: '#$displayNumber', compact: true),
               const SizedBox(width: AppSpacing.xs),
               Expanded(
                 child: Text(question.prompt, style: textTheme.titleSmall),

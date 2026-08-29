@@ -275,4 +275,33 @@ void main() {
     expect(model.interview, isNull);
     expect(model.quiz, isNull);
   });
+
+  group('Phase 10A.4B addendum — candidate availability window', () {
+    test('parses available_at/due_at/quiz_timing_status when present', () {
+      final json = _assessmentJson(type: 'quiz')
+        ..['available_at'] = '2026-08-28T10:00:00.000000Z'
+        ..['due_at'] = '2026-08-30T10:00:00.000000Z'
+        ..['quiz_timing_status'] = 'upcoming';
+
+      final model = AssessmentModel.fromJson(json);
+
+      expect(
+        model.availableAt,
+        DateTime.parse('2026-08-28T10:00:00.000000Z'),
+      );
+      expect(model.dueAt, DateTime.parse('2026-08-30T10:00:00.000000Z'));
+      expect(model.quizTimingStatus, 'upcoming');
+    });
+
+    test(
+      'available_at/due_at/quiz_timing_status default to null (legacy/interview)',
+      () {
+        final model = AssessmentModel.fromJson(_assessmentJson());
+
+        expect(model.availableAt, isNull);
+        expect(model.dueAt, isNull);
+        expect(model.quizTimingStatus, isNull);
+      },
+    );
+  });
 }

@@ -28,11 +28,13 @@ import 'package:opportunityhub_flutter/core/widgets/app_widgets.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
+import 'package:opportunityhub_flutter/features/messaging/data/conversation_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/features/student/presentation/student_home_screen.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/conversation_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
@@ -42,6 +44,7 @@ import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/conversations_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_applications_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
@@ -66,6 +69,14 @@ class _FakeNotificationRepository extends NotificationRepository {
 
   @override
   Future<List<NotificationModel>> getNotifications() async => [];
+}
+
+class _FakeConversationRepository extends ConversationRepository {
+  _FakeConversationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<ConversationSummaryModel>> getConversations() async => [];
 }
 
 class _FakeApplicationRepository extends ApplicationRepository {
@@ -104,6 +115,7 @@ class _FakeOpportunityRepository extends OpportunityRepository {
     String? location,
     String? fieldOfStudy,
     String? keyword,
+    int? organizationId,
     int page = 1,
     int perPage = 15,
   }) async {
@@ -235,6 +247,12 @@ _pumpScreen(
     repository: notificationRepository ?? _FakeNotificationRepository(),
     authProvider: authProvider,
   );
+  // MessagesBellAction now renders unconditionally next to
+  // NotificationBellAction on Student/Organization Home.
+  final conversationsProvider = ConversationsProvider(
+    repository: _FakeConversationRepository(),
+    authProvider: authProvider,
+  );
   final applicationsProvider = StudentApplicationsProvider(
     repository: applicationRepository ?? _FakeApplicationRepository(),
     authProvider: authProvider,
@@ -296,6 +314,9 @@ _pumpScreen(
         ChangeNotifierProvider<ThemeProvider>.value(value: resolvedThemeProvider),
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
+        ),
+        ChangeNotifierProvider<ConversationsProvider>.value(
+          value: conversationsProvider,
         ),
         ChangeNotifierProvider<StudentApplicationsProvider>.value(
           value: applicationsProvider,

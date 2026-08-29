@@ -1,3 +1,4 @@
+import '../../../core/utils/date_formatter.dart';
 import '../../../models/notification_model.dart';
 
 // Display helpers for Notification data — kept feature-local, mirroring
@@ -20,6 +21,7 @@ const notificationTypeLabels = {
   'offer': 'Offer',
   'organization': 'Organization',
   'opportunity': 'Opportunity',
+  'message': 'Message',
 };
 
 /// [priority]'s label, falling back to a simple capitalized form of the raw
@@ -55,4 +57,46 @@ DateTime? notificationDisplayTime(NotificationModel notification) =>
 bool isNavigableActionUrl(String? actionUrl) {
   final value = actionUrl;
   return value != null && value.isNotEmpty && value.startsWith('/');
+}
+
+bool _isSameDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+bool _isYesterday(DateTime a, DateTime b) {
+  final yesterday = DateTime(b.year, b.month, b.day - 1);
+  return _isSameDay(a, yesterday);
+}
+
+/// A human-friendly relative rendering of [time] (UI Phase 9) -- "Just
+/// now"/"5m ago"/"2h ago" only within the same real calendar day as [now]
+/// (defaults to [DateTime.now]), "Yesterday" for the calendar day before
+/// that, and [formatDate] for anything older. Calendar-day comparison
+/// (not a raw 24h difference) deliberately avoids the misleading case of
+/// an 11pm-yesterday notification reading "2h ago" once it's past
+/// midnight -- see this phase's own audit note on timezone/day-boundary
+/// safety. [time] is used exactly as parsed (this app has no established
+/// UTC-normalization convention -- see `date_formatter.dart`), so this
+/// never alters stored timezone semantics.
+String notificationRelativeTime(DateTime time, {DateTime? now}) {
+  final reference = now ?? DateTime.now();
+  if (time.isAfter(reference)) return formatDate(time);
+
+  if (_isSameDay(time, reference)) {
+    final diff = reference.difference(time);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    return '${diff.inHours}h ago';
+  }
+  if (_isYesterday(time, reference)) return 'Yesterday';
+  return formatDate(time);
+}
+
+/// The real calendar-day bucket [time] falls into, for presentation-only
+/// grouping (UI Phase 9) -- never alters ordering, which stays exactly
+/// what the backend/provider already returns (newest-first).
+String notificationDateBucket(DateTime time, {DateTime? now}) {
+  final reference = now ?? DateTime.now();
+  if (time.isAfter(reference) || _isSameDay(time, reference)) return 'Today';
+  if (_isYesterday(time, reference)) return 'Yesterday';
+  return 'Earlier';
 }

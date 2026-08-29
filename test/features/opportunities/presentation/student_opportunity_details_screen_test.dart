@@ -11,6 +11,7 @@ import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/core/widgets/app_skeleton.dart';
 import 'package:opportunityhub_flutter/core/widgets/secondary_button.dart';
+import 'package:opportunityhub_flutter/core/widgets/status_chip.dart';
 import 'package:opportunityhub_flutter/core/widgets/theme_toggle_button.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
@@ -212,6 +213,15 @@ Future<StudentOpportunitiesProvider> _pumpDetails(
           opportunityId: int.parse(state.pathParameters['id']!),
         ),
       ),
+      // Organization Public Profile phase -- the real destination the
+      // organization identity (hero row and `_OrganizationCard`) links
+      // to.
+      GoRoute(
+        path: '/organizations/:id',
+        builder: (_, state) => Scaffold(
+          body: Text('COMPANY_PROFILE_${state.pathParameters['id']}'),
+        ),
+      ),
     ],
   );
 
@@ -290,6 +300,29 @@ void main() {
     expect(find.text('Amman, Jordan'), findsNWidgets(2));
   });
 
+  testWidgets(
+    'Tapping the organization identity card opens its real public '
+    'Company Profile (Organization Public Profile phase)',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(
+          organizationProfile: const OrganizationProfileModel(
+            id: 3,
+            organizationName: 'Acme Corp',
+            organizationType: 'company',
+            approvalStatus: 'approved',
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      await tester.tap(find.text('About the Organization'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('COMPANY_PROFILE_3'), findsOneWidget);
+    },
+  );
+
   testWidgets('Nested skills render as chips when present', (tester) async {
     final repository = _FakeOpportunityRepository(
       getResult: _opportunity(
@@ -312,6 +345,30 @@ void main() {
     expect(find.text('Flutter (Required)'), findsOneWidget);
     expect(find.text('Figma'), findsOneWidget);
   });
+
+  testWidgets(
+    'the required-skill chip uses AppStatusType.info, never the '
+    'low-dark-mode-contrast primary type (Opportunity Type Clarity)',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: _opportunity(
+          opportunitySkills: const [
+            OpportunitySkillModel(
+              id: 1,
+              isRequired: true,
+              skill: SkillModel(id: 1, name: 'Flutter'),
+            ),
+          ],
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      final chip = tester.widget<StatusChip>(
+        find.widgetWithText(StatusChip, 'Flutter (Required)'),
+      );
+      expect(chip.type, AppStatusType.info);
+    },
+  );
 
   testWidgets('No Skills section renders when there are none', (tester) async {
     final repository = _FakeOpportunityRepository(getResult: _opportunity());
@@ -728,6 +785,10 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Apply Now'), findsOneWidget);
+      // With a real restriction in place, the fact-tile "All majors
+      // welcome" line must never also appear -- that's exclusively for
+      // the unrestricted case, never shown alongside real chips.
+      expect(find.text('All majors welcome'), findsNothing);
     },
   );
 
@@ -770,15 +831,59 @@ void main() {
   );
 
   testWidgets(
-    'An unrestricted opportunity shows neither an eligibility line nor an '
-    'Eligible Majors section',
+    'An unrestricted opportunity shows a truthful "All majors welcome" '
+    'fact, not a chip section or an eligibility confirmation line',
     (tester) async {
       final repository = _FakeOpportunityRepository(getResult: _opportunity());
       await _pumpDetails(tester, repository: repository);
 
-      expect(find.text('Eligible Majors'), findsNothing);
+      // Exactly one render -- the fact-tile row, never the prominent
+      // chip-card section (which only ever renders for a real, explicit
+      // restriction).
+      expect(find.text('Eligible Majors'), findsOneWidget);
+      expect(find.text('All majors welcome'), findsOneWidget);
       expect(
         find.text('Your major is eligible for this opportunity.'),
+        findsNothing,
+      );
+      expect(find.text('Apply Now'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'no eligible majors configured never restricts Apply, and Field of '
+    'Study is never displayed at all -- Opportunity Academic Matching '
+    'Cleanup',
+    (tester) async {
+      final repository = _FakeOpportunityRepository(
+        getResult: OpportunityModel(
+          id: 1,
+          title: 'Junior Mobile App Developer Intern',
+          description: 'A great opportunity.',
+          opportunityType: 'job',
+          employmentType: 'full_time',
+          workMode: 'remote',
+          experienceLevel: 'junior',
+          positionsAvailable: 2,
+          status: 'open',
+          eligibleMajors: const [],
+        ),
+      );
+      await _pumpDetails(
+        tester,
+        repository: repository,
+        studentMajor: 'Fine Arts',
+      );
+
+      // Truthfully says "All majors welcome" -- no explicit restriction.
+      expect(find.text('Eligible Majors'), findsOneWidget);
+      expect(find.text('All majors welcome'), findsOneWidget);
+      // Field of Study (legacy, deprecated) is never shown anywhere.
+      expect(find.text('Field of Study'), findsNothing);
+      // The student must not be blocked.
+      expect(find.text('Not Eligible'), findsNothing);
+      expect(
+        find.text('Your major is not eligible for this opportunity.'),
         findsNothing,
       );
       expect(find.text('Apply Now'), findsOneWidget);

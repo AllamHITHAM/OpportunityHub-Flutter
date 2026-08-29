@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
+import 'package:opportunityhub_flutter/core/utils/date_formatter.dart';
 import 'package:opportunityhub_flutter/core/widgets/app_widgets.dart';
 import 'package:opportunityhub_flutter/features/applications/data/application_repository.dart';
 import 'package:opportunityhub_flutter/features/applications/presentation/student_application_details_screen.dart';
@@ -66,12 +67,18 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   Map<int, AssessmentModel?>? resultsByApplication;
+
+  /// Phase 10A.3 — set this instead of [resultsByApplication] to give a
+  /// specific application a full, multi-element Assessment history (e.g. a
+  /// completed Quiz already followed by an Interview). Takes priority over
+  /// [resultsByApplication] for any application ID it contains.
+  Map<int, List<AssessmentModel>>? historyByApplication;
   Map<int, Duration>? delaysByApplication;
   ApiException? loadError;
   int getStudentAssessmentForApplicationCallCount = 0;
 
   @override
-  Future<AssessmentModel?> getStudentAssessmentForApplication(
+  Future<List<AssessmentModel>> getStudentAssessmentsForApplication(
     int applicationId,
   ) async {
     getStudentAssessmentForApplicationCallCount++;
@@ -80,7 +87,11 @@ class _FakeAssessmentRepository extends AssessmentRepository {
       await Future<void>.delayed(delay);
     }
     if (loadError != null) throw loadError!;
-    return resultsByApplication?[applicationId];
+    if (historyByApplication?.containsKey(applicationId) ?? false) {
+      return historyByApplication![applicationId]!;
+    }
+    final result = resultsByApplication?[applicationId];
+    return result == null ? [] : [result];
   }
 }
 
@@ -171,6 +182,8 @@ AssessmentModel _assessment({
   String? result,
   InterviewModel? interview,
   QuizModel? quiz,
+  DateTime? availableAt,
+  DateTime? dueAt,
 }) {
   return AssessmentModel(
     id: id,
@@ -180,6 +193,8 @@ AssessmentModel _assessment({
     result: result,
     interview: interview,
     quiz: quiz,
+    availableAt: availableAt,
+    dueAt: dueAt,
   );
 }
 
@@ -1253,6 +1268,119 @@ void main() {
           assessmentRepository.getStudentAssessmentForApplicationCallCount,
           2,
         );
+      },
+    );
+  });
+
+  group('Assessment section — quiz availability window (Phase 10A.4B addendum)', () {
+    testWidgets(
+      'an upcoming candidate window shows Assessment Upcoming with real dates, no quiz tiles',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final future = DateTime.now().add(const Duration(days: 2));
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              type: 'quiz',
+              status: 'scheduled',
+              quiz: _quiz(),
+              availableAt: future,
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Assessment Upcoming'), findsOneWidget);
+        expect(find.textContaining(formatDateTime(future)), findsOneWidget);
+        expect(find.text('Quiz Title'), findsNothing);
+        expect(find.text('Open Quiz'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a passed deadline with no submission shows Assessment Deadline Passed, no Open Quiz',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final past = DateTime.now().subtract(const Duration(days: 1));
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              type: 'quiz',
+              status: 'scheduled',
+              quiz: _quiz(),
+              availableAt: DateTime.now().subtract(const Duration(days: 3)),
+              dueAt: past,
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Assessment Deadline Passed'), findsOneWidget);
+        expect(find.textContaining(formatDateTime(past)), findsOneWidget);
+        expect(find.text('Open Quiz'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'an available window (between available_at and due_at) shows the normal quiz card plus a Deadline tile',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final due = DateTime.now().add(const Duration(days: 1));
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(
+              type: 'quiz',
+              status: 'scheduled',
+              quiz: _quiz(),
+              availableAt: DateTime.now().subtract(const Duration(hours: 1)),
+              dueAt: due,
+            ),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Quiz Title'), findsOneWidget);
+        expect(find.text('Open Quiz'), findsOneWidget);
+        expect(find.text('Deadline'), findsOneWidget);
+        expect(find.text(formatDateTime(due)), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a legacy quiz with no availability window renders exactly as before (no gating)',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'interview_scheduled')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..resultsByApplication = {
+            1: _assessment(type: 'quiz', status: 'scheduled', quiz: _quiz()),
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        expect(find.text('Assessment Upcoming'), findsNothing);
+        expect(find.text('Assessment Deadline Passed'), findsNothing);
+        expect(find.text('Deadline'), findsNothing);
+        expect(find.text('Open Quiz'), findsOneWidget);
       },
     );
   });
@@ -2366,6 +2494,45 @@ void main() {
       expect(find.text('30 minutes'), findsOneWidget);
       expect(find.text('Open Quiz'), findsOneWidget);
     });
+
+    testWidgets(
+      'a completed Quiz followed by a scheduled Interview renders both '
+      'stages, sequentially — the Quiz never appears to disappear '
+      '(Phase 10A.3)',
+      (tester) async {
+        final applicationRepository = _FakeApplicationRepository(
+          listResult: [_application(id: 1, status: 'in_assessment')],
+        );
+        final assessmentRepository = _FakeAssessmentRepository()
+          ..historyByApplication = {
+            1: [
+              _assessment(
+                id: 1,
+                type: 'quiz',
+                status: 'completed',
+                result: 'passed',
+                quiz: _quiz(timeLimitMinutes: 30, questionCount: 3),
+              ),
+              _assessment(
+                id: 2,
+                type: 'interview',
+                status: 'scheduled',
+                interview: _interview(interviewType: 'online'),
+              ),
+            ],
+          };
+        await _pumpDetails(
+          tester,
+          repository: applicationRepository,
+          assessmentRepository: assessmentRepository,
+        );
+
+        // Both stages are on screen at once, in order.
+        expect(find.text('Quiz'), findsOneWidget);
+        expect(find.text('Quiz completed'), findsOneWidget);
+        expect(find.text('Online Interview'), findsOneWidget);
+      },
+    );
 
     testWidgets('renders without overflow at a genuinely narrow viewport with a full interview payload', (
       tester,

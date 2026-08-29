@@ -87,6 +87,33 @@ class AppRoutes {
   static String organizationApplicants(int opportunityId) =>
       '$organizationOpportunities/$opportunityId/applicants';
 
+  /// Phase O8.1 — real, eligible candidates ranked for one of the
+  /// organization's own opportunities, highest match first. Nested under
+  /// [organizationOpportunities] like [organizationApplicants], so it's
+  /// already covered by that prefix's existing role/profile-completion
+  /// gating in `AppRouter` without needing a second redirect check.
+  static String organizationOpportunityRecommendedCandidates(
+    int opportunityId,
+  ) => '$organizationOpportunities/$opportunityId/recommended-candidates';
+
+  /// Phase 10A.4B — the Opportunity's shared Quiz template (create/edit
+  /// settings, manage questions, publish) — mirrors [organizationApplicants]'s
+  /// nesting convention for an Opportunity-scoped sub-route.
+  static String organizationOpportunityQuiz(int opportunityId) =>
+      '$organizationOpportunities/$opportunityId/quiz';
+
+  /// The template's own settings-creation form — a distinct route from
+  /// [organizationOpportunityQuiz] (which shows the *current* state:
+  /// not-configured/draft/published) the same way [organizationCreateQuiz]
+  /// is distinct from the read/manage view it hands off to on success.
+  static String organizationCreateQuizForOpportunity(int opportunityId) =>
+      '$organizationOpportunities/$opportunityId/quiz/new';
+
+  /// Phase 10A.4B — every candidate's score/result/decision for the
+  /// Opportunity's shared Quiz.
+  static String organizationOpportunityQuizResults(int opportunityId) =>
+      '$organizationOpportunities/$opportunityId/quiz/results';
+
   /// Organization-only application details — not nested under an
   /// opportunity path, since the backend's single-application endpoint
   /// doesn't need the opportunity ID to resolve.
@@ -169,9 +196,17 @@ class AppRoutes {
   static const String adminEducationVerifications =
       '$adminHome/education-verifications';
 
-  /// Organization-only Candidate Search (Phase 8B-3, Flow B) — see
-  /// `AppRouter` for the role gating applied to it.
+  /// Organization-only Talent Directory (Phase 8B-3, Flow B — renamed from
+  /// "Find Candidates" in Phase O8.1 once inviting moved to Recommended
+  /// Candidates) — see `AppRouter` for the role gating applied to it.
   static const String organizationCandidates = '/organization/candidates';
+
+  /// Phase O8.1 — the read-only Organization-facing Candidate Profile,
+  /// reached from "View Profile" in either the Talent Directory or
+  /// Recommended Candidates. Nested under [organizationCandidates] so it's
+  /// already covered by that prefix's existing gating in `AppRouter`.
+  static String organizationCandidateProfile(int candidateId) =>
+      '$organizationCandidates/$candidateId';
 
   /// Student-only received invitations (Phase 8B-3, Flow B) — see
   /// `AppRouter` for the role gating applied to it.
@@ -190,4 +225,39 @@ class AppRoutes {
   /// covered by that same route's existing student-only role guard in
   /// `AppRouter`, matching how [studentSkills] shares [studentCvs]'s guard.
   static const String studentProfileEdit = '$studentProfile/edit';
+
+  /// Messaging MVP — Student-only conversation list. A top-level prefix
+  /// of its own (not nested under [studentProfile]), matching the
+  /// majority convention every other student feature area here already
+  /// follows.
+  static const String studentMessages = '/student/messages';
+
+  static String studentConversation(int conversationId) =>
+      '$studentMessages/$conversationId';
+
+  /// Messaging MVP — Organization-only conversation list.
+  static const String organizationMessages = '/organization/messages';
+
+  static String organizationConversation(int conversationId) =>
+      '$organizationMessages/$conversationId';
+
+  /// Organization Public Profile phase — the authenticated organization's
+  /// own "Company Profile" screen (owner view: About, Company Details,
+  /// Open Opportunities, Updates & Achievements, plus Edit/Create
+  /// controls). See `AppRouter` for the organization-only role gating
+  /// applied to this and [organizationProfileEdit].
+  static const String organizationProfile = '/organization/profile';
+
+  static const String organizationProfileEdit = '$organizationProfile/edit';
+
+  /// Organization Public Profile phase — the read-only, public-facing
+  /// Company Profile for any organization by ID. Reachable by any
+  /// authenticated role (a Student reaches it from an Opportunity's
+  /// company identity; an Organization can preview its own public page
+  /// the same way). Deliberately a distinct top-level prefix from
+  /// [organizationProfile] (no trailing "s" there vs. "organizations"
+  /// here) so the two can never be confused by a `startsWith()` guard in
+  /// `AppRouter`.
+  static String companyProfile(int organizationId) =>
+      '/organizations/$organizationId';
 }

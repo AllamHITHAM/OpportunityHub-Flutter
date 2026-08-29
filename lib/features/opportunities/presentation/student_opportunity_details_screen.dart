@@ -2,6 +2,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -19,6 +20,7 @@ import '../../../providers/student_applications_provider.dart';
 import '../../../providers/student_cv_provider.dart';
 import '../../../providers/student_opportunities_provider.dart';
 import '../../../providers/student_profile_provider.dart';
+import '../../../routes/app_routes.dart';
 import '../../applications/presentation/apply_bottom_sheet.dart';
 import 'opportunity_card_palette.dart';
 import 'opportunity_display.dart';
@@ -280,9 +282,6 @@ class _DetailsContent extends StatelessWidget {
     final tone = opportunityCardTone(opportunity.id);
     final isDesktop = tier == _ScreenTier.desktop;
     final eligibleMajors = opportunity.eligibleMajors;
-    final fallbackFieldOfStudy = eligibleMajors.isEmpty
-        ? opportunity.fieldOfStudy
-        : null;
 
     // On mobile, Apply itself lives in the sticky bottom bar (dense, no
     // room for an explanation) -- so the same status line
@@ -297,8 +296,7 @@ class _DetailsContent extends StatelessWidget {
         tier == _ScreenTier.mobile &&
         !applied &&
         (blockedReason != _ApplyBlockedReason.none ||
-            eligibleMajors.isNotEmpty ||
-            fallbackFieldOfStudy != null);
+            eligibleMajors.isNotEmpty);
 
     final mainSections = [
       if (showMobileStatusLine) ...[
@@ -310,12 +308,9 @@ class _DetailsContent extends StatelessWidget {
         const SizedBox(height: AppSpacing.md),
       ],
       _DescriptionSection(opportunity: opportunity),
-      if (eligibleMajors.isNotEmpty || fallbackFieldOfStudy != null) ...[
+      if (eligibleMajors.isNotEmpty) ...[
         const SizedBox(height: AppSpacing.md),
-        _EligibleMajorsSection(
-          majors: eligibleMajors,
-          fallbackFieldOfStudy: fallbackFieldOfStudy,
-        ),
+        _EligibleMajorsSection(majors: eligibleMajors),
       ],
       if (opportunity.opportunitySkills.isNotEmpty) ...[
         const SizedBox(height: AppSpacing.md),
@@ -634,59 +629,73 @@ class _OpportunityHero extends StatelessWidget {
                     controller: entranceController,
                     start: 0.25,
                     end: 0.8,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(3),
-                          decoration: BoxDecoration(
-                            color: AppColors.surface,
-                            shape: BoxShape.circle,
-                            boxShadow: AppShadows.card,
-                          ),
-                          child: AppAvatar(
-                            name: organization?.organizationName,
-                            size: isWide ? 48 : 40,
-                            fallbackIcon: Icons.apartment_outlined,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        if (organization != null)
-                          Flexible(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                    organization.organizationName,
-                                    style: textTheme.titleMedium,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                // "Approved" is the organization's real,
-                                // literal backend `approvalStatus` (only
-                                // admin-approved organizations can publish
-                                // publicly) -- not a fabricated
-                                // "verified" claim, just labeled plainly.
-                                if (organization.approvalStatus == 'approved')
-                                  Padding(
-                                    padding: const EdgeInsets.only(
-                                      left: AppSpacing.xxs,
-                                    ),
-                                    child: Tooltip(
-                                      message:
-                                          'Approved organization on OpportunityHub',
-                                      child: Icon(
-                                        Icons.verified_rounded,
-                                        size: 18,
-                                        color: AppColors.primary,
-                                      ),
-                                    ),
-                                  ),
-                              ],
+                    // Organization Public Profile phase: tappable when a
+                    // real organization is known -- navigates to its
+                    // public Company Profile, the same destination
+                    // `_OrganizationCard` further down the page links to.
+                    // A plain `GestureDetector` (not `InkWell`) since this
+                    // sits over a gradient hero, not a `Material` surface.
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: organization == null
+                          ? null
+                          : () => context.push(
+                              AppRoutes.companyProfile(organization.id),
+                            ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              shape: BoxShape.circle,
+                              boxShadow: AppShadows.card,
+                            ),
+                            child: AppAvatar(
+                              name: organization?.organizationName,
+                              size: isWide ? 48 : 40,
+                              fallbackIcon: Icons.apartment_outlined,
                             ),
                           ),
-                      ],
+                          const SizedBox(width: AppSpacing.sm),
+                          if (organization != null)
+                            Flexible(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      organization.organizationName,
+                                      style: textTheme.titleMedium,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  // "Approved" is the organization's real,
+                                  // literal backend `approvalStatus` (only
+                                  // admin-approved organizations can publish
+                                  // publicly) -- not a fabricated
+                                  // "verified" claim, just labeled plainly.
+                                  if (organization.approvalStatus == 'approved')
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                        left: AppSpacing.xxs,
+                                      ),
+                                      child: Tooltip(
+                                        message:
+                                            'Approved organization on OpportunityHub',
+                                        child: Icon(
+                                          Icons.verified_rounded,
+                                          size: 18,
+                                          color: AppColors.primary,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                   if (opportunity.location != null) ...[
@@ -946,25 +955,19 @@ class _DescriptionSection extends StatelessWidget {
 }
 
 /// Real eligible majors as polished chips (Phase 8B-3.2's
-/// [OpportunityModel.eligibleMajors]), falling back to a single chip for
-/// the legacy [OpportunityModel.fieldOfStudy] when no explicit majors are
-/// set — the same fallback rule [eligibilityLabel] already documents,
-/// just rendered as chips here instead of one collapsed sentence. Renders
-/// nothing when neither is present (an unrestricted opportunity), rather
-/// than a fabricated "Open to all majors".
+/// [OpportunityModel.eligibleMajors]) — the sole authoritative academic
+/// requirement (the legacy free-text `field_of_study` is deprecated as of
+/// the Opportunity Academic Matching Cleanup and is no longer modeled or
+/// displayed anywhere in this app). Only ever built when [majors] is non-empty —
+/// an unrestricted opportunity renders nothing here, rather than a
+/// fabricated "Open to all majors".
 class _EligibleMajorsSection extends StatelessWidget {
-  const _EligibleMajorsSection({
-    required this.majors,
-    required this.fallbackFieldOfStudy,
-  });
+  const _EligibleMajorsSection({required this.majors});
 
   final List<String> majors;
-  final String? fallbackFieldOfStudy;
 
   @override
   Widget build(BuildContext context) {
-    final chips = majors.isNotEmpty ? majors : [fallbackFieldOfStudy!];
-
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -975,7 +978,7 @@ class _EligibleMajorsSection extends StatelessWidget {
             spacing: AppSpacing.xs,
             runSpacing: AppSpacing.xxs,
             children: [
-              for (final major in chips)
+              for (final major in majors)
                 StatusChip(type: AppStatusType.info, label: major),
             ],
           ),
@@ -1007,8 +1010,12 @@ class _SkillsSection extends StatelessWidget {
                   label: opportunitySkill.isRequired
                       ? '${opportunitySkill.skill.name} (Required)'
                       : opportunitySkill.skill.name,
+                  // `info`, not `primary` -- same dark-mode contrast fix
+                  // already applied to the Organization-side Required
+                  // Skills chips and the Eligible Major chip (see
+                  // organization_opportunity_details_screen.dart).
                   type: opportunitySkill.isRequired
-                      ? AppStatusType.primary
+                      ? AppStatusType.info
                       : AppStatusType.neutral,
                   compact: true,
                 ),
@@ -1040,11 +1047,17 @@ class _FactsSection extends StatelessWidget {
         'Location',
         opportunity.location ?? 'Not specified',
       ),
-      (
-        Icons.menu_book_outlined,
-        'Field of Study',
-        opportunity.fieldOfStudy ?? 'Not specified',
-      ),
+      // Opportunity Academic Matching Cleanup: Field of Study (legacy,
+      // free-text) is deliberately not shown here any more -- Eligible
+      // Majors is the sole authoritative academic requirement (see
+      // [_EligibleMajorsSection] and the fallback fact just below).
+      // Only shown when there's no explicit restriction -- an explicit
+      // list gets its own prominent chip section ([_EligibleMajorsSection])
+      // instead, so this never duplicates it. A truthful "All majors
+      // welcome" beats an unexplained absence, making the actual business
+      // rule explicit to the Student.
+      if (opportunity.eligibleMajors.isEmpty)
+        (Icons.diversity_3_outlined, 'Eligible Majors', 'All majors welcome'),
       (
         Icons.school_outlined,
         'Education Level',
@@ -1195,9 +1208,8 @@ class _FactTileState extends State<_FactTile> {
 /// A compact organization-identity card — avatar, name, type, and industry
 /// (all real fields already on [OrganizationProfileModel]; nothing
 /// fabricated). Renders nothing when the relation wasn't eager-loaded.
-/// Never wrapped in a tap target: there's no organization-profile route
-/// students can open yet, so making this look tappable would be a dead
-/// interaction.
+/// Tappable (Organization Public Profile phase) — navigates to the real
+/// public Company Profile for [organization.id].
 class _OrganizationCard extends StatelessWidget {
   const _OrganizationCard({required this.organization});
 
@@ -1217,6 +1229,8 @@ class _OrganizationCard extends StatelessWidget {
         organization.website != null && organization.website!.trim().isNotEmpty;
 
     return AppCard(
+      interactive: true,
+      onTap: () => context.push(AppRoutes.companyProfile(organization.id)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1285,10 +1299,10 @@ class _OrganizationCard extends StatelessWidget {
                   // Selectable (copyable), not a live link -- this codebase
                   // deliberately avoids a `url_launcher` dependency (see
                   // StudentApplicationDetailsScreen's own meeting-link row
-                  // for the same established pattern). No "View
-                  // Organization Profile" action either -- no such route
-                  // exists for students yet, and a dead link would be
-                  // worse than no link.
+                  // for the same established pattern). The card itself
+                  // (see this widget's own doc comment) is now the real
+                  // way to reach the organization's public Company
+                  // Profile, so no separate action is needed here.
                   Expanded(
                     child: SelectableText(
                       organization.website!,
@@ -1520,9 +1534,7 @@ class _ApplyStatusLine extends StatelessWidget {
   final bool applied;
   final _ApplyBlockedReason blockedReason;
 
-  bool get _isRestricted =>
-      opportunity.eligibleMajors.isNotEmpty ||
-      (opportunity.fieldOfStudy?.trim().isNotEmpty ?? false);
+  bool get _isRestricted => opportunity.eligibleMajors.isNotEmpty;
 
   @override
   Widget build(BuildContext context) {

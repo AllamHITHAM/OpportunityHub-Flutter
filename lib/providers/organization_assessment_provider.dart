@@ -4,11 +4,16 @@ import '../core/api/api_client.dart';
 import '../features/assessments/data/assessment_repository.dart';
 import '../features/assessments/data/interview_create_input.dart';
 import '../features/assessments/data/quiz_create_input.dart';
+import '../features/offers/data/send_offer_input.dart';
 import '../models/assessment_model.dart';
 import 'auth_provider.dart';
 
-/// Holds the currently-viewed application's Assessment state and exposes
-/// the "create an interview assessment" action.
+/// Holds the currently-viewed application's Assessment *history* (Phase
+/// 10A.3) and exposes the "create an interview/quiz assessment" action —
+/// including "Advance to Interview" (Phase 10A.3), which is just another
+/// call to the same [createAssessment] the application's very first
+/// Assessment used, now legal once the application's most recent
+/// Assessment has been finalized (see [latestAssessment]).
 ///
 /// Kept entirely separate from `OrganizationApplicationsProvider` and
 /// `StudentApplicationsProvider` — Assessment is a structurally distinct
@@ -28,9 +33,26 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
   final AssessmentRepository repository;
   final AuthProvider _authProvider;
 
-  AssessmentModel? assessment;
+  /// The full Assessment *history* for [loadedApplicationId], oldest first
+  /// (Phase 10A.3) — before this phase an application could only ever have
+  /// one Assessment, so this held at most one element; a completed Quiz
+  /// followed by a real "Advance to Interview" Assessment now both live
+  /// here, in full, never collapsed down to just one.
+  List<AssessmentModel> assessments = [];
 
-  /// Which application [assessment] (or the in-flight fetch) belongs to —
+  /// The application's *current* Assessment — the last element of
+  /// [assessments] (already chronologically ordered by the backend), or
+  /// `null` when [assessments] is empty. This is what every action-gating
+  /// decision (Complete Interview, Advance to Interview, Send Offer
+  /// eligibility mirroring the backend's own `OfferService`) should read,
+  /// never [assessments] directly, and never an arbitrary element — the
+  /// same "explicit current/latest concept, never an ambiguous single
+  /// record" requirement this phase's backend model changes also follow
+  /// (see `Application::assessment` on the backend).
+  AssessmentModel? get latestAssessment =>
+      assessments.isEmpty ? null : assessments.last;
+
+  /// Which application [assessments] (or the in-flight fetch) belongs to —
   /// mirrors `OrganizationApplicationsProvider._pendingListOpportunityId`'s
   /// dual role: it identifies both the currently in-flight load and the
   /// most recently completed one, so a request for a different
@@ -62,6 +84,20 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
   /// specific Interview.
   final Set<int> completingInterviewIds = {};
 
+  /// Assessment IDs with a manual quiz-result-release request currently in
+  /// flight (Phase 10A.2) — the same duplicate-submission guard as
+  /// [completingInterviewIds], keyed by Assessment since release always
+  /// targets a specific Assessment.
+  final Set<int> releasingResultAssessmentIds = {};
+
+  /// Assessment IDs with a next-action decision request currently in
+  /// flight (Phase 10A.4A) — the same duplicate-submission guard as
+  /// [releasingResultAssessmentIds], shared by all three decision types
+  /// ([setNextActionInterview]/[setNextActionOffer]/[setNextActionReject])
+  /// since only one decision can ever be in flight for a given Assessment
+  /// at once.
+  final Set<int> settingNextActionAssessmentIds = {};
+
   /// The in-flight load fetch, if any — guards against concurrent
   /// duplicate requests for the *same* application, without preventing an
   /// explicit refresh once the previous fetch has finished.
@@ -75,8 +111,14 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
   bool isCompletingInterview(int interviewId) =>
       completingInterviewIds.contains(interviewId);
 
+  bool isReleasingResult(int assessmentId) =>
+      releasingResultAssessmentIds.contains(assessmentId);
+
+  bool isSettingNextAction(int assessmentId) =>
+      settingNextActionAssessmentIds.contains(assessmentId);
+
   bool hasAssessmentFor(int applicationId) =>
-      loadedApplicationId == applicationId && assessment != null;
+      loadedApplicationId == applicationId && assessments.isNotEmpty;
 
   void _handleAuthChanged() {
     // A different user may sign in next — don't leak the previous
@@ -115,11 +157,11 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
     bool stillCurrent() => loadedApplicationId == applicationId;
 
     try {
-      final result = await repository.getAssessmentForApplication(
+      final result = await repository.getAssessmentsForApplication(
         applicationId,
       );
       if (stillCurrent()) {
-        assessment = result;
+        assessments = result;
       }
     } on ApiException catch (error) {
       if (stillCurrent()) {
@@ -152,6 +194,15 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
   /// [interviewInput]). Both present, or the wrong one for [type], is a
   /// local programming error — this never reaches the network, matching
   /// [AssessmentRepository.createAssessment]'s own local validation.
+  ///
+  /// **Phase 10A.3**: if [applicationId]'s history is already loaded (the
+  /// common case for "Advance to Interview" — the organization can only
+  /// see that action once a completed Quiz is already showing), the newly
+  /// created Assessment is *appended* to [assessments] rather than
+  /// replacing it, so the completed Quiz that made this creation legal in
+  /// the first place stays visible. Only replaces [assessments] wholesale
+  /// (as `[created]`) when this is a genuinely fresh application context —
+  /// matches the pre-10A.3 behavior exactly for that case.
   Future<bool> createAssessment({
     required int applicationId,
     required String type,
@@ -188,7 +239,9 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
         interviewInput: interviewInput,
         quizInput: quizInput,
       );
-      assessment = created;
+      assessments = loadedApplicationId == applicationId
+          ? [...assessments, created]
+          : [created];
       loadedApplicationId = applicationId;
       success = true;
     } on ApiException catch (error) {
@@ -197,7 +250,7 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
     } catch (_) {
       // An unexpected parsing/runtime error — never propagates as a raw
       // exception, never shows raw exception/stack-trace text, and never
-      // touches `assessment`, so the previous state is preserved exactly
+      // touches `assessments`, so the previous state is preserved exactly
       // as it was before this attempt.
       actionErrorMessage = 'Something went wrong. Please try again.';
     } finally {
@@ -207,10 +260,47 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
     return success;
   }
 
+  /// Phase 10A.4B — advances [applicationId]'s candidate straight to the
+  /// Opportunity's already-published shared Quiz template. Same
+  /// busy-guard/state-update shape as [createAssessment], but creates only
+  /// a new Assessment referencing the shared Quiz, never a new Quiz row.
+  ///
+  /// A `422` here most often means the shared Quiz isn't published yet
+  /// (`actionErrorMessage` carries the backend's own clear message, e.g.
+  /// `"This opportunity's quiz is not published yet."`) — surfaced as-is,
+  /// never replaced with a generic message.
+  Future<bool> advanceToSharedQuiz(int applicationId) async {
+    if (busyApplicationIds.contains(applicationId)) return false;
+
+    busyApplicationIds.add(applicationId);
+    actionErrorMessage = null;
+    fieldErrors = {};
+    notifyListeners();
+
+    var success = false;
+    try {
+      final created = await repository.advanceToSharedQuiz(applicationId);
+      assessments = loadedApplicationId == applicationId
+          ? [...assessments, created]
+          : [created];
+      loadedApplicationId = applicationId;
+      success = true;
+    } on ApiException catch (error) {
+      actionErrorMessage = error.message;
+    } catch (_) {
+      actionErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      busyApplicationIds.remove(applicationId);
+      notifyListeners();
+    }
+    return success;
+  }
+
   /// Completes [interviewId] (belonging to [applicationId]'s currently
-  /// tracked assessment) and, only on success, refreshes [assessment] from
-  /// the backend so its `status`/`result`/nested `interview` all reflect
-  /// the post-completion state — the completion endpoint itself returns
+  /// tracked assessment) and, only on success, refreshes [assessments] from
+  /// the backend so the completed Interview's `status`/`result`/nested
+  /// `interview` all reflect the post-completion state — the completion
+  /// endpoint itself returns
   /// the updated Interview, not the Assessment shape this provider holds,
   /// so a targeted reload through the same [loadForApplication] path
   /// already used elsewhere is the least-coupled way to stay in sync
@@ -249,11 +339,139 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
     } catch (_) {
       // An unexpected parsing/runtime error — never propagates as a raw
       // exception, never shows raw exception/stack-trace text, and never
-      // touches `assessment`, so the previous state is preserved exactly
+      // touches `assessments`, so the previous state is preserved exactly
       // as it was before this attempt.
       actionErrorMessage = 'Something went wrong. Please try again.';
     } finally {
       completingInterviewIds.remove(interviewId);
+      notifyListeners();
+    }
+    return success;
+  }
+
+  /// Manually releases [assessmentId]'s already-graded Quiz result to the
+  /// Student (Phase 10A.2). On success, replaces the matching element of
+  /// [assessments] in place from the response (Phase 10A.3 — [assessments]
+  /// is now a history, so this can no longer just overwrite a single
+  /// field) — mirroring [createAssessment]'s own direct-assignment pattern
+  /// rather than [completeInterview]'s reload-via [loadForApplication],
+  /// since `releaseQuizResult` already returns the full updated Assessment
+  /// and a second round-trip would be redundant. Only applied when
+  /// [applicationId] is still the one currently loaded, so a release for an
+  /// application the organization has since navigated away from can never
+  /// overwrite newer state. Returns `true` only on success. A duplicate
+  /// submission for the same assessment while one is already in flight is
+  /// ignored (returns `false` immediately, no second repository call).
+  Future<bool> releaseQuizResult({
+    required int applicationId,
+    required int assessmentId,
+  }) async {
+    if (releasingResultAssessmentIds.contains(assessmentId)) return false;
+
+    releasingResultAssessmentIds.add(assessmentId);
+    actionErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      final updated = await repository.releaseQuizResult(assessmentId);
+      if (loadedApplicationId == applicationId) {
+        assessments = [
+          for (final existing in assessments)
+            existing.id == updated.id ? updated : existing,
+        ];
+      }
+      success = true;
+    } on ApiException catch (error) {
+      actionErrorMessage = error.message;
+    } catch (_) {
+      // An unexpected parsing/runtime error — never propagates as a raw
+      // exception, never shows raw exception/stack-trace text, and never
+      // touches `assessments`, so the previous state is preserved exactly
+      // as it was before this attempt.
+      actionErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      releasingResultAssessmentIds.remove(assessmentId);
+      notifyListeners();
+    }
+    return success;
+  }
+
+  /// Stages "Advance to Interview" as [assessmentId]'s next-step decision
+  /// (Phase 10A.4A). On success, replaces the matching element of
+  /// [assessments] in place from the response (which now carries
+  /// `next_action`/`next_action_assessment`), the same pattern
+  /// [releaseQuizResult] already uses. Returns `true` only on success. A
+  /// duplicate submission for the same assessment while one is already in
+  /// flight is ignored.
+  Future<bool> setNextActionInterview({
+    required int applicationId,
+    required int assessmentId,
+    required InterviewCreateInput input,
+  }) => _setNextAction(
+    applicationId: applicationId,
+    assessmentId: assessmentId,
+    call: () => repository.setNextActionInterview(assessmentId, input),
+  );
+
+  /// Stages "Proceed to Offer" as [assessmentId]'s next-step decision
+  /// (Phase 10A.4A). See [setNextActionInterview] for the shared
+  /// state-update/error-handling behavior.
+  Future<bool> setNextActionOffer({
+    required int applicationId,
+    required int assessmentId,
+    required SendOfferInput input,
+  }) => _setNextAction(
+    applicationId: applicationId,
+    assessmentId: assessmentId,
+    call: () => repository.setNextActionOffer(assessmentId, input),
+  );
+
+  /// Stages "Reject" as [assessmentId]'s next-step decision (Phase
+  /// 10A.4A). See [setNextActionInterview] for the shared state-update/
+  /// error-handling behavior.
+  Future<bool> setNextActionReject({
+    required int applicationId,
+    required int assessmentId,
+  }) => _setNextAction(
+    applicationId: applicationId,
+    assessmentId: assessmentId,
+    call: () => repository.setNextActionReject(assessmentId),
+  );
+
+  Future<bool> _setNextAction({
+    required int applicationId,
+    required int assessmentId,
+    required Future<AssessmentModel> Function() call,
+  }) async {
+    if (settingNextActionAssessmentIds.contains(assessmentId)) return false;
+
+    settingNextActionAssessmentIds.add(assessmentId);
+    actionErrorMessage = null;
+    fieldErrors = {};
+    notifyListeners();
+
+    var success = false;
+    try {
+      final updated = await call();
+      if (loadedApplicationId == applicationId) {
+        assessments = [
+          for (final existing in assessments)
+            existing.id == updated.id ? updated : existing,
+        ];
+      }
+      success = true;
+    } on ApiException catch (error) {
+      actionErrorMessage = error.message;
+      fieldErrors = error.errors ?? {};
+    } catch (_) {
+      // An unexpected parsing/runtime error — never propagates as a raw
+      // exception, never shows raw exception/stack-trace text, and never
+      // touches `assessments`, so the previous state is preserved exactly
+      // as it was before this attempt.
+      actionErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      settingNextActionAssessmentIds.remove(assessmentId);
       notifyListeners();
     }
     return success;
@@ -271,7 +489,7 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
 
   /// Clears all assessment state — called when the signed-in user changes.
   void reset() {
-    assessment = null;
+    assessments = [];
     loadedApplicationId = null;
     isLoading = false;
     errorMessage = null;
@@ -279,6 +497,7 @@ class OrganizationAssessmentProvider extends ChangeNotifier {
     fieldErrors = {};
     busyApplicationIds.clear();
     completingInterviewIds.clear();
+    releasingResultAssessmentIds.clear();
     _pendingLoadFetch = null;
     notifyListeners();
   }

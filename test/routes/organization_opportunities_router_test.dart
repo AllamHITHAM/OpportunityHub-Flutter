@@ -14,6 +14,8 @@ import 'package:opportunityhub_flutter/features/applications/data/application_re
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
 import 'package:opportunityhub_flutter/features/education_verification/data/education_verification_repository.dart';
+import 'package:opportunityhub_flutter/features/locations/data/location_repository.dart';
+import 'package:opportunityhub_flutter/features/messaging/data/conversation_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
 import 'package:opportunityhub_flutter/features/opportunities/data/opportunity_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
@@ -21,16 +23,21 @@ import 'package:opportunityhub_flutter/features/skills/data/student_skill_reposi
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/application_model.dart';
+import 'package:opportunityhub_flutter/models/conversation_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/education_verification_model.dart';
+import 'package:opportunityhub_flutter/models/location_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
 import 'package:opportunityhub_flutter/models/opportunity_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
+import 'package:opportunityhub_flutter/models/skill_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_skill_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/conversations_provider.dart';
+import 'package:opportunityhub_flutter/providers/location_catalog_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_opportunities_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
@@ -92,6 +99,17 @@ class _FakeOpportunityRepository extends OpportunityRepository {
   Future<OpportunityModel> getOpportunity(int id) async {
     throw ApiException('Opportunity not found', statusCode: 404);
   }
+
+  @override
+  Future<List<SkillModel>> getSkillCatalog() async => [];
+}
+
+class _FakeLocationRepository extends LocationRepository {
+  _FakeLocationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<LocationModel>> getLocations() async => [];
 }
 
 class _FakeAdminDashboardRepository extends AdminDashboardRepository {
@@ -110,6 +128,14 @@ class _FakeNotificationRepository extends NotificationRepository {
 
   @override
   Future<List<NotificationModel>> getNotifications() async => [];
+}
+
+class _FakeConversationRepository extends ConversationRepository {
+  _FakeConversationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<ConversationSummaryModel>> getConversations() async => [];
 }
 
 /// StudentHomeScreen now reads these 5 providers unconditionally in
@@ -135,6 +161,7 @@ class _FakeStudentOpportunityRepository extends OpportunityRepository {
     String? location,
     String? fieldOfStudy,
     String? keyword,
+    int? organizationId,
     int page = 1,
     int perPage = 15,
   }) async {
@@ -239,6 +266,13 @@ Future<void> _pumpAsRole(
     repository: _FakeNotificationRepository(),
     authProvider: authProvider,
   );
+  // See the AdminDashboardProvider comment above — the same reasoning
+  // applies here: MessagesBellAction now renders unconditionally next to
+  // NotificationBellAction on Student/Organization Home.
+  final conversationsProvider = ConversationsProvider(
+    repository: _FakeConversationRepository(),
+    authProvider: authProvider,
+  );
   final studentApplicationsProvider = StudentApplicationsProvider(
     repository: _FakeStudentApplicationRepository(),
     authProvider: authProvider,
@@ -261,6 +295,9 @@ Future<void> _pumpAsRole(
         repository: _FakeEducationVerificationRepository(),
         authProvider: authProvider,
       );
+  final locationCatalogProvider = LocationCatalogProvider(
+    repository: _FakeLocationRepository(),
+  );
   final appRouter = AppRouter(
     authProvider,
     studentProfileProvider,
@@ -286,6 +323,9 @@ Future<void> _pumpAsRole(
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
         ),
+        ChangeNotifierProvider<ConversationsProvider>.value(
+          value: conversationsProvider,
+        ),
         ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ChangeNotifierProvider<StudentApplicationsProvider>.value(
           value: studentApplicationsProvider,
@@ -301,6 +341,9 @@ Future<void> _pumpAsRole(
         ),
         ChangeNotifierProvider<StudentEducationVerificationProvider>.value(
           value: studentEducationVerificationProvider,
+        ),
+        ChangeNotifierProvider<LocationCatalogProvider>.value(
+          value: locationCatalogProvider,
         ),
       ],
       child: MaterialApp.router(
@@ -357,6 +400,11 @@ void main() {
           ),
           ChangeNotifierProvider<OrganizationOpportunitiesProvider>.value(
             value: opportunitiesProvider,
+          ),
+          ChangeNotifierProvider<LocationCatalogProvider>.value(
+            value: LocationCatalogProvider(
+              repository: _FakeLocationRepository(),
+            ),
           ),
           ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
         ],
@@ -443,7 +491,10 @@ void main() {
         organizationProfile: _approvedProfile,
       );
 
-      expect(find.text('Create Opportunity'), findsOneWidget);
+      // "Create Opportunity" now appears both as the AppBar title and as
+      // the primary button's own label (Phase O3) — still real evidence
+      // the create route rendered.
+      expect(find.text('Create Opportunity'), findsWidgets);
       expect(tester.takeException(), isNull);
     },
   );

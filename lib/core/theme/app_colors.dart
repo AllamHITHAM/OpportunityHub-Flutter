@@ -132,7 +132,12 @@ class AppColorsLight {
   static const Color surface = Color(0xFFFFFFFF);
   static const Color surfaceVariant = Color(0xFFF1F5F9);
   static const Color card = Color(0xFFFFFFFF);
-  static const Color inputFill = Color(0xFFF8FAFC);
+  // UI Phase O3.1: was `0xFFF8FAFC` — identical to [background] itself, the
+  // one real bug behind "inputs don't stand out" reports. The dark palette
+  // below already keeps three genuinely distinct tiers (background < card <
+  // inputFill); this reuses [surfaceVariant]'s existing tone so light mode
+  // has the same three-tier hierarchy, rather than inventing a new color.
+  static const Color inputFill = Color(0xFFF1F5F9);
 
   static const Color textPrimary = Color(0xFF0F172A);
   static const Color textSecondary = Color(0xFF64748B);

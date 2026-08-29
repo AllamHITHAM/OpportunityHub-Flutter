@@ -136,11 +136,27 @@ void main() {
     expect(() => QuizModel.fromJson(json), throwsA(isA<TypeError>()));
   });
 
-  test('a malformed required assessment_id throws', () {
-    final json = _quizJson();
-    json['assessment_id'] = null;
+  test(
+    'a null assessment_id parses safely (Phase 10A.4B shared template shape)',
+    () {
+      final json = _quizJson();
+      json['assessment_id'] = null;
+      json['opportunity_id'] = 7;
 
-    expect(() => QuizModel.fromJson(json), throwsA(isA<TypeError>()));
+      final quiz = QuizModel.fromJson(json);
+
+      expect(quiz.assessmentId, isNull);
+      expect(quiz.opportunityId, 7);
+    },
+  );
+
+  test('a legacy quiz parses with opportunityId null', () {
+    final json = _quizJson();
+
+    final quiz = QuizModel.fromJson(json);
+
+    expect(quiz.assessmentId, isNotNull);
+    expect(quiz.opportunityId, isNull);
   });
 
   test('a malformed required title throws', () {
@@ -206,5 +222,55 @@ void main() {
     final model = QuizModel.fromJson(_quizJson(assessment: 'not-an-object'));
 
     expect(model.assessmentStatus, isNull);
+  });
+
+  group('Phase 10A.4B addendum — availability policy and window', () {
+    test('parses the shared availability policy on a template quiz', () {
+      final json = _quizJson()
+        ..['availability_delay_days'] = 2
+        ..['availability_time'] = '10:00'
+        ..['submission_window_hours'] = 48;
+
+      final model = QuizModel.fromJson(json);
+
+      expect(model.availabilityDelayDays, 2);
+      expect(model.availabilityTime, '10:00');
+      expect(model.submissionWindowHours, 48);
+    });
+
+    test('policy fields default to null when absent (legacy quiz)', () {
+      final model = QuizModel.fromJson(_quizJson());
+
+      expect(model.availabilityDelayDays, isNull);
+      expect(model.availabilityTime, isNull);
+      expect(model.submissionWindowHours, isNull);
+    });
+
+    test(
+      'parses a candidate-specific available_at/due_at (Student quiz response)',
+      () {
+        final json = _quizJson()
+          ..['available_at'] = '2026-08-28T10:00:00.000000Z'
+          ..['due_at'] = '2026-08-30T10:00:00.000000Z';
+
+        final model = QuizModel.fromJson(json);
+
+        expect(
+          model.availableAt,
+          DateTime.parse('2026-08-28T10:00:00.000000Z'),
+        );
+        expect(model.dueAt, DateTime.parse('2026-08-30T10:00:00.000000Z'));
+      },
+    );
+
+    test(
+      'available_at/due_at default to null when absent (no gating / legacy)',
+      () {
+        final model = QuizModel.fromJson(_quizJson());
+
+        expect(model.availableAt, isNull);
+        expect(model.dueAt, isNull);
+      },
+    );
   });
 }

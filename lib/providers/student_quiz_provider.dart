@@ -93,6 +93,36 @@ class StudentQuizProvider extends ChangeNotifier {
   /// check on submit is the actual authority (see [submit]'s 422 handling).
   bool isExpired = false;
 
+  /// Phase 10A.4B addendum — a second, lightweight timer, active whenever
+  /// [quiz] is loaded and no attempt has started yet. Its only job is to
+  /// call [notifyListeners] once a second so [isUpcoming]/[isDeadlinePassed]
+  /// (both computed live against [DateTime.now]) get re-evaluated on
+  /// rebuild — this is a pure UX convenience (so the premium "Assessment
+  /// Upcoming" screen transitions on its own the moment the window opens,
+  /// without the student needing to manually refresh) and never itself
+  /// authorizes anything: [start] independently re-checks with the backend
+  /// regardless of what this local clock says.
+  Timer? _preAttemptClockTimer;
+
+  /// Phase 10A.4B addendum — `true` while [quiz]'s candidate-specific
+  /// window hasn't opened yet. `false` for a legacy quiz (`availableAt`
+  /// null means "no gating", not "not yet available").
+  bool get isUpcoming {
+    final availableAt = quiz?.availableAt;
+    return availableAt != null && DateTime.now().isBefore(availableAt);
+  }
+
+  /// Phase 10A.4B addendum — `true` once [quiz]'s candidate-specific
+  /// submission deadline has passed with no successful submission yet
+  /// (whether or not an attempt was ever started). `false` for a legacy
+  /// quiz (`dueAt` null means "no deadline").
+  bool get isDeadlinePassed {
+    final dueAt = quiz?.dueAt;
+    if (dueAt == null) return false;
+    if (attempt?.isSubmitted ?? false) return false;
+    return DateTime.now().isAfter(dueAt);
+  }
+
   void _handleAuthChanged() {
     // A different student may sign in next — don't leak the previous
     // session's quiz/answer data into theirs.
@@ -131,6 +161,7 @@ class StudentQuizProvider extends ChangeNotifier {
       final result = await repository.getStudentQuiz(assessmentId);
       if (stillCurrent()) {
         quiz = result;
+        _syncPreAttemptClock();
       }
     } on ApiException catch (error) {
       if (stillCurrent()) {
@@ -175,6 +206,7 @@ class StudentQuizProvider extends ChangeNotifier {
       selectedAnswers
         ..clear()
         ..addAll(result.answers);
+      _stopPreAttemptClock();
       _startTimer(result.startedAt);
       success = true;
     } on ApiException catch (error) {
@@ -260,14 +292,55 @@ class StudentQuizProvider extends ChangeNotifier {
     return success;
   }
 
+  /// Phase 10A.4B addendum — the real cutoff for the in-progress countdown:
+  /// whichever of the personal timer (`startedAt + time_limit_minutes`) and
+  /// the candidate's own submission deadline (`quiz.dueAt`) comes first —
+  /// mirrors `Student\QuizController::submit()`'s identical
+  /// `$personalTimerDeadline`/`$effectiveDeadline` selection exactly, so
+  /// this countdown never promises the student more time than the backend
+  /// will actually honor. `null` when neither constraint applies (no time
+  /// limit and no deadline) — matches the pre-addendum "no countdown at
+  /// all" behavior.
+  DateTime? _effectiveDeadline(DateTime startedAt) {
+    final limitMinutes = quiz?.timeLimitMinutes;
+    final dueAt = quiz?.dueAt;
+    final timerDeadline = limitMinutes != null
+        ? startedAt.add(Duration(minutes: limitMinutes))
+        : null;
+
+    if (timerDeadline == null) return dueAt;
+    if (dueAt == null) return timerDeadline;
+    return timerDeadline.isBefore(dueAt) ? timerDeadline : dueAt;
+  }
+
+  /// Phase 10A.4B addendum — once [isExpired], which constraint actually
+  /// bound: the candidate's real submission deadline (`true`), or their
+  /// personal timer (`false`) — mirrors
+  /// `Student\QuizController::submit()`'s own `$dueAtIsBinding` selection,
+  /// so the expiry message this local clock shows never claims a cause the
+  /// backend wouldn't also report. Meaningless (and unused) while
+  /// [isExpired] is `false`.
+  bool get isDeadlineBindingOnExpiry {
+    final startedAt = effectiveStartedAt;
+    final dueAt = quiz?.dueAt;
+    if (dueAt == null) return false;
+    if (startedAt == null) return true;
+
+    final limitMinutes = quiz?.timeLimitMinutes;
+    final timerDeadline = limitMinutes != null
+        ? startedAt.add(Duration(minutes: limitMinutes))
+        : null;
+    return timerDeadline == null || !timerDeadline.isBefore(dueAt);
+  }
+
   void _startTimer(DateTime? startedAt) {
     _timer?.cancel();
     _timer = null;
     effectiveStartedAt = startedAt;
     isExpired = false;
 
-    final limitMinutes = quiz?.timeLimitMinutes;
-    if (startedAt == null || limitMinutes == null) {
+    final deadline = startedAt != null ? _effectiveDeadline(startedAt) : null;
+    if (startedAt == null || deadline == null) {
       remainingTime = null;
       return;
     }
@@ -278,10 +351,9 @@ class StudentQuizProvider extends ChangeNotifier {
 
   void _tick() {
     final startedAt = effectiveStartedAt;
-    final limitMinutes = quiz?.timeLimitMinutes;
-    if (startedAt == null || limitMinutes == null) return;
+    final deadline = startedAt != null ? _effectiveDeadline(startedAt) : null;
+    if (startedAt == null || deadline == null) return;
 
-    final deadline = startedAt.add(Duration(minutes: limitMinutes));
     final remaining = deadline.difference(DateTime.now());
 
     if (remaining.isNegative || remaining == Duration.zero) {
@@ -299,6 +371,35 @@ class StudentQuizProvider extends ChangeNotifier {
     _timer = null;
   }
 
+  /// Phase 10A.4B addendum — (re)starts [_preAttemptClockTimer] whenever
+  /// [quiz] still has a real reason to keep ticking pre-attempt: it's
+  /// upcoming (so it can transition to "available" live), or it has a
+  /// deadline that could still transition to "passed" live. A no-op (and
+  /// stops any existing one) once neither applies, or once an attempt
+  /// exists — the per-attempt [_timer] takes over from there.
+  void _syncPreAttemptClock() {
+    _preAttemptClockTimer?.cancel();
+    _preAttemptClockTimer = null;
+
+    if (quiz == null || attempt != null) return;
+    // Only keeps ticking while a real state transition is still pending —
+    // once `isDeadlinePassed` is already true, nothing further will ever
+    // change, so there's no reason to keep a periodic timer alive.
+    final hasPendingTransition =
+        isUpcoming || (quiz?.dueAt != null && !isDeadlinePassed);
+    if (!hasPendingTransition) return;
+
+    _preAttemptClockTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => notifyListeners(),
+    );
+  }
+
+  void _stopPreAttemptClock() {
+    _preAttemptClockTimer?.cancel();
+    _preAttemptClockTimer = null;
+  }
+
   /// Clears all quiz/attempt/answer state — called when the signed-in
   /// student changes.
   void reset() {
@@ -314,6 +415,7 @@ class StudentQuizProvider extends ChangeNotifier {
     startAlreadySubmitted = false;
     fieldErrors = {};
     _stopTimer();
+    _stopPreAttemptClock();
     effectiveStartedAt = null;
     remainingTime = null;
     isExpired = false;
@@ -328,6 +430,7 @@ class StudentQuizProvider extends ChangeNotifier {
   void dispose() {
     _authProvider.removeListener(_handleAuthChanged);
     _stopTimer();
+    _stopPreAttemptClock();
     super.dispose();
   }
 }

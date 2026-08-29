@@ -24,19 +24,26 @@ import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/admin/data/admin_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/cv/data/cv_repository.dart';
+import 'package:opportunityhub_flutter/features/messaging/data/conversation_repository.dart';
 import 'package:opportunityhub_flutter/features/notifications/data/notification_repository.dart';
+import 'package:opportunityhub_flutter/features/organization/data/organization_dashboard_repository.dart';
 import 'package:opportunityhub_flutter/features/organization/data/organization_profile_repository.dart';
+import 'package:opportunityhub_flutter/features/organization/presentation/organization_home_screen.dart';
 import 'package:opportunityhub_flutter/features/skills/data/student_skill_repository.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/models/admin_dashboard_stats_model.dart';
+import 'package:opportunityhub_flutter/models/conversation_model.dart';
 import 'package:opportunityhub_flutter/models/cv_model.dart';
 import 'package:opportunityhub_flutter/models/notification_model.dart';
+import 'package:opportunityhub_flutter/models/organization_dashboard_stats_model.dart';
 import 'package:opportunityhub_flutter/models/organization_profile_model.dart';
 import 'package:opportunityhub_flutter/models/student_profile_model.dart';
 import 'package:opportunityhub_flutter/models/user_model.dart';
 import 'package:opportunityhub_flutter/providers/admin_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/auth_provider.dart';
+import 'package:opportunityhub_flutter/providers/conversations_provider.dart';
 import 'package:opportunityhub_flutter/providers/notification_provider.dart';
+import 'package:opportunityhub_flutter/providers/organization_dashboard_provider.dart';
 import 'package:opportunityhub_flutter/providers/organization_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_cv_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
@@ -99,12 +106,34 @@ class _FakeAdminDashboardRepository extends AdminDashboardRepository {
   }
 }
 
+// See _FakeAdminDashboardRepository's own doc comment above —
+// OrganizationHomeScreen now requires OrganizationDashboardProvider
+// directly, for the identical reason.
+class _FakeOrganizationDashboardRepository
+    extends OrganizationDashboardRepository {
+  _FakeOrganizationDashboardRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<OrganizationDashboardStatsModel> getDashboardStats() async {
+    throw ApiException('Not used in these router tests');
+  }
+}
+
 class _FakeNotificationRepository extends NotificationRepository {
   _FakeNotificationRepository()
     : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
 
   @override
   Future<List<NotificationModel>> getNotifications() async => [];
+}
+
+class _FakeConversationRepository extends ConversationRepository {
+  _FakeConversationRepository()
+    : super(apiClient: ApiClient(tokenStorageService: TokenStorageService()));
+
+  @override
+  Future<List<ConversationSummaryModel>> getConversations() async => [];
 }
 
 void _setViewSize(WidgetTester tester, Size size) {
@@ -239,8 +268,18 @@ Future<void> _pumpAsRole(
     repository: _FakeAdminDashboardRepository(),
     authProvider: authProvider,
   );
+  final organizationDashboardProvider = OrganizationDashboardProvider(
+    repository: _FakeOrganizationDashboardRepository(),
+    authProvider: authProvider,
+  );
   final notificationProvider = NotificationProvider(
     repository: _FakeNotificationRepository(),
+    authProvider: authProvider,
+  );
+  // MessagesBellAction now renders unconditionally next to
+  // NotificationBellAction on Student/Organization Home.
+  final conversationsProvider = ConversationsProvider(
+    repository: _FakeConversationRepository(),
     authProvider: authProvider,
   );
   final appRouter = AppRouter(
@@ -259,12 +298,18 @@ Future<void> _pumpAsRole(
         ChangeNotifierProvider<AdminDashboardProvider>.value(
           value: adminDashboardProvider,
         ),
+        ChangeNotifierProvider<OrganizationDashboardProvider>.value(
+          value: organizationDashboardProvider,
+        ),
         ChangeNotifierProvider<OrganizationProfileProvider>.value(
           value: organizationProfileProvider,
         ),
         ChangeNotifierProvider<StudentCvProvider>.value(value: cvProvider),
         ChangeNotifierProvider<NotificationProvider>.value(
           value: notificationProvider,
+        ),
+        ChangeNotifierProvider<ConversationsProvider>.value(
+          value: conversationsProvider,
         ),
         ChangeNotifierProvider<ThemeProvider>.value(value: ThemeProvider()),
       ],
@@ -411,7 +456,7 @@ void main() {
       );
 
       expect(find.text('My CVs'), findsNothing);
-      expect(find.text('Role: Organization'), findsOneWidget);
+      expect(find.byType(OrganizationHomeScreen), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

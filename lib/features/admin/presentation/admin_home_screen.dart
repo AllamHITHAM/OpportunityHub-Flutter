@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_motion.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_widgets.dart';
 import '../../../providers/admin_dashboard_provider.dart';
@@ -11,8 +13,21 @@ import '../../../routes/app_routes.dart';
 import '../../auth/presentation/email_verification_banner.dart';
 import '../../notifications/presentation/notification_bell_action.dart';
 
+/// Real, responsive breakpoints for the metric grid, and the centered
+/// desktop content width (Admin Dashboard Final UI Polish) — deliberately
+/// the exact same values `OrganizationHomeScreen` already established,
+/// not a new, competing set of breakpoints for this one screen.
+const _wideBreakpoint = 1200.0;
+const _desktopBreakpoint = 900.0;
+const _tabletBreakpoint = 600.0;
+const _maxContentWidth = 900.0;
+
 /// The Admin dashboard — platform-wide statistics, plus navigation entries
-/// to Manage Users, Manage Organizations, and Manage Skills.
+/// to Manage Users, Manage Organizations, Manage Skills, and Education
+/// Verifications. Every number here is a real backend count from
+/// `GET /api/admin/dashboard` — this phase is visual/responsive polish
+/// only, never a new statistic or a changed query (see
+/// `AdminDashboardStatsModel`/`DashboardController` — both untouched).
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
 
@@ -79,98 +94,189 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
     return RefreshIndicator(
       onRefresh: () => provider.load(forceRefresh: true),
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _AdminIdentityCard(authProvider: authProvider),
-            const SizedBox(height: AppSpacing.sm),
-            const EmailVerificationBanner(),
-            if (provider.errorMessage != null) ...[
-              const SizedBox(height: AppSpacing.md),
-              AppErrorView(
-                compact: true,
-                title: 'Refresh Failed',
-                message: provider.errorMessage!,
-                onRetry: () => provider.load(forceRefresh: true),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+
+          return SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: EdgeInsets.symmetric(
+              horizontal: width >= _desktopBreakpoint
+                  ? AppSpacing.xl
+                  : AppSpacing.screenHorizontal,
+              vertical: AppSpacing.md,
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _AdminIdentityCard(authProvider: authProvider),
+                    const SizedBox(height: AppSpacing.md),
+                    const EmailVerificationBanner(),
+                    if (provider.errorMessage != null) ...[
+                      const SizedBox(height: AppSpacing.sm),
+                      AppErrorView(
+                        compact: true,
+                        title: 'Refresh Failed',
+                        message: provider.errorMessage!,
+                        onRetry: () => provider.load(forceRefresh: true),
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.lg),
+                    _MetricGroup(
+                      title: 'Overview',
+                      width: width,
+                      metrics: [
+                        _Metric(
+                          icon: Icons.groups_outlined,
+                          label: 'Total Users',
+                          value: stats.totalUsers,
+                        ),
+                        _Metric(
+                          icon: Icons.person_outline_rounded,
+                          label: 'Students',
+                          value: stats.totalStudents,
+                        ),
+                        _Metric(
+                          icon: Icons.business_outlined,
+                          label: 'Organizations',
+                          value: stats.totalOrganizations,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    _MetricGroup(
+                      title: 'Organizations',
+                      width: width,
+                      metrics: [
+                        _Metric(
+                          icon: Icons.hourglass_top_outlined,
+                          label: 'Pending',
+                          value: stats.pendingOrganizations,
+                          type: AppStatusType.warning,
+                          // Admin Dashboard Final UI Polish: real-data-driven
+                          // emphasis only -- never a fabricated alert. A
+                          // genuinely nonzero Pending count (real backend
+                          // data already on screen either way) gets a
+                          // slightly stronger border, nothing invented.
+                          emphasized: stats.pendingOrganizations > 0,
+                        ),
+                        _Metric(
+                          icon: Icons.check_circle_outline,
+                          label: 'Approved',
+                          value: stats.approvedOrganizations,
+                          type: AppStatusType.success,
+                        ),
+                        _Metric(
+                          icon: Icons.cancel_outlined,
+                          label: 'Rejected',
+                          value: stats.rejectedOrganizations,
+                          type: AppStatusType.error,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    _MetricGroup(
+                      title: 'Opportunities',
+                      width: width,
+                      metrics: [
+                        _Metric(
+                          icon: Icons.work_outline_rounded,
+                          label: 'Total',
+                          value: stats.totalOpportunities,
+                        ),
+                        _Metric(
+                          icon: Icons.check_circle_outline,
+                          label: 'Open',
+                          value: stats.openOpportunities,
+                          type: AppStatusType.success,
+                        ),
+                        _Metric(
+                          icon: Icons.archive_outlined,
+                          label: 'Closed',
+                          value: stats.closedOpportunities,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    _MetricGroup(
+                      title: 'Recruitment',
+                      width: width,
+                      metrics: [
+                        _Metric(
+                          icon: Icons.description_outlined,
+                          label: 'Applications',
+                          value: stats.totalApplications,
+                        ),
+                        _Metric(
+                          icon: Icons.groups_2_outlined,
+                          label: 'Interviews',
+                          value: stats.totalInterviews,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    const SectionHeader(title: 'Manage'),
+                    const SizedBox(height: AppSpacing.xs),
+                    _ManageEntry(
+                      icon: Icons.people_outline_rounded,
+                      label: 'Manage Users',
+                      onTap: () => context.push(AppRoutes.adminUsers),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ManageEntry(
+                      icon: Icons.business_outlined,
+                      label: 'Manage Organizations',
+                      onTap: () => context.push(AppRoutes.adminOrganizations),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ManageEntry(
+                      icon: Icons.psychology_outlined,
+                      label: 'Manage Skills',
+                      onTap: () => context.push(AppRoutes.adminSkills),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ManageEntry(
+                      icon: Icons.school_outlined,
+                      label: 'Education Verifications',
+                      onTap: () =>
+                          context.push(AppRoutes.adminEducationVerifications),
+                    ),
+                    const SizedBox(height: AppSpacing.xl),
+                    Center(
+                      child: TextButton.icon(
+                        onPressed: () => authProvider.logout(),
+                        icon: Icon(
+                          Icons.logout_rounded,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
+                        label: Text(
+                          'Logout',
+                          style: TextStyle(color: AppColors.textSecondary),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
+                ),
               ),
-            ],
-            const SizedBox(height: AppSpacing.lg),
-            _StatSection(
-              title: 'Overview',
-              items: [
-                _StatItem('Total Users', stats.totalUsers),
-                _StatItem('Students', stats.totalStudents),
-                _StatItem('Organizations', stats.totalOrganizations),
-              ],
             ),
-            const SizedBox(height: AppSpacing.lg),
-            _StatSection(
-              title: 'Organizations',
-              items: [
-                _StatItem('Pending', stats.pendingOrganizations),
-                _StatItem('Approved', stats.approvedOrganizations),
-                _StatItem('Rejected', stats.rejectedOrganizations),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            _StatSection(
-              title: 'Opportunities',
-              items: [
-                _StatItem('Total', stats.totalOpportunities),
-                _StatItem('Open', stats.openOpportunities),
-                _StatItem('Closed', stats.closedOpportunities),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            _StatSection(
-              title: 'Recruitment',
-              items: [
-                _StatItem('Applications', stats.totalApplications),
-                _StatItem('Interviews', stats.totalInterviews),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            const SectionHeader(title: 'Manage'),
-            const SizedBox(height: AppSpacing.xs),
-            _ManageEntry(
-              icon: Icons.people_outline_rounded,
-              label: 'Manage Users',
-              onTap: () => context.push(AppRoutes.adminUsers),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            _ManageEntry(
-              icon: Icons.business_outlined,
-              label: 'Manage Organizations',
-              onTap: () => context.push(AppRoutes.adminOrganizations),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            _ManageEntry(
-              icon: Icons.psychology_outlined,
-              label: 'Manage Skills',
-              onTap: () => context.push(AppRoutes.adminSkills),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            _ManageEntry(
-              icon: Icons.school_outlined,
-              label: 'Education Verifications',
-              onTap: () => context.push(AppRoutes.adminEducationVerifications),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SecondaryButton(
-              label: 'Logout',
-              onPressed: () => authProvider.logout(),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
 }
 
+/// The Admin identity card — avatar/initials, name, email, and the "Admin"
+/// role badge, unchanged in substance from before this polish (no new
+/// profile feature, no Admin Profile screen). A subtle one-time entrance
+/// (respecting reduced motion), mirroring `OrganizationHomeScreen`'s own
+/// `_DashboardHeader` — the same restrained motion already standard
+/// elsewhere in this app, not a new animation invented for this screen.
 class _AdminIdentityCard extends StatelessWidget {
   const _AdminIdentityCard({required this.authProvider});
 
@@ -180,50 +286,116 @@ class _AdminIdentityCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final user = authProvider.user;
+    final reducedMotion = AppMotion.reduced(context, AppMotion.slow);
 
-    return AppCard(
-      child: Row(
-        children: [
-          AppAvatar(name: user?.name, size: 44),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(user?.name ?? '', style: textTheme.titleMedium),
-                Text(user?.email ?? '', style: textTheme.bodySmall),
-              ],
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: reducedMotion,
+      curve: AppMotion.entrance,
+      builder: (context, t, child) => Opacity(
+        opacity: t,
+        child: Transform.translate(
+          offset: Offset(0, (1 - t) * 8),
+          child: child,
+        ),
+      ),
+      child: AppCard(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            AppAvatar(name: user?.name, size: 48),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    user?.name ?? '',
+                    style: textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    user?.email ?? '',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    // A long Admin email must wrap safely on a narrow
+                    // phone, never overflow -- see spec's own mobile
+                    // requirement. Two lines is enough room for any
+                    // realistic address without pushing the badge below.
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-          ),
-          const StatusChip(label: 'Admin', type: AppStatusType.primary),
-        ],
+            const SizedBox(width: AppSpacing.xs),
+            const StatusChip(label: 'Admin', type: AppStatusType.primary),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// A single dashboard statistic — a plain label/value pair, not tied to any
-/// backend field name. Kept private to this screen: these are display
+/// One real dashboard statistic — a plain icon/label/value tuple, not tied
+/// to any backend field name beyond what [AdminDashboardStatsModel]
+/// already provides. Kept private to this screen: these are display
 /// labels, not something a model or a shared file should know about.
-class _StatItem {
-  const _StatItem(this.label, this.value);
+/// Mirrors `OrganizationHomeScreen`'s own `_Metric` exactly, for one
+/// consistent metric-tile look across every dashboard in this app.
+class _Metric {
+  const _Metric({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.type = AppStatusType.neutral,
+    this.emphasized = false,
+  });
 
+  final IconData icon;
   final String label;
   final int value;
+  final AppStatusType type;
+
+  /// Real-data-driven only (e.g. a nonzero Pending count) -- never set from
+  /// an invented condition. Renders a stronger accent border; the number
+  /// and label are always present regardless, so status is never conveyed
+  /// by color/emphasis alone.
+  final bool emphasized;
 }
 
-/// A titled group of [_StatTile]s, laid out in a width-aware wrapping grid
-/// so it never overflows at narrow widths and uses the extra space on wide
-/// (e.g. web) viewports instead of leaving it empty.
-class _StatSection extends StatelessWidget {
-  const _StatSection({required this.title, required this.items});
+/// A titled group of [_MetricTile]s, laid out in a width-aware wrapping
+/// grid so it never overflows at narrow widths and uses the extra space on
+/// wide (desktop/web) viewports instead of leaving it empty. Identical
+/// breakpoint logic to `OrganizationHomeScreen`'s own `_MetricGroup`.
+class _MetricGroup extends StatelessWidget {
+  const _MetricGroup({
+    required this.title,
+    required this.width,
+    required this.metrics,
+  });
 
   final String title;
-  final List<_StatItem> items;
+  final double width;
+  final List<_Metric> metrics;
+
+  int get _columns {
+    if (width >= _wideBreakpoint) return 4;
+    if (width >= _desktopBreakpoint) return 3;
+    if (width >= _tabletBreakpoint) return 2;
+    return 2;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final columns = _columns;
+    const spacing = AppSpacing.sm;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -231,10 +403,6 @@ class _StatSection extends StatelessWidget {
         const SizedBox(height: AppSpacing.xs),
         LayoutBuilder(
           builder: (context, constraints) {
-            final columns = constraints.maxWidth >= 700
-                ? 4
-                : (constraints.maxWidth >= 420 ? 3 : 2);
-            const spacing = AppSpacing.sm;
             final tileWidth =
                 (constraints.maxWidth - spacing * (columns - 1)) / columns;
 
@@ -242,10 +410,10 @@ class _StatSection extends StatelessWidget {
               spacing: spacing,
               runSpacing: spacing,
               children: [
-                for (final item in items)
+                for (final metric in metrics)
                   SizedBox(
                     width: tileWidth,
-                    child: _StatTile(item: item),
+                    child: _MetricTile(metric: metric),
                   ),
               ],
             );
@@ -256,29 +424,61 @@ class _StatSection extends StatelessWidget {
   }
 }
 
-class _StatTile extends StatelessWidget {
-  const _StatTile({required this.item});
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({required this.metric});
 
-  final _StatItem item;
+  final _Metric metric;
+
+  Color get _accent {
+    switch (metric.type) {
+      case AppStatusType.success:
+        return AppColors.success;
+      case AppStatusType.warning:
+        return AppColors.warning;
+      case AppStatusType.error:
+        return AppColors.error;
+      case AppStatusType.info:
+        return AppColors.info;
+      case AppStatusType.primary:
+        return AppColors.primary;
+      case AppStatusType.neutral:
+        return AppColors.textSecondary;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
     return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('${item.value}', style: textTheme.headlineSmall),
-          const SizedBox(height: AppSpacing.xxs),
-          Text(
-            item.label,
-            style: textTheme.bodySmall,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+      borderColor: metric.emphasized ? _accent : null,
+      child: Semantics(
+        // Screen-reader-friendly: announces as one coherent statistic
+        // ("Pending, 3") rather than two disconnected text nodes.
+        label: '${metric.label}, ${metric.value}',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(metric.icon, size: 18, color: _accent),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              '${metric.value}',
+              style: textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              metric.label,
+              style: textTheme.bodySmall?.copyWith(
+                color: AppColors.textSecondary,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -306,9 +506,14 @@ class _ManageEntry extends StatelessWidget {
 
     return AppCard(
       onTap: onTap,
+      // Admin Dashboard Final UI Polish: a subtle Web hover lift + mobile
+      // press-scale on top of the tap ripple `onTap` already provides --
+      // the same opt-in `AppCard` already offers `_QuickActionCard` on the
+      // Organization dashboard. Routes/business logic are untouched.
+      interactive: true,
       child: Row(
         children: [
-          Icon(icon, color: color),
+          SizedBox(width: 24, child: Icon(icon, color: color)),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
@@ -317,7 +522,7 @@ class _ManageEntry extends StatelessWidget {
             ),
           ),
           if (enabled)
-            const Icon(Icons.chevron_right_rounded)
+            Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary)
           else
             const StatusChip(label: 'Coming Soon', compact: true),
         ],
