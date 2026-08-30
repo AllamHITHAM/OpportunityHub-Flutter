@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../core/api/api_client.dart';
+import '../features/organization_profile/data/picked_image_file.dart';
 import '../features/student/data/student_profile_repository.dart';
 import '../models/student_profile_model.dart';
 import 'auth_provider.dart';
@@ -93,6 +94,8 @@ class StudentProfileProvider extends ChangeNotifier {
     hasChecked = false;
     _checkSucceeded = false;
     errorMessage = null;
+    isUploadingPhoto = false;
+    photoErrorMessage = null;
     notifyListeners();
   }
 
@@ -196,6 +199,70 @@ class StudentProfileProvider extends ChangeNotifier {
       notifyListeners();
     }
     return success;
+  }
+
+  // -----------------------------------------------------------------
+  // Profile Photo
+  // -----------------------------------------------------------------
+  //
+  // Mirrors `OrganizationProfileProvider.uploadLogo`/`removeLogo`
+  // exactly: one busy flag shared by upload+remove, one error string, a
+  // busy-guard that ignores a duplicate submission rather than queuing
+  // it, and [profile] only ever replaced with the real backend response
+  // on success -- never touched on failure, so a failed upload can never
+  // make the screen believe a new photo actually persisted or lose the
+  // previously-displayed one.
+
+  bool isUploadingPhoto = false;
+  String? photoErrorMessage;
+
+  Future<bool> uploadPhoto(PickedImageFile file) async {
+    if (isUploadingPhoto) return false;
+
+    isUploadingPhoto = true;
+    photoErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      profile = await repository.uploadPhoto(file);
+      success = true;
+    } on ApiException catch (error) {
+      photoErrorMessage = error.message;
+    } catch (_) {
+      photoErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isUploadingPhoto = false;
+      notifyListeners();
+    }
+    return success;
+  }
+
+  Future<bool> removePhoto() async {
+    if (isUploadingPhoto) return false;
+
+    isUploadingPhoto = true;
+    photoErrorMessage = null;
+    notifyListeners();
+
+    var success = false;
+    try {
+      profile = await repository.removePhoto();
+      success = true;
+    } on ApiException catch (error) {
+      photoErrorMessage = error.message;
+    } catch (_) {
+      photoErrorMessage = 'Something went wrong. Please try again.';
+    } finally {
+      isUploadingPhoto = false;
+      notifyListeners();
+    }
+    return success;
+  }
+
+  void clearPhotoError() {
+    photoErrorMessage = null;
+    notifyListeners();
   }
 
   void clearError() {

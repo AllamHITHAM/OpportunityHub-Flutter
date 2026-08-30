@@ -181,7 +181,7 @@ void main() {
       expect(applicant.major, isNull);
       expect(applicant.graduationYear, isNull);
       expect(applicant.bio, isNull);
-      expect(applicant.profileImage, isNull);
+      expect(applicant.photoUrl, isNull);
       expect(applicant.name, isNull);
       expect(applicant.email, isNull);
     });

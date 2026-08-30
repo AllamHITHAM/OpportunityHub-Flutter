@@ -27,6 +27,7 @@ class RecommendedCandidateModel {
     required this.currentLocation,
     required this.availableLocations,
     required this.skills,
+    this.photoUrl,
     required this.matchScore,
     this.skillsMatchScore,
     this.majorMatchScore,
@@ -60,6 +61,10 @@ class RecommendedCandidateModel {
   final List<LocationModel> availableLocations;
 
   final List<CandidateSkillModel> skills;
+
+  /// Student Profile Photo: the candidate's uploaded profile photo, if
+  /// any -- `null` keeps the existing initials-avatar fallback rendering.
+  final String? photoUrl;
 
   /// The same deterministic 0-100 overall match score
   /// `MatchingService::scoreCandidate()` computes — never a fabricated or
@@ -142,6 +147,7 @@ class RecommendedCandidateModel {
       skills: skillsJson
           .map((s) => CandidateSkillModel.fromJson(s as Map<String, dynamic>))
           .toList(),
+      photoUrl: json['profile_photo_url'] as String?,
       matchScore: (json['match_score'] as num).toDouble(),
       skillsMatchScore: (json['skills_match_score'] as num?)?.toDouble(),
       majorMatchScore: (json['major_match_score'] as num?)?.toDouble(),

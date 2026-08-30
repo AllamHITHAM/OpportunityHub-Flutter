@@ -23,7 +23,7 @@ class ApplicantSummaryModel {
     this.major,
     this.graduationYear,
     this.bio,
-    this.profileImage,
+    this.photoUrl,
     this.skills = const [],
     this.educationVerificationStatus = 'not_submitted',
   });
@@ -41,7 +41,13 @@ class ApplicantSummaryModel {
   final String? major;
   final int? graduationYear;
   final String? bio;
-  final String? profileImage;
+
+  /// Student Profile Photo: the applicant's uploaded profile photo, if
+  /// any -- populated from the nested `student_profile.profile_photo_url`
+  /// field (never the raw `profile_image` storage path, which the
+  /// backend never exposes). `null` keeps the existing initials-avatar
+  /// fallback rendering.
+  final String? photoUrl;
 
   /// The applicant's Student Skills, each carrying its evidence source
   /// (Phase 8A-6.1) — populated from the nested
@@ -74,7 +80,7 @@ class ApplicantSummaryModel {
       major: json['major'] as String?,
       graduationYear: json['graduation_year'] as int?,
       bio: json['bio'] as String?,
-      profileImage: json['profile_image'] as String?,
+      photoUrl: json['profile_photo_url'] as String?,
       skills: skillsJson is List
           ? skillsJson
                 .whereType<Map<String, dynamic>>()

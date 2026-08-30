@@ -47,6 +47,24 @@ void main() {
     });
 
     test(
+      'parses profile_photo_url (Student Profile Photo phase), null when '
+      'absent',
+      () {
+        final withPhoto = CandidateModel.fromJson({
+          ..._json(),
+          'profile_photo_url': 'https://cdn.example.com/photos/omar.png',
+        });
+        final withoutPhoto = CandidateModel.fromJson(_json());
+
+        expect(
+          withPhoto.photoUrl,
+          'https://cdn.example.com/photos/omar.png',
+        );
+        expect(withoutPhoto.photoUrl, isNull);
+      },
+    );
+
+    test(
       'education_verification_status defaults to not_submitted when missing',
       () {
         final json = _json()..remove('education_verification_status');

@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:opportunityhub_flutter/core/api/api_client.dart';
 import 'package:opportunityhub_flutter/core/storage/token_storage_service.dart';
+import 'package:opportunityhub_flutter/features/organization_profile/data/picked_image_file.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 
 const _secureStorageChannel = MethodChannel(
@@ -469,6 +470,105 @@ void main() {
             'Student profile not found',
           ),
         ),
+      );
+    });
+  });
+
+  group('uploadPhoto', () {
+    test('POSTs multipart form data to /student/profile/photo with a '
+        '"photo" field', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {
+            'id': 1,
+            'university': 'State University',
+            'major': 'Computer Science',
+            'graduation_year': 2027,
+            'profile_photo_url': 'https://cdn.example.com/photos/new.png',
+          },
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final profile = await repository.uploadPhoto(
+        PickedImageFile(
+          filename: 'photo.png',
+          bytes: Uint8List.fromList([1, 2, 3]),
+        ),
+      );
+
+      expect(adapter.lastRequest?.method, 'POST');
+      expect(adapter.lastRequest?.path, '/student/profile/photo');
+      final sentBody = adapter.lastRequest?.data as FormData;
+      expect(sentBody.files.single.key, 'photo');
+      expect(sentBody.files.single.value.filename, 'photo.png');
+      expect(profile.photoUrl, 'https://cdn.example.com/photos/new.png');
+    });
+
+    test('throws with the backend message on 422 (invalid file)', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'message': 'The given data was invalid.',
+          'errors': {
+            'photo': ['The photo must be an image.'],
+          },
+        }, 422);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.uploadPhoto(
+          PickedImageFile(
+            filename: 'not-an-image.txt',
+            bytes: Uint8List.fromList([1, 2, 3]),
+          ),
+        ),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.errors?['photo'],
+            'errors[photo]',
+            contains('The photo must be an image.'),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('removePhoto', () {
+    test('sends DELETE to /student/profile/photo and parses the response', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'data': {
+            'id': 1,
+            'university': 'State University',
+            'major': 'Computer Science',
+            'graduation_year': 2027,
+            'profile_photo_url': null,
+          },
+        }, 200);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      final profile = await repository.removePhoto();
+
+      expect(adapter.lastRequest?.method, 'DELETE');
+      expect(adapter.lastRequest?.path, '/student/profile/photo');
+      expect(profile.photoUrl, isNull);
+    });
+
+    test('throws on 404 when the profile does not exist yet', () async {
+      final adapter = _FakeHttpClientAdapter((options) {
+        return _jsonResponse({
+          'success': false,
+          'message': 'Student profile not found',
+          'data': null,
+        }, 404);
+      });
+      final repository = _repositoryWithAdapter(adapter);
+
+      await expectLater(
+        repository.removePhoto(),
+        throwsA(isA<ApiException>()),
       );
     });
   });

@@ -7,8 +7,10 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_widgets.dart';
+import '../../../providers/auth_provider.dart';
 import '../../../providers/location_catalog_provider.dart';
 import '../../../providers/student_profile_provider.dart';
+import '../../organization_profile/data/picked_image_file.dart';
 import 'interested_in_field.dart';
 import 'work_location_fields.dart';
 
@@ -16,10 +18,23 @@ import 'work_location_fields.dart';
 /// (`PUT /api/student/profile`) — university, major, graduation year,
 /// phone, bio, current location, and available work locations (Student
 /// Location Profile Patch), the only fields this endpoint accepts. No GPA,
-/// availability, hours/week, or profile photo field exists on the backend
-/// record's editable surface, so none are offered here.
+/// availability, or hours/week field exists on the backend record's
+/// editable surface, so none are offered here. The profile photo (Student
+/// Profile Photo phase) is a separate, self-contained action
+/// ([_PhotoSection]) hitting its own dedicated upload/remove endpoints
+/// immediately, not part of this form's own submit — mirrors
+/// `OrganizationProfileEditScreen`'s own Company Logo section exactly.
 class StudentProfileEditScreen extends StatefulWidget {
-  const StudentProfileEditScreen({super.key});
+  const StudentProfileEditScreen({
+    super.key,
+    this.pickPhoto = pickImageFileFromDevice,
+  });
+
+  /// Defaults to the real platform file picker
+  /// ([pickImageFileFromDevice]) — overridable in tests, mirroring
+  /// `OrganizationProfileEditScreen.pickLogoImage`'s own injectable-picker
+  /// convention. Threaded down to [_PhotoSection].
+  final Future<PickedImageFile?> Function() pickPhoto;
 
   @override
   State<StudentProfileEditScreen> createState() =>
@@ -191,6 +206,8 @@ class _StudentProfileEditScreenState extends State<StudentProfileEditScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      _PhotoSection(pickImage: widget.pickPhoto),
+                      const SizedBox(height: AppSpacing.md),
                       AppCard(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -461,6 +478,160 @@ class _FormEntranceState extends State<_FormEntrance>
           end: Offset.zero,
         ).animate(curved),
         child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Profile Photo — Choose Image → preview → Save (Student Profile Photo
+/// phase). A self-contained action, separate from the surrounding form's
+/// own "Save Changes" submit, hitting the dedicated
+/// `POST/DELETE /student/profile/photo` endpoints immediately. Mirrors
+/// `OrganizationProfileEditScreen`'s own `_LogoSection` exactly. Keeps
+/// the existing clean initials fallback (via [AppAvatar]) whenever no
+/// photo is set — never a fabricated stock image.
+class _PhotoSection extends StatefulWidget {
+  const _PhotoSection({this.pickImage = pickImageFileFromDevice});
+
+  /// Defaults to the real platform file picker
+  /// ([pickImageFileFromDevice]) — overridable in tests.
+  final Future<PickedImageFile?> Function() pickImage;
+
+  @override
+  State<_PhotoSection> createState() => _PhotoSectionState();
+}
+
+class _PhotoSectionState extends State<_PhotoSection> {
+  /// A freshly-picked photo not yet uploaded -- `null` until the user
+  /// chooses one, and cleared again once a save/cancel resolves.
+  PickedImageFile? _picked;
+
+  Future<void> _choose() async {
+    final picked = await widget.pickImage();
+    if (!mounted || picked == null) return;
+    setState(() => _picked = picked);
+  }
+
+  void _cancelPreview() {
+    setState(() => _picked = null);
+  }
+
+  Future<void> _save(StudentProfileProvider provider) async {
+    final picked = _picked;
+    if (picked == null) return;
+
+    final success = await provider.uploadPhoto(picked);
+    if (!mounted) return;
+
+    if (success) {
+      setState(() => _picked = null);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Profile photo updated')));
+    } else if (provider.photoErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.photoErrorMessage!)));
+    }
+  }
+
+  Future<void> _remove(StudentProfileProvider provider) async {
+    final success = await provider.removePhoto();
+    if (!mounted) return;
+
+    if (!success && provider.photoErrorMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(provider.photoErrorMessage!)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<StudentProfileProvider>();
+    final authProvider = context.watch<AuthProvider>();
+    final isBusy = provider.isUploadingPhoto;
+    final existingUrl = provider.profile?.photoUrl;
+    final hasPreview = _picked != null;
+    final displayName = authProvider.user?.name;
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SectionHeader(title: 'Profile Photo'),
+          const SizedBox(height: AppSpacing.sm),
+          Center(
+            child: hasPreview
+                ? ClipOval(
+                    child: Image.memory(
+                      _picked!.bytes,
+                      width: 96,
+                      height: 96,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : AppAvatar(
+                    imageUrl: existingUrl,
+                    name: displayName,
+                    size: 96,
+                    fallbackIcon: Icons.person_outline,
+                  ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (hasPreview)
+            Row(
+              children: [
+                Expanded(
+                  child: SecondaryButton(
+                    label: 'Cancel',
+                    onPressed: isBusy ? null : _cancelPreview,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: PrimaryButton(
+                    label: 'Save Photo',
+                    isLoading: isBusy,
+                    onPressed: () => _save(provider),
+                  ),
+                ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: SecondaryButton(
+                    label: existingUrl != null ? 'Change Photo' : 'Add Photo',
+                    icon: Icons.image_outlined,
+                    onPressed: isBusy ? null : _choose,
+                  ),
+                ),
+                if (existingUrl != null) ...[
+                  const SizedBox(width: AppSpacing.xs),
+                  Expanded(
+                    child: SecondaryButton(
+                      label: 'Remove',
+                      icon: Icons.delete_outline_rounded,
+                      isLoading: isBusy,
+                      onPressed: () => _remove(provider),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          if (!hasPreview && provider.photoErrorMessage != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              provider.photoErrorMessage!,
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: AppColors.error),
+            ),
+          ],
+        ],
       ),
     );
   }

@@ -51,6 +51,7 @@ class CandidateProfileView {
     required this.currentLocation,
     required this.availableLocations,
     required this.skills,
+    this.photoUrl,
     this.interestedIn,
     this.applicationId,
     this.phone,
@@ -71,6 +72,10 @@ class CandidateProfileView {
   final LocationModel? currentLocation;
   final List<LocationModel> availableLocations;
   final List<CandidateSkillModel> skills;
+
+  /// Student Profile Photo: the candidate's uploaded profile photo, if
+  /// any -- `null` keeps the existing initials-avatar fallback rendering.
+  final String? photoUrl;
 
   /// Candidate Opportunity Preferences patch: only ever populated from
   /// the Talent Directory ([fromCandidate]) -- `null` from Recommended
@@ -105,6 +110,7 @@ class CandidateProfileView {
       currentLocation: candidate.currentLocation,
       availableLocations: candidate.availableLocations,
       skills: candidate.skills,
+      photoUrl: candidate.photoUrl,
       interestedIn: candidate.interestedIn,
       applicationId: candidate.applicationId,
       phone: candidate.phone,
@@ -128,6 +134,7 @@ class CandidateProfileView {
       currentLocation: candidate.currentLocation,
       availableLocations: candidate.availableLocations,
       skills: candidate.skills,
+      photoUrl: candidate.photoUrl,
       applicationId: candidate.applicationId,
       phone: candidate.phone,
       email: candidate.email,
@@ -283,7 +290,7 @@ class _ProfileHeaderCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          AppAvatar(name: candidate.name, size: 56),
+          AppAvatar(imageUrl: candidate.photoUrl, name: candidate.name, size: 56),
           const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(

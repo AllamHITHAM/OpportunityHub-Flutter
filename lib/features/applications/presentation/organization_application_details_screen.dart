@@ -447,7 +447,11 @@ class _CandidateHeaderCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AppAvatar(name: applicantName, size: 56),
+          AppAvatar(
+            imageUrl: application.applicant?.photoUrl,
+            name: applicantName,
+            size: 56,
+          ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(

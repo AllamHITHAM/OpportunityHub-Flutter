@@ -22,6 +22,7 @@ class CandidateModel {
     required this.currentLocation,
     required this.availableLocations,
     required this.skills,
+    this.photoUrl,
     this.alreadyApplied,
     this.alreadyInvited,
     this.applicationId,
@@ -54,6 +55,10 @@ class CandidateModel {
   final List<LocationModel> availableLocations;
 
   final List<CandidateSkillModel> skills;
+
+  /// Student Profile Photo: the candidate's uploaded profile photo, if
+  /// any -- `null` keeps the existing initials-avatar fallback rendering.
+  final String? photoUrl;
 
   /// Only present when the search was scoped to a specific
   /// `opportunity_id` -- `null` otherwise, never a stand-in `false`, so
@@ -109,6 +114,7 @@ class CandidateModel {
       skills: skillsJson
           .map((s) => CandidateSkillModel.fromJson(s as Map<String, dynamic>))
           .toList(),
+      photoUrl: json['profile_photo_url'] as String?,
       alreadyApplied: json['already_applied'] as bool?,
       alreadyInvited: json['already_invited'] as bool?,
       applicationId: json['application_id'] as int?,

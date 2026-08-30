@@ -297,9 +297,10 @@ class _Stagger extends StatelessWidget {
 /// The premium profile header — answers "who is this student, what do
 /// they study, where, what stage" at a glance. A gradient in the app's own
 /// primary-blue identity (the same dominant treatment
-/// `StudentOpportunityDetailsScreen`'s Apply panel uses), [AppAvatar]'s
-/// initials fallback (no profile-photo field exists anywhere in this
-/// app's data), and only real fields.
+/// `StudentOpportunityDetailsScreen`'s Apply panel uses), [AppAvatar]
+/// showing the student's uploaded profile photo when one exists (Student
+/// Profile Photo phase) or its initials fallback otherwise, and only
+/// real fields.
 class _ProfileHero extends StatelessWidget {
   const _ProfileHero({
     required this.user,
@@ -405,7 +406,11 @@ class _ProfileHero extends StatelessWidget {
               ? Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    _HeroAvatar(displayName: displayName, size: 84),
+                    _HeroAvatar(
+                      displayName: displayName,
+                      photoUrl: studentProfile?.photoUrl as String?,
+                      size: 84,
+                    ),
                     const SizedBox(width: AppSpacing.lg),
                     Expanded(child: identityColumn),
                     const SizedBox(width: AppSpacing.lg),
@@ -417,7 +422,11 @@ class _ProfileHero extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        _HeroAvatar(displayName: displayName, size: 64),
+                        _HeroAvatar(
+                          displayName: displayName,
+                          photoUrl: studentProfile?.photoUrl as String?,
+                          size: 64,
+                        ),
                         const SizedBox(width: AppSpacing.lg),
                         Expanded(child: identityColumn),
                       ],
@@ -436,10 +445,19 @@ class _ProfileHero extends StatelessWidget {
 }
 
 class _HeroAvatar extends StatelessWidget {
-  const _HeroAvatar({required this.displayName, required this.size});
+  const _HeroAvatar({
+    required this.displayName,
+    required this.size,
+    this.photoUrl,
+  });
 
   final String displayName;
   final double size;
+
+  /// Student Profile Photo: the student's own uploaded photo, if any --
+  /// `null` keeps the existing initials fallback rendering exactly as
+  /// before this phase.
+  final String? photoUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -451,6 +469,7 @@ class _HeroAvatar extends StatelessWidget {
         boxShadow: AppShadows.card,
       ),
       child: AppAvatar(
+        imageUrl: photoUrl,
         name: displayName,
         size: size,
         backgroundColor: AppColors.primaryContainer,

@@ -52,6 +52,7 @@ CandidateModel _candidateModel({
   int? applicationId,
   String? phone,
   String? email,
+  String? photoUrl,
 }) {
   return CandidateModel(
     id: id,
@@ -67,6 +68,7 @@ CandidateModel _candidateModel({
     applicationId: applicationId,
     phone: phone,
     email: email,
+    photoUrl: photoUrl,
   );
 }
 
@@ -169,6 +171,38 @@ void main() {
 
     expect(find.text('Passionate backend engineer.'), findsOneWidget);
   });
+
+  testWidgets(
+    'shows the candidate\'s photo when available (Student Profile Photo '
+    'phase)',
+    (tester) async {
+      await _pumpScreen(
+        tester,
+        candidate: CandidateProfileView.fromCandidate(
+          _candidateModel(
+            photoUrl: 'https://cdn.example.com/photos/omar.png',
+          ),
+        ),
+      );
+
+      final avatar = tester.widget<AppAvatar>(find.byType(AppAvatar));
+      expect(avatar.imageUrl, 'https://cdn.example.com/photos/omar.png');
+    },
+  );
+
+  testWidgets(
+    'falls back to initials when no photo is set (Student Profile Photo '
+    'phase)',
+    (tester) async {
+      await _pumpScreen(
+        tester,
+        candidate: CandidateProfileView.fromCandidate(_candidateModel()),
+      );
+
+      final avatar = tester.widget<AppAvatar>(find.byType(AppAvatar));
+      expect(avatar.imageUrl, isNull);
+    },
+  );
 
   testWidgets('omits the Bio line entirely when bio is missing', (
     tester,

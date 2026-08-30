@@ -5,10 +5,7 @@ import 'location_model.dart';
 ///
 /// Models every field the backend actually returns and accepts for this
 /// record (`university`, `major`, `graduation_year`, `phone`, `bio`,
-/// `current_location`, `available_locations`) except `profile_image` --
-/// that column exists on the backend row, but there is no real upload
-/// endpoint anywhere in this app to populate it with a genuine file, so
-/// treating it as editable here would just be a dead text field.
+/// `current_location`, `available_locations`, `profile_photo_url`).
 class StudentProfileModel {
   const StudentProfileModel({
     required this.id,
@@ -20,6 +17,7 @@ class StudentProfileModel {
     this.currentLocation,
     this.availableLocations = const [],
     this.interestedIn,
+    this.photoUrl,
   });
 
   final int id;
@@ -28,6 +26,14 @@ class StudentProfileModel {
   final int? graduationYear;
   final String? phone;
   final String? bio;
+
+  /// Student Profile Photo: the full, publicly-reachable
+  /// `/api/media/...` URL of the student's uploaded profile photo --
+  /// mirrors `OrganizationProfileModel.logoUrl` exactly. `null` until the
+  /// student uploads one, in which case the existing initials-avatar
+  /// fallback (`AppAvatar`) keeps rendering exactly as it already does
+  /// everywhere else in this app. Never a raw storage path.
+  final String? photoUrl;
 
   /// Candidate Opportunity Preferences patch: the canonical Opportunity
   /// Type(s) (`job`/`internship`/`volunteer`/`scholarship`/`competition`
@@ -76,6 +82,7 @@ class StudentProfileModel {
       interestedIn: interestedInJson is List
           ? interestedInJson.map((value) => value as String).toList()
           : null,
+      photoUrl: json['profile_photo_url'] as String?,
     );
   }
 }

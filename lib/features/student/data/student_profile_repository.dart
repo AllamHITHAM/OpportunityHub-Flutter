@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../models/student_profile_model.dart';
+import '../../organization_profile/data/picked_image_file.dart';
 
 /// Talks to the Laravel student-profile endpoints.
 class StudentProfileRepository {
@@ -114,6 +115,44 @@ class StudentProfileRepository {
           'available_location_ids': availableLocationIds,
         },
       );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return StudentProfileModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Uploads (or replaces) the student's Profile Photo with a real
+  /// multipart image upload — `POST /api/student/profile/photo` (Student
+  /// Profile Photo phase). Mirrors
+  /// `OrganizationProfileRepository.uploadLogo` exactly.
+  ///
+  /// Errors: 401, 403, 404 (no profile), 422 (missing/invalid/oversized
+  /// file).
+  Future<StudentProfileModel> uploadPhoto(PickedImageFile file) async {
+    try {
+      final formData = FormData.fromMap({
+        'photo': MultipartFile.fromBytes(file.bytes, filename: file.filename),
+      });
+      final response = await apiClient.dio.post(
+        '/student/profile/photo',
+        data: formData,
+      );
+      final data = apiClient.parseData(response) as Map<String, dynamic>;
+      return StudentProfileModel.fromJson(data);
+    } on DioException catch (error) {
+      throw apiClient.handleError(error);
+    }
+  }
+
+  /// Removes the student's Profile Photo (reverts to the initials
+  /// fallback) with `DELETE /api/student/profile/photo`. Mirrors
+  /// `OrganizationProfileRepository.removeLogo` exactly.
+  ///
+  /// Errors: 401, 403, 404 (no profile).
+  Future<StudentProfileModel> removePhoto() async {
+    try {
+      final response = await apiClient.dio.delete('/student/profile/photo');
       final data = apiClient.parseData(response) as Map<String, dynamic>;
       return StudentProfileModel.fromJson(data);
     } on DioException catch (error) {

@@ -1000,6 +1000,42 @@ void main() {
     );
   });
 
+  testWidgets(
+    'shows the applicant\'s photo when available (Student Profile Photo '
+    'phase)',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(
+          applicant: const ApplicantSummaryModel(
+            id: 1,
+            name: 'Jane Student',
+            photoUrl: 'https://cdn.example.com/photos/jane.png',
+          ),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      final avatar = tester.widget<AppAvatar>(find.byType(AppAvatar));
+      expect(avatar.imageUrl, 'https://cdn.example.com/photos/jane.png');
+    },
+  );
+
+  testWidgets(
+    'falls back to initials when the applicant has no photo (Student '
+    'Profile Photo phase)',
+    (tester) async {
+      final repository = _FakeApplicationRepository(
+        detailsResult: _application(
+          applicant: const ApplicantSummaryModel(id: 1, name: 'Jane Student'),
+        ),
+      );
+      await _pumpDetails(tester, repository: repository);
+
+      final avatar = tester.widget<AppAvatar>(find.byType(AppAvatar));
+      expect(avatar.imageUrl, isNull);
+    },
+  );
+
   testWidgets('Empty-string applicant name falls back to "Unnamed applicant"', (
     tester,
   ) async {

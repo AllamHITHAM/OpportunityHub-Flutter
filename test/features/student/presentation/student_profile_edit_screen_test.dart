@@ -5,6 +5,9 @@
 // against duplicate submission, and only pops back after the backend has
 // actually confirmed success.
 
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -17,6 +20,7 @@ import 'package:opportunityhub_flutter/core/theme/app_colors.dart';
 import 'package:opportunityhub_flutter/core/theme/app_theme.dart';
 import 'package:opportunityhub_flutter/features/auth/data/auth_repository.dart';
 import 'package:opportunityhub_flutter/features/locations/data/location_repository.dart';
+import 'package:opportunityhub_flutter/features/organization_profile/data/picked_image_file.dart';
 import 'package:opportunityhub_flutter/features/student/data/student_profile_repository.dart';
 import 'package:opportunityhub_flutter/features/student/presentation/student_profile_edit_screen.dart';
 import 'package:opportunityhub_flutter/models/location_model.dart';
@@ -26,6 +30,14 @@ import 'package:opportunityhub_flutter/providers/auth_provider.dart';
 import 'package:opportunityhub_flutter/providers/location_catalog_provider.dart';
 import 'package:opportunityhub_flutter/providers/student_profile_provider.dart';
 import 'package:opportunityhub_flutter/providers/theme_provider.dart';
+
+// A real, minimal valid 1x1 PNG -- `Image.memory` decodes actual image
+// bytes even in the widget-test environment, so arbitrary placeholder
+// bytes throw "Invalid image data" mid-test.
+final Uint8List _tinyPng = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY'
+  '42YAAAAASUVORK5CYII=',
+);
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository()
@@ -104,6 +116,42 @@ class _FakeStudentProfileRepository extends StudentProfileRepository {
       bio: bio,
     );
   }
+
+  ApiException? uploadPhotoError;
+  ApiException? removePhotoError;
+  int uploadPhotoCallCount = 0;
+  int removePhotoCallCount = 0;
+  PickedImageFile? lastUploadedPhoto;
+  String? nextPhotoUrl = 'https://cdn.example.com/photos/new.png';
+
+  @override
+  Future<StudentProfileModel> uploadPhoto(PickedImageFile file) async {
+    uploadPhotoCallCount++;
+    lastUploadedPhoto = file;
+    if (uploadPhotoError != null) throw uploadPhotoError!;
+    return StudentProfileModel(
+      id: 1,
+      interestedIn: const ['job'],
+      university: 'State University',
+      major: 'Computer Science',
+      graduationYear: 2027,
+      photoUrl: nextPhotoUrl,
+    );
+  }
+
+  @override
+  Future<StudentProfileModel> removePhoto() async {
+    removePhotoCallCount++;
+    if (removePhotoError != null) throw removePhotoError!;
+    return const StudentProfileModel(
+      id: 1,
+      interestedIn: ['job'],
+      university: 'State University',
+      major: 'Computer Science',
+      graduationYear: 2027,
+      photoUrl: null,
+    );
+  }
 }
 
 class _FakeLocationRepository extends LocationRepository {
@@ -137,6 +185,7 @@ _pumpScreen(
   _UpdateHandler? onUpdate,
   List<LocationModel> locations = const [],
   _FakeLocationRepository? locationRepository,
+  Future<PickedImageFile?> Function()? pickPhoto,
 }) async {
   addTearDown(() => AppColors.updateBrightness(Brightness.light));
 
@@ -173,7 +222,9 @@ _pumpScreen(
         routes: [
           GoRoute(
             path: 'edit',
-            builder: (_, _) => const StudentProfileEditScreen(),
+            builder: (_, _) => StudentProfileEditScreen(
+              pickPhoto: pickPhoto ?? pickImageFileFromDevice,
+            ),
           ),
         ],
       ),
@@ -1045,5 +1096,154 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('Save Changes'), findsOneWidget);
+  });
+
+  group('Profile Photo (Student Profile Photo phase)', () {
+    testWidgets('shows the initials fallback and Add Photo when no photo is set', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        initialProfile: const StudentProfileModel(
+          id: 1,
+          interestedIn: ['job'],
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+        ),
+      );
+
+      expect(find.text('Add Photo'), findsOneWidget);
+      expect(find.text('Change Photo'), findsNothing);
+      expect(find.text('Remove'), findsNothing);
+    });
+
+    testWidgets('an existing photo shows Change Photo and Remove', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        initialProfile: const StudentProfileModel(
+          id: 1,
+          interestedIn: ['job'],
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+          photoUrl: 'https://cdn.example.com/photos/existing.png',
+        ),
+      );
+
+      expect(find.text('Change Photo'), findsOneWidget);
+      expect(find.text('Add Photo'), findsNothing);
+      expect(find.text('Remove'), findsOneWidget);
+    });
+
+    testWidgets('choosing a photo shows a preview with Save Photo/Cancel', (
+      tester,
+    ) async {
+      final (_, _, repository) = await _pumpScreen(
+        tester,
+        pickPhoto: () async =>
+            PickedImageFile(filename: 'photo.png', bytes: _tinyPng),
+      );
+
+      await tester.tap(find.text('Add Photo'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Save Photo'), findsOneWidget);
+      expect(find.text('Cancel'), findsWidgets);
+
+      await tester.tap(find.text('Save Photo'));
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadPhotoCallCount, 1);
+      expect(repository.lastUploadedPhoto?.filename, 'photo.png');
+      expect(find.text('Save Photo'), findsNothing);
+      expect(find.text('Profile photo updated'), findsOneWidget);
+    });
+
+    testWidgets('cancelling a photo preview never uploads it', (
+      tester,
+    ) async {
+      final (_, _, repository) = await _pumpScreen(
+        tester,
+        pickPhoto: () async =>
+            PickedImageFile(filename: 'photo.png', bytes: _tinyPng),
+      );
+
+      await tester.tap(find.text('Add Photo'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel').first);
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadPhotoCallCount, 0);
+      expect(find.text('Add Photo'), findsOneWidget);
+    });
+
+    testWidgets('cancelling the platform picker (returns null) does nothing', (
+      tester,
+    ) async {
+      final (_, _, repository) = await _pumpScreen(
+        tester,
+        pickPhoto: () async => null,
+      );
+
+      await tester.tap(find.text('Add Photo'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(repository.uploadPhotoCallCount, 0);
+      // Still the pre-pick state -- no preview, no error, no crash.
+      expect(find.text('Add Photo'), findsOneWidget);
+      expect(find.text('Save Photo'), findsNothing);
+    });
+
+    testWidgets('removing the photo calls removePhoto and reverts to initials', (
+      tester,
+    ) async {
+      final (_, _, repository) = await _pumpScreen(
+        tester,
+        initialProfile: const StudentProfileModel(
+          id: 1,
+          interestedIn: ['job'],
+          university: 'State University',
+          major: 'Computer Science',
+          graduationYear: 2027,
+          photoUrl: 'https://cdn.example.com/photos/existing.png',
+        ),
+      );
+
+      await tester.tap(find.text('Remove'));
+      await tester.pumpAndSettle();
+
+      expect(repository.removePhotoCallCount, 1);
+      expect(find.text('Remove'), findsNothing);
+      expect(find.text('Add Photo'), findsOneWidget);
+    });
+
+    testWidgets(
+      'a failed photo upload keeps the preview and shows an error',
+      (tester) async {
+        final (_, _, repository) = await _pumpScreen(
+          tester,
+          pickPhoto: () async =>
+              PickedImageFile(filename: 'photo.png', bytes: _tinyPng),
+        );
+        repository.uploadPhotoError = ApiException('Upload failed');
+
+        await tester.tap(find.text('Add Photo'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Save Photo'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Upload failed'), findsOneWidget);
+        // The picked preview and Save Photo/Cancel stay so the student
+        // can retry -- the failed upload never silently discards their
+        // selection, and the provider's own `profile` (and thus any
+        // already-saved photo) is deliberately left untouched.
+        expect(find.text('Save Photo'), findsOneWidget);
+        expect(repository.uploadPhotoCallCount, 1);
+      },
+    );
   });
 }
