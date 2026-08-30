@@ -45,18 +45,18 @@ const _insufficientTextMessage =
 /// [StudentCvScreen.pickCvFile] — overridable in tests so the Add CV flow
 /// can be exercised without a real platform file-picker channel.
 Future<PickedCvFile?> pickCvFileFromDevice() async {
-  final result = await FilePicker.pickFiles(
+  final picked = await FilePicker.pickFile(
     type: FileType.custom,
     allowedExtensions: ['pdf'],
-    withData: true,
   );
-  if (result == null || result.files.isEmpty) return null;
+  if (picked == null) return null;
 
-  final picked = result.files.single;
-  final bytes = picked.bytes;
-  if (bytes == null) return null;
-
-  return PickedCvFile(filename: picked.name, bytes: bytes);
+  try {
+    final bytes = await picked.readAsBytes();
+    return PickedCvFile(filename: picked.name, bytes: bytes);
+  } catch (_) {
+    return null;
+  }
 }
 
 /// Premium CV management + AI Skill Analysis (UI Phase 6) — a real,

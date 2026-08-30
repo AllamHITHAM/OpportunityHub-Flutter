@@ -24,16 +24,16 @@ class PickedImageFile {
 /// implementation — overridable in tests, mirroring
 /// `pickCvFileFromDevice()`'s own injectable-function convention.
 Future<PickedImageFile?> pickImageFileFromDevice() async {
-  final result = await FilePicker.pickFiles(
+  final picked = await FilePicker.pickFile(
     type: FileType.custom,
     allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
-    withData: true,
   );
-  if (result == null || result.files.isEmpty) return null;
+  if (picked == null) return null;
 
-  final picked = result.files.single;
-  final bytes = picked.bytes;
-  if (bytes == null) return null;
-
-  return PickedImageFile(filename: picked.name, bytes: bytes);
+  try {
+    final bytes = await picked.readAsBytes();
+    return PickedImageFile(filename: picked.name, bytes: bytes);
+  } catch (_) {
+    return null;
+  }
 }
